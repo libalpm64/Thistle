@@ -1,0 +1,80 @@
+[
+    {
+        "name": "RFC 3713 128-bit",
+        "key": "0123456789abcdeffedcba9876543210",
+        "plaintext": "0123456789abcdeffedcba9876543210",
+        "ciphertext": "67673138549669730857065648eabe43"
+    },
+    {
+        "name": "192-bit Key",
+        "key": "0123456789abcdeffedcba98765432100011223344556677",
+        "plaintext": "0123456789abcdeffedcba9876543210",
+        "ciphertext": "b4993401b3e996f84ee5cee7d79b09b9"
+    },
+    {
+        "name": "256-bit Key",
+        "key": "0123456789abcdeffedcba987654321000112233445566778899aabbccddeeff",
+        "plaintext": "0123456789abcdeffedcba9876543210",
+        "ciphertext": "9acc237dff16d76c20ef7c919e3a7509"
+    },
+    {
+        "name": "Generated Case 0",
+        "key": "00000000000000000000000000000000",
+        "plaintext": "01010101010101010101010101010101",
+        "ciphertext": "265107fb69683599030e0a1eb06cad2b"
+    },
+    {
+        "name": "Generated Case 1",
+        "key": "01010101010101010101010101010101",
+        "plaintext": "02020202020202020202020202020202",
+        "ciphertext": "fea72db2ba0027e494f82a91647ec6b8"
+    },
+    {
+        "name": "Generated Case 2",
+        "key": "02020202020202020202020202020202",
+        "plaintext": "03030303030303030303030303030303",
+        "ciphertext": "ca320b93203afa765ce3678e35644c82"
+    },
+    {
+        "name": "Generated Case 3",
+        "key": "03030303030303030303030303030303",
+        "plaintext": "04040404040404040404040404040404",
+        "ciphertext": "7b3e7d2558ced02dc5fd01984c552146"
+    },
+    {
+        "name": "Generated Case 4",
+        "key": "04040404040404040404040404040404",
+        "plaintext": "05050505050505050505050505050505",
+        "ciphertext": "31571ce6aaf9c7ec9184df1384e984a6"
+    },
+    {
+        "name": "Generated Case 5",
+        "key": "05050505050505050505050505050505",
+        "plaintext": "06060606060606060606060606060606",
+        "ciphertext": "84a850e9152073b5822e07b3b6055608"
+    },
+    {
+        "name": "Generated Case 6",
+        "key": "06060606060606060606060606060606",
+        "plaintext": "07070707070707070707070707070707",
+        "ciphertext": "b87347f494dc3a69aa90e38975d3938e"
+    },
+    {
+        "name": "Generated Case 7",
+        "key": "07070707070707070707070707070707",
+        "plaintext": "08080808080808080808080808080808",
+        "ciphertext": "ef159730b6eaabcede80818b2c62686c"
+    },
+    {
+        "name": "Generated Case 8",
+        "key": "08080808080808080808080808080808",
+        "plaintext": "09090909090909090909090909090909",
+        "ciphertext": "6acf08377c2de3e28764761b33acaac8"
+    },
+    {
+        "name": "Generated Case 9",
+        "key": "09090909090909090909090909090909",
+        "plaintext": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+        "ciphertext": "cfc69c132fd46de2e9aaa6b54f9e25bf"
+    }
+]
