@@ -18,6 +18,7 @@ Thistle was written to avoid the **150x performance drops** when Mojo has to cal
 * **Pbkdf2**
 * **SHA2**
 * **SHA3**
+* **ChaCha20**
 
 ---
 
