@@ -11,14 +11,14 @@ Thistle was written to avoid the **150x performance drops** when Mojo has to cal
 
 ### Currently supported Algorithms:
 
-* **Argon2**
-* **Blake2b**
-* **Blake3**
-* **Camellia**
-* **Pbkdf2**
-* **SHA2**
-* **SHA3**
-* **ChaCha20**
+* **Argon2** (~ 2x slower than native due to Mojo not supporting uint64 in SIMD)
+* **Blake2b** (Parity)
+* **Blake3** (Parity if not better that native)
+* **Camellia** (Parity, very slow)
+* **Pbkdf2** (Parity)
+* **SHA2** (Much slower ~5x slower lacks NI)
+* **SHA3** (~ 2x slower than native)
+* **ChaCha20** (Parity)
 
 ---
 
