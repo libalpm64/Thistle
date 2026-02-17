@@ -13,7 +13,7 @@ Thistle was written to avoid the **150x performance drops** when Mojo has to cal
 
 * **Argon2** (~ 2x slower than native due to Mojo not supporting uint64 in SIMD)
 * **Blake2b** (Parity)
-* **Blake3** (Parity if not better that native)
+* **Blake3** (Parity if not better than native)
 * **Camellia** (Parity, very slow)
 * **Pbkdf2** (Parity)
 * **SHA2** (Much slower ~5x slower lacks NI)
