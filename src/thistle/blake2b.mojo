@@ -27,7 +27,7 @@ By Libalpm64, Attribute not required.
 """
 
 from collections import List
-from memory import UnsafePointer
+from memory import UnsafePointer, alloc, memcpy
 
 comptime BLAKE2B_IV = SIMD[DType.uint64, 8](
     0x6A09E667F3BCC908,
@@ -57,48 +57,62 @@ comptime SIGMA = (
 
 
 @always_inline
-fn rotr64(x: UInt64, n: Int) -> UInt64:
+fn rotr64[n: Int](x: UInt64) -> UInt64:
     return (x >> n) | (x << (64 - n))
 
 
 @always_inline
-fn g(
-    mut v: SIMD[DType.uint64, 16],
-    a: Int,
-    b: Int,
-    c: Int,
-    d: Int,
-    x: UInt64,
-    y: UInt64,
-):
-    v[a] = v[a] + v[b] + x
-    v[d] = rotr64(v[d] ^ v[a], 32)
-    v[c] = v[c] + v[d]
-    v[b] = rotr64(v[b] ^ v[c], 24)
-    v[a] = v[a] + v[b] + y
-    v[d] = rotr64(v[d] ^ v[a], 16)
-    v[c] = v[c] + v[d]
-    v[b] = rotr64(v[b] ^ v[c], 63)
+fn g(a: UInt64, b: UInt64, c: UInt64, d: UInt64, x: UInt64, y: UInt64) -> Tuple[UInt64, UInt64, UInt64, UInt64]:
+    var va = a + b + x
+    var vd = rotr64[32](d ^ va)
+    var vc = c + vd
+    var vb = rotr64[24](b ^ vc)
+    va = va + vb + y
+    vd = rotr64[16](vd ^ va)
+    vc = vc + vd
+    vb = rotr64[63](vb ^ vc)
+    return (va, vb, vc, vd)
 
 
 @always_inline
-fn round_fn[r: Int](mut v: SIMD[DType.uint64, 16], m: SIMD[DType.uint64, 16]):
+fn round_fn[r: Int](
+    mut v0: UInt64, mut v1: UInt64, mut v2: UInt64, mut v3: UInt64,
+    mut v4: UInt64, mut v5: UInt64, mut v6: UInt64, mut v7: UInt64,
+    mut v8: UInt64, mut v9: UInt64, mut v10: UInt64, mut v11: UInt64,
+    mut v12: UInt64, mut v13: UInt64, mut v14: UInt64, mut v15: UInt64,
+    m: UnsafePointer[UInt64, ImmutAnyOrigin],
+) -> Tuple[UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64]:
     comptime s = SIGMA[r]
-    g(v, 0, 4, 8, 12, m[Int(s[0])], m[Int(s[1])])
-    g(v, 1, 5, 9, 13, m[Int(s[2])], m[Int(s[3])])
-    g(v, 2, 6, 10, 14, m[Int(s[4])], m[Int(s[5])])
-    g(v, 3, 7, 11, 15, m[Int(s[6])], m[Int(s[7])])
-    g(v, 0, 5, 10, 15, m[Int(s[8])], m[Int(s[9])])
-    g(v, 1, 6, 11, 12, m[Int(s[10])], m[Int(s[11])])
-    g(v, 2, 7, 8, 13, m[Int(s[12])], m[Int(s[13])])
-    g(v, 3, 4, 9, 14, m[Int(s[14])], m[Int(s[15])])
+    
+    v0, v4, v8, v12 = g(v0, v4, v8, v12, m[Int(s[0])], m[Int(s[1])])
+    v1, v5, v9, v13 = g(v1, v5, v9, v13, m[Int(s[2])], m[Int(s[3])])
+    v2, v6, v10, v14 = g(v2, v6, v10, v14, m[Int(s[4])], m[Int(s[5])])
+    v3, v7, v11, v15 = g(v3, v7, v11, v15, m[Int(s[6])], m[Int(s[7])])
+    
+    v0, v5, v10, v15 = g(v0, v5, v10, v15, m[Int(s[8])], m[Int(s[9])])
+    v1, v6, v11, v12 = g(v1, v6, v11, v12, m[Int(s[10])], m[Int(s[11])])
+    v2, v7, v8, v13 = g(v2, v7, v8, v13, m[Int(s[12])], m[Int(s[13])])
+    v3, v4, v9, v14 = g(v3, v4, v9, v14, m[Int(s[14])], m[Int(s[15])])
+    
+    return (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15)
+
+
+@always_inline
+fn zero_buffer(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
+    for i in range(len):
+        ptr[i] = 0
+
+@always_inline
+fn zero_and_free(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
+    zero_buffer(ptr, len)
+    ptr.free()
 
 
 struct Blake2b(Movable):
     var h: SIMD[DType.uint64, 8]
     var t_low: UInt64
     var t_high: UInt64
-    var buffer: List[UInt8]
+    var buffer: UnsafePointer[UInt8, MutAnyOrigin]
     var buffer_len: Int
     var out_len: Int
     var key_len: Int
@@ -109,12 +123,11 @@ struct Blake2b(Movable):
         self.h = BLAKE2B_IV
         self.t_low = 0
         self.t_high = 0
-        self.buffer = List[UInt8](capacity=128)
-        for _ in range(128):
-            self.buffer.append(0)
+        self.buffer = alloc[UInt8](128)
+        for i in range(128):
+            self.buffer[i] = 0
         self.buffer_len = 0
 
-        # Parameter block
         var p0: UInt64 = 0x01010000
         p0 |= UInt64(self.key_len) << 8
         p0 |= UInt64(self.out_len)
@@ -127,12 +140,11 @@ struct Blake2b(Movable):
         self.h = BLAKE2B_IV
         self.t_low = 0
         self.t_high = 0
-        self.buffer = List[UInt8](capacity=128)
-        for _ in range(128):
-            self.buffer.append(0)
+        self.buffer = alloc[UInt8](128)
+        for i in range(128):
+            self.buffer[i] = 0
         self.buffer_len = 0
 
-        # Parameter block p[0]
         var p0: UInt64 = 0x01010000
         p0 |= UInt64(self.key_len) << 8
         p0 |= UInt64(self.out_len)
@@ -141,88 +153,91 @@ struct Blake2b(Movable):
 
         if self.key_len > 0:
             self.update(key)
-            var pad_len = 128 - self.buffer_len
-            for _ in range(pad_len):
+            while self.buffer_len < 128:
                 self.buffer[self.buffer_len] = 0
                 self.buffer_len += 1
-            # don't compress here (if exits)
 
     fn __moveinit__(out self, deinit other: Self):
         self.h = other.h
         self.t_low = other.t_low
         self.t_high = other.t_high
-        self.buffer = other.buffer^
+        self.buffer = other.buffer
         self.buffer_len = other.buffer_len
         self.out_len = other.out_len
         self.key_len = other.key_len
 
+    fn __del__(deinit self):
+        zero_and_free(self.buffer, 128)
+
     fn compress(mut self, is_last: Bool):
-        # Initialize local work vector v
-        var v = SIMD[DType.uint64, 16](0)
-        for i in range(8):
-            v[i] = self.h[i]
-            v[i + 8] = BLAKE2B_IV[i]
+        var v0 = self.h[0]
+        var v1 = self.h[1]
+        var v2 = self.h[2]
+        var v3 = self.h[3]
+        var v4 = self.h[4]
+        var v5 = self.h[5]
+        var v6 = self.h[6]
+        var v7 = self.h[7]
+        var v8 = BLAKE2B_IV[0]
+        var v9 = BLAKE2B_IV[1]
+        var v10 = BLAKE2B_IV[2]
+        var v11 = BLAKE2B_IV[3]
+        var v12 = BLAKE2B_IV[4]
+        var v13 = BLAKE2B_IV[5]
+        var v14 = BLAKE2B_IV[6]
+        var v15 = BLAKE2B_IV[7]
 
-        # T adjustment
-        v[12] ^= self.t_low
-        v[13] ^= self.t_high
+        v12 ^= self.t_low
+        v13 ^= self.t_high
 
-        # F flag
         if is_last:
-            v[14] ^= 0xFFFFFFFFFFFFFFFF
+            v14 ^= 0xFFFFFFFFFFFFFFFF
 
-        # message block
-        var m = SIMD[DType.uint64, 16](0)
-        for i in range(16):
-            var word: UInt64 = 0
-            word |= UInt64(self.buffer[i * 8 + 0])
-            word |= UInt64(self.buffer[i * 8 + 1]) << 8
-            word |= UInt64(self.buffer[i * 8 + 2]) << 16
-            word |= UInt64(self.buffer[i * 8 + 3]) << 24
-            word |= UInt64(self.buffer[i * 8 + 4]) << 32
-            word |= UInt64(self.buffer[i * 8 + 5]) << 40
-            word |= UInt64(self.buffer[i * 8 + 6]) << 48
-            word |= UInt64(self.buffer[i * 8 + 7]) << 56
-            m[i] = word
+        var m = self.buffer.bitcast[UInt64]()
+        
+        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[0](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
+        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[1](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
+        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[2](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
+        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[3](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
+        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[4](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
+        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[5](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
+        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[6](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
+        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[7](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
+        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[8](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
+        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[9](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
+        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[10](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
+        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[11](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
 
-        # Rounds
-        round_fn[0](v, m)
-        round_fn[1](v, m)
-        round_fn[2](v, m)
-        round_fn[3](v, m)
-        round_fn[4](v, m)
-        round_fn[5](v, m)
-        round_fn[6](v, m)
-        round_fn[7](v, m)
-        round_fn[8](v, m)
-        round_fn[9](v, m)
-        round_fn[10](v, m)
-        round_fn[11](v, m)
-
-        for i in range(8):
-            self.h[i] ^= v[i] ^ v[i + 8]
+        self.h[0] ^= v0 ^ v8
+        self.h[1] ^= v1 ^ v9
+        self.h[2] ^= v2 ^ v10
+        self.h[3] ^= v3 ^ v11
+        self.h[4] ^= v4 ^ v12
+        self.h[5] ^= v5 ^ v13
+        self.h[6] ^= v6 ^ v14
+        self.h[7] ^= v7 ^ v15
 
     fn update(mut self, data: Span[UInt8]):
         var i = 0
         while i < len(data):
             if self.buffer_len == 128:
                 self.t_low += 128
-                # Overflow check
                 if self.t_low < 128:
                     self.t_high += 1
-
                 self.compress(False)
                 self.buffer_len = 0
 
-            # Copy data to buffer
             var available = 128 - self.buffer_len
             var remaining_data = len(data) - i
             var to_copy = available
             if remaining_data < available:
                 to_copy = remaining_data
 
-            for k in range(to_copy):
-                self.buffer[self.buffer_len + k] = data[i + k]
+            memcpy(
+                dest=self.buffer + self.buffer_len,
+                src=data.unsafe_ptr() + i,
+                count=to_copy,
+            )
 
             self.buffer_len += to_copy
             i += to_copy
@@ -233,7 +248,6 @@ struct Blake2b(Movable):
         if self.t_low < old_low:
             self.t_high += 1
 
-        # Pad with zeros
         while self.buffer_len < 128:
             self.buffer[self.buffer_len] = 0
             self.buffer_len += 1
@@ -242,7 +256,6 @@ struct Blake2b(Movable):
 
         var output = List[UInt8](capacity=self.out_len)
         for i in range(self.out_len):
-            # Little endian extraction
             var word_idx = i // 8
             var byte_idx = i % 8
             var word = self.h[word_idx]

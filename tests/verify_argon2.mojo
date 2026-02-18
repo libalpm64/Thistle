@@ -6,7 +6,6 @@ from testing import assert_equal
 
 def test_blake2b():
     print("Testing Blake2b...")
-    # RFC 7693 Appendix A, Blake2b-512 with empty input
     var ctx = Blake2b(64)
     var h = ctx.finalize()
     var hex = bytes_to_hex(h)
@@ -21,41 +20,24 @@ def test_blake2b():
 
 def main():
     test_blake2b()
-    print("\nTesting Argon2id")
+    print("\nTesting Argon2id - Simple case (p=1, m=1024, t=2)")
 
-    var pwd = List[UInt8]()
-    for _ in range(32):
-        pwd.append(0x01)
-
-    var salt = List[UInt8]()
-    for _ in range(16):
-        salt.append(0x02)
-
-    var secret = List[UInt8]()
-    for _ in range(8):
-        secret.append(0x03)
-
-    var ad = List[UInt8]()
-    for _ in range(12):
-        ad.append(0x04)
+    var pwd = String("password").as_bytes()
+    var salt = String("somesalt").as_bytes()
 
     var argon2 = Argon2id(
-        Span[UInt8](salt),
-        Span[UInt8](secret),
-        Span[UInt8](ad),
-        parallelism=4,
+        salt,
+        parallelism=1,
         tag_length=32,
-        memory_size_kb=16,
-        iterations=3,
-        version=16,
+        memory_size_kb=1024,
+        iterations=2,
+        version=19,
     )
 
-    var tag = argon2.hash(Span[UInt8](pwd))
+    var tag = argon2.hash(pwd)
     var tag_hex = bytes_to_hex(tag)
 
-    var expected = (
-        "8bc6df1fdc4b56a752f1a1f8fa787ee89c58eb5525c2bf34ca0d465caaa3c0aa"
-    )
+    var expected = "ec57ec9c0eaf51eeea2e92ffdcaa9cdee478f1927215b515b7b8d66657f41ed9"
     print("Expected: " + expected)
     print("Actual:   " + tag_hex)
 

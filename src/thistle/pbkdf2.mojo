@@ -20,276 +20,259 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-
 """
 PBKDF2 (Password-Based Key Derivation Function 2) Implementation in Mojo
 SP 800-132 / FIPS 140-2 / RFC 8018
-By Libalpm no attribution required
+By Libalpm64, Attribute not required.
 """
 
 from collections import List
-from memory import UnsafePointer
-from .sha2 import SHA256Context, sha256_update, sha256_final
-from .sha2 import SHA512Context, sha512_update, sha512_final
+from memory import UnsafePointer, alloc, memcpy
+from .sha2 import (
+    SHA256Context,
+    SHA512Context,
+    sha256_update,
+    sha256_final_to_buffer,
+    sha512_update,
+    sha512_final_to_buffer,
+)
 
 
-fn hmac_sha256(key: Span[UInt8], data: Span[UInt8]) -> List[UInt8]:
-    """
-    Computes HMAC-SHA-256.
-    """
-    var k = List[UInt8]()
-    if len(key) > 64:
-        # Key too long, hash it
-        var ctx = SHA256Context()
-        sha256_update(ctx, key)
-        k = sha256_final(ctx)
-    else:
-        # Copy key
-        for i in range(len(key)):
-            k.append(key[i])
+struct PBKDF2SHA256:
+    var ipad: UnsafePointer[UInt8, MutAnyOrigin]
+    var opad: UnsafePointer[UInt8, MutAnyOrigin]
+    var inner_hash: UnsafePointer[UInt8, MutAnyOrigin]
+    var u_block: UnsafePointer[UInt8, MutAnyOrigin]
+    var f_block: UnsafePointer[UInt8, MutAnyOrigin]
+    var counter_bytes: UnsafePointer[UInt8, MutAnyOrigin]
+    var inner_ctx: SHA256Context
+    var outer_ctx: SHA256Context
 
-    # Pad key with zeros if short
-    while len(k) < 64:
-        k.append(0)
+    fn __init__(out self, password: Span[UInt8]):
+        self.ipad = alloc[UInt8](64)
+        self.opad = alloc[UInt8](64)
+        self.inner_hash = alloc[UInt8](32)
+        self.u_block = alloc[UInt8](32)
+        self.f_block = alloc[UInt8](32)
+        self.counter_bytes = alloc[UInt8](4)
+        self.inner_ctx = SHA256Context()
+        self.outer_ctx = SHA256Context()
 
-    var ipad = List[UInt8](capacity=64)
-    var opad = List[UInt8](capacity=64)
+        var k = alloc[UInt8](64)
+        for i in range(64):
+            k[i] = 0
 
-    for i in range(64):
-        ipad.append(k[i] ^ 0x36)
-        opad.append(k[i] ^ 0x5C)
+        if len(password) > 64:
+            var ctx = SHA256Context()
+            sha256_update(ctx, password)
+            sha256_final_to_buffer(ctx, k)
+        else:
+            for i in range(len(password)):
+                k[i] = password[i]
 
-    # Inner hash: H(ipad || data)
-    var inner_ctx = SHA256Context()
-    sha256_update(
-        inner_ctx, Span[UInt8](ptr=ipad.unsafe_ptr(), length=len(ipad))
-    )
-    sha256_update(inner_ctx, data)
-    var inner_hash = sha256_final(inner_ctx)
+        for i in range(64):
+            self.ipad[i] = k[i] ^ 0x36
+            self.opad[i] = k[i] ^ 0x5C
 
-    # Outer hash: H(opad || inner_hash)
-    var outer_ctx = SHA256Context()
-    sha256_update(
-        outer_ctx, Span[UInt8](ptr=opad.unsafe_ptr(), length=len(opad))
-    )
-    sha256_update(
-        outer_ctx,
-        Span[UInt8](ptr=inner_hash.unsafe_ptr(), length=len(inner_hash)),
-    )
-    return sha256_final(outer_ctx)
+        for i in range(64):
+            k[i] = 0
+        k.free()
+
+    fn __del__(deinit self):
+        self.ipad.free()
+        self.opad.free()
+        self.inner_hash.free()
+        self.u_block.free()
+        self.f_block.free()
+        self.counter_bytes.free()
+
+    @always_inline
+    fn hmac(mut self, data: Span[UInt8]):
+        self.inner_ctx.reset()
+        sha256_update(self.inner_ctx, Span[UInt8](ptr=self.ipad, length=64))
+        sha256_update(self.inner_ctx, data)
+        sha256_final_to_buffer(self.inner_ctx, self.inner_hash)
+
+        self.outer_ctx.reset()
+        sha256_update(self.outer_ctx, Span[UInt8](ptr=self.opad, length=64))
+        sha256_update(self.outer_ctx, Span[UInt8](ptr=self.inner_hash, length=32))
+        sha256_final_to_buffer(self.outer_ctx, self.u_block)
+
+    @always_inline
+    fn hmac_with_counter(mut self, data: Span[UInt8], counter: UInt32):
+        self.counter_bytes[0] = UInt8((counter >> 24) & 0xFF)
+        self.counter_bytes[1] = UInt8((counter >> 16) & 0xFF)
+        self.counter_bytes[2] = UInt8((counter >> 8) & 0xFF)
+        self.counter_bytes[3] = UInt8(counter & 0xFF)
+
+        self.inner_ctx.reset()
+        sha256_update(self.inner_ctx, Span[UInt8](ptr=self.ipad, length=64))
+        sha256_update(self.inner_ctx, data)
+        sha256_update(self.inner_ctx, Span[UInt8](ptr=self.counter_bytes, length=4))
+        sha256_final_to_buffer(self.inner_ctx, self.inner_hash)
+
+        self.outer_ctx.reset()
+        sha256_update(self.outer_ctx, Span[UInt8](ptr=self.opad, length=64))
+        sha256_update(self.outer_ctx, Span[UInt8](ptr=self.inner_hash, length=32))
+        sha256_final_to_buffer(self.outer_ctx, self.u_block)
+
+    fn derive(mut self, salt: Span[UInt8], iterations: Int, dklen: Int) -> List[UInt8]:
+        var hLen = 32
+        var num_blocks = (dklen + hLen - 1) // hLen
+
+        var derived_key = List[UInt8](capacity=dklen)
+        var f_u64 = self.f_block.bitcast[UInt64]()
+        var u_u64 = self.u_block.bitcast[UInt64]()
+
+        for block_idx in range(1, num_blocks + 1):
+            self.hmac_with_counter(salt, UInt32(block_idx))
+            for b in range(4):
+                f_u64[b] = u_u64[b]
+
+            for _ in range(1, iterations):
+                self.hmac(Span[UInt8](ptr=self.u_block, length=32))
+                for b in range(4):
+                    f_u64[b] ^= u_u64[b]
+
+            var remaining = dklen - len(derived_key)
+            var to_copy = 32 if remaining > 32 else remaining
+            for b in range(to_copy):
+                derived_key.append(self.f_block[b])
+
+        return derived_key^
 
 
 fn pbkdf2_hmac_sha256(
     password: Span[UInt8], salt: Span[UInt8], iterations: Int, dkLen: Int
 ) -> List[UInt8]:
-    """
-    Derives a key using PBKDF2 with HMAC-SHA-256.
-
-    Args:
-        password: The master password.
-        salt: A salt value (recommended at least 64 bits/8 bytes).
-        iterations: Iteration count (e.g., 1000, 10000).
-        dkLen: Desired length of the derived key in bytes.
-
-    Returns:
-        The derived key as a List[UInt8].
-    """
-    # Prep HMAC key (password) pads
-    var k = List[UInt8]()
-    if len(password) > 64:
-        var ctx = SHA256Context()
-        sha256_update(ctx, password)
-        k = sha256_final(ctx)
-    else:
-        for i in range(len(password)):
-            k.append(password[i])
-    while len(k) < 64:
-        k.append(0)
-
-    var ipad = List[UInt8](capacity=64)
-    var opad = List[UInt8](capacity=64)
-    for i in range(64):
-        ipad.append(k[i] ^ 0x36)
-        opad.append(k[i] ^ 0x5C)
-
-    var derived_key = List[UInt8](capacity=dkLen)
-    var hLen = 32
-    var l = (dkLen + hLen - 1) // hLen
-
-    for i in range(1, l + 1):
-        # T_i calculation
-        # U_1 = PRF(P, S || INT(i))
-        var u_block: List[UInt8]
-
-        # Inner U_1
-        var ctx_in = SHA256Context()
-        sha256_update(ctx_in, Span[UInt8](ipad))
-        sha256_update(ctx_in, salt)
-        # Append INT(i) - 4 bytes Big Endian
-        var block_idx_bytes = List[UInt8](capacity=4)
-        block_idx_bytes.append(UInt8((i >> 24) & 0xFF))
-        block_idx_bytes.append(UInt8((i >> 16) & 0xFF))
-        block_idx_bytes.append(UInt8((i >> 8) & 0xFF))
-        block_idx_bytes.append(UInt8(i & 0xFF))
-        sha256_update(ctx_in, Span[UInt8](block_idx_bytes))
-        var inner_hash = sha256_final(ctx_in)
-
-        # Outer U_1
-        var ctx_out = SHA256Context()
-        sha256_update(ctx_out, Span[UInt8](opad))
-        sha256_update(ctx_out, Span[UInt8](inner_hash))
-        u_block = sha256_final(ctx_out)
-
-        # F = U_1
-        var f_block = List[UInt8](capacity=32)
-        for b in range(32):
-            f_block.append(u_block[b])
-
-        # U_2 ... U_c
-        for _ in range(1, iterations):
-            # HMAC(P, u_block)
-            # Inner
-            var ctx_in2 = SHA256Context()
-            sha256_update(ctx_in2, Span[UInt8](ipad))
-            sha256_update(ctx_in2, Span[UInt8](u_block))
-            var inner_hash2 = sha256_final(ctx_in2)
-
-            # Outer
-            var ctx_out2 = SHA256Context()
-            sha256_update(ctx_out2, Span[UInt8](opad))
-            sha256_update(ctx_out2, Span[UInt8](inner_hash2))
-            u_block = sha256_final(ctx_out2)
-
-            # F ^ U
-            for b in range(32):
-                f_block[b] ^= u_block[b]
-
-        # Append T_i to DK
-        for b in range(len(f_block)):
-            if len(derived_key) < dkLen:
-                derived_key.append(f_block[b])
-
-    return derived_key^
+    var pbkdf2 = PBKDF2SHA256(password)
+    return pbkdf2.derive(salt, iterations, dkLen)
 
 
-fn hmac_sha512(key: Span[UInt8], data: Span[UInt8]) -> List[UInt8]:
-    """
-    Computes HMAC-SHA-512.
-    """
-    var k = List[UInt8]()
-    if len(key) > 128:
-        # Key too long, hash it
-        var ctx = SHA512Context()
-        sha512_update(ctx, key)
-        k = sha512_final(ctx)
-    else:
-        # Copy key
-        for i in range(len(key)):
-            k.append(key[i])
+struct PBKDF2SHA512:
+    var ipad: UnsafePointer[UInt8, MutAnyOrigin]
+    var opad: UnsafePointer[UInt8, MutAnyOrigin]
+    var inner_hash: UnsafePointer[UInt8, MutAnyOrigin]
+    var u_block: UnsafePointer[UInt8, MutAnyOrigin]
+    var f_block: UnsafePointer[UInt8, MutAnyOrigin]
+    var counter_bytes: UnsafePointer[UInt8, MutAnyOrigin]
+    var inner_ctx: SHA512Context
+    var outer_ctx: SHA512Context
 
-    # Pad key with zeros if short
-    while len(k) < 128:
-        k.append(0)
+    fn __init__(out self, password: Span[UInt8]):
+        self.ipad = alloc[UInt8](128)
+        self.opad = alloc[UInt8](128)
+        self.inner_hash = alloc[UInt8](64)
+        self.u_block = alloc[UInt8](64)
+        self.f_block = alloc[UInt8](64)
+        self.counter_bytes = alloc[UInt8](4)
+        self.inner_ctx = SHA512Context()
+        self.outer_ctx = SHA512Context()
 
-    var ipad = List[UInt8](capacity=128)
-    var opad = List[UInt8](capacity=128)
+        var k = alloc[UInt8](128)
+        for i in range(128):
+            k[i] = 0
 
-    for i in range(128):
-        ipad.append(k[i] ^ 0x36)
-        opad.append(k[i] ^ 0x5C)
+        if len(password) > 128:
+            var ctx = SHA512Context()
+            sha512_update(ctx, password)
+            sha512_final_to_buffer(ctx, k)
+        else:
+            for i in range(len(password)):
+                k[i] = password[i]
 
-    # Inner hash: H(ipad || data)
-    var inner_ctx = SHA512Context()
-    sha512_update(inner_ctx, Span[UInt8](ipad))
-    sha512_update(inner_ctx, data)
-    var inner_hash = sha512_final(inner_ctx)
+        for i in range(128):
+            self.ipad[i] = k[i] ^ 0x36
+            self.opad[i] = k[i] ^ 0x5C
 
-    # Outer hash: H(opad || inner_hash)
-    var outer_ctx = SHA512Context()
-    sha512_update(outer_ctx, Span[UInt8](opad))
-    sha512_update(outer_ctx, Span[UInt8](inner_hash))
-    return sha512_final(outer_ctx)
+        for i in range(128):
+            k[i] = 0
+        k.free()
+
+    fn __del__(deinit self):
+        self.ipad.free()
+        self.opad.free()
+        self.inner_hash.free()
+        self.u_block.free()
+        self.f_block.free()
+        self.counter_bytes.free()
+
+    @always_inline
+    fn hmac(mut self, data: Span[UInt8]):
+        self.inner_ctx.reset()
+        sha512_update(self.inner_ctx, Span[UInt8](ptr=self.ipad, length=128))
+        sha512_update(self.inner_ctx, data)
+        sha512_final_to_buffer(self.inner_ctx, self.inner_hash)
+
+        self.outer_ctx.reset()
+        sha512_update(self.outer_ctx, Span[UInt8](ptr=self.opad, length=128))
+        sha512_update(self.outer_ctx, Span[UInt8](ptr=self.inner_hash, length=64))
+        sha512_final_to_buffer(self.outer_ctx, self.u_block)
+
+    @always_inline
+    fn hmac_with_counter(mut self, data: Span[UInt8], counter: UInt32):
+        self.counter_bytes[0] = UInt8((counter >> 24) & 0xFF)
+        self.counter_bytes[1] = UInt8((counter >> 16) & 0xFF)
+        self.counter_bytes[2] = UInt8((counter >> 8) & 0xFF)
+        self.counter_bytes[3] = UInt8(counter & 0xFF)
+
+        self.inner_ctx.reset()
+        sha512_update(self.inner_ctx, Span[UInt8](ptr=self.ipad, length=128))
+        sha512_update(self.inner_ctx, data)
+        sha512_update(self.inner_ctx, Span[UInt8](ptr=self.counter_bytes, length=4))
+        sha512_final_to_buffer(self.inner_ctx, self.inner_hash)
+
+        self.outer_ctx.reset()
+        sha512_update(self.outer_ctx, Span[UInt8](ptr=self.opad, length=128))
+        sha512_update(self.outer_ctx, Span[UInt8](ptr=self.inner_hash, length=64))
+        sha512_final_to_buffer(self.outer_ctx, self.u_block)
+
+    fn derive(mut self, salt: Span[UInt8], iterations: Int, dklen: Int) -> List[UInt8]:
+        var hLen = 64
+        var num_blocks = (dklen + hLen - 1) // hLen
+
+        var derived_key = List[UInt8](capacity=dklen)
+        var f_u64 = self.f_block.bitcast[UInt64]()
+        var u_u64 = self.u_block.bitcast[UInt64]()
+
+        for block_idx in range(1, num_blocks + 1):
+            self.hmac_with_counter(salt, UInt32(block_idx))
+            for b in range(8):
+                f_u64[b] = u_u64[b]
+
+            for _ in range(1, iterations):
+                self.hmac(Span[UInt8](ptr=self.u_block, length=64))
+                for b in range(8):
+                    f_u64[b] ^= u_u64[b]
+
+            var remaining = dklen - len(derived_key)
+            var to_copy = 64 if remaining > 64 else remaining
+            for b in range(to_copy):
+                derived_key.append(self.f_block[b])
+
+        return derived_key^
 
 
 fn pbkdf2_hmac_sha512(
     password: Span[UInt8], salt: Span[UInt8], iterations: Int, dkLen: Int
 ) -> List[UInt8]:
-    """
-    Derives a key using PBKDF2 with HMAC-SHA-512.
-    """
-    # 1. Prepare HMAC key (password) pads
-    var k = List[UInt8]()
-    if len(password) > 128:
-        var ctx = SHA512Context()
-        sha512_update(ctx, password)
-        k = sha512_final(ctx)
-    else:
-        for i in range(len(password)):
-            k.append(password[i])
-    while len(k) < 128:
-        k.append(0)
+    var pbkdf2 = PBKDF2SHA512(password)
+    return pbkdf2.derive(salt, iterations, dkLen)
 
-    var ipad = List[UInt8](capacity=128)
-    var opad = List[UInt8](capacity=128)
-    for i in range(128):
-        ipad.append(k[i] ^ 0x36)
-        opad.append(k[i] ^ 0x5C)
 
-    var derived_key = List[UInt8](capacity=dkLen)
-    var hLen = 64
-    var l = (dkLen + hLen - 1) // hLen
+fn hmac_sha256(key: Span[UInt8], data: Span[UInt8]) -> List[UInt8]:
+    var pbkdf2 = PBKDF2SHA256(key)
+    pbkdf2.hmac(data)
+    var result = List[UInt8](capacity=32)
+    for i in range(32):
+        result.append(pbkdf2.u_block[i])
+    return result^
 
-    for i in range(1, l + 1):
-        # T_i calculation
-        # U_1 = PRF(P, S || INT(i))
-        var u_block: List[UInt8]
 
-        # Inner U_1
-        var ctx_in = SHA512Context()
-        sha512_update(ctx_in, Span[UInt8](ipad))
-        sha512_update(ctx_in, salt)
-        # Append INT(i) - 4 bytes Big Endian
-        var block_idx_bytes = List[UInt8](capacity=4)
-        block_idx_bytes.append(UInt8((i >> 24) & 0xFF))
-        block_idx_bytes.append(UInt8((i >> 16) & 0xFF))
-        block_idx_bytes.append(UInt8((i >> 8) & 0xFF))
-        block_idx_bytes.append(UInt8(i & 0xFF))
-        sha512_update(ctx_in, Span[UInt8](block_idx_bytes))
-        var inner_hash = sha512_final(ctx_in)
-
-        # Outer U_1
-        var ctx_out = SHA512Context()
-        sha512_update(ctx_out, Span[UInt8](opad))
-        sha512_update(ctx_out, Span[UInt8](inner_hash))
-        u_block = sha512_final(ctx_out)
-
-        # F = U_1
-        var f_block = List[UInt8](capacity=64)
-        for b in range(64):
-            f_block.append(u_block[b])
-
-        # U_2 ... U_c
-        for _ in range(1, iterations):
-            # HMAC(P, u_block)
-            # Inner
-            var ctx_in2 = SHA512Context()
-            sha512_update(ctx_in2, Span[UInt8](ipad))
-            sha512_update(ctx_in2, Span[UInt8](u_block))
-            var inner_hash2 = sha512_final(ctx_in2)
-
-            # Outer
-            var ctx_out2 = SHA512Context()
-            sha512_update(ctx_out2, Span[UInt8](opad))
-            sha512_update(ctx_out2, Span[UInt8](inner_hash2))
-            u_block = sha512_final(ctx_out2)
-
-            # F ^ U
-            for b in range(64):
-                f_block[b] ^= u_block[b]
-
-        # Append T_i to DK
-        for b in range(len(f_block)):
-            if len(derived_key) < dkLen:
-                derived_key.append(f_block[b])
-
-    return derived_key^
+fn hmac_sha512(key: Span[UInt8], data: Span[UInt8]) -> List[UInt8]:
+    var pbkdf2 = PBKDF2SHA512(key)
+    pbkdf2.hmac(data)
+    var result = List[UInt8](capacity=64)
+    for i in range(64):
+        result.append(pbkdf2.u_block[i])
+    return result^

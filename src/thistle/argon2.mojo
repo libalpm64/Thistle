@@ -26,302 +26,263 @@ RFC 9106
 By Libalpm64 no attribution required.
 """
 
-from collections import List, InlineArray
-from memory import (
-    UnsafePointer,
-    MutUnsafePointer,
-    ImmutUnsafePointer,
-    memcpy,
-)
+from collections import List
+from memory import alloc, UnsafePointer
 from algorithm import parallelize
 from bit import rotate_bits_left
-from .blake2b import blake2b_hash, Blake2b
+from .blake2b import Blake2b
+
+
+comptime MASK32 = 0xFFFFFFFF
+
+@always_inline
+fn zero_buffer(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
+    for i in range(len):
+        ptr[i] = 0
+
+@always_inline
+fn zero_buffer_u64(ptr: UnsafePointer[UInt64, MutAnyOrigin], len: Int):
+    for i in range(len):
+        ptr[i] = 0
+
+@always_inline
+fn zero_and_free(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
+    zero_buffer(ptr, len)
+    ptr.free()
+
+@always_inline
+fn zero_and_free_u64(ptr: UnsafePointer[UInt64, MutAnyOrigin], len: Int):
+    zero_buffer_u64(ptr, len)
+    ptr.free()
 
 
 @always_inline
-fn gb(
-    a: UInt64, b: UInt64, c: UInt64, d: UInt64
-) -> Tuple[UInt64, UInt64, UInt64, UInt64]:
-    """Argon2 G function using native rotate.
-    
-    RFC 9103 specifies right rotations (>>>). For 64-bit values:
-    right rotate by n = left rotate by (64-n)
-    - >>> 32 = left rotate 32 (64-32=32)
-    - >>> 24 = left rotate 40 (64-24=40)
-    - >>> 16 = left rotate 48 (64-16=48)
-    - >>> 63 = left rotate 1  (64-63=1)
-    
-    NOTE: Using scalar operations instead of SIMD. Mojo's SIMD[DType.uint64, N]
-    constructor fails with "constraint failed: expected a scalar type" when
-    attempting to create UInt64 SIMD vectors. Python's argon2-cffi achieves
-    ~2x better performance (24 vs 11 hashes/sec) using AVX2/AVX-512 SIMD
-    for these 64-bit operations. This is a fundamental Mojo limitation that
-    cannot be worked around until native UInt64 SIMD support is added.
-    """
-    # Scalar operations would benefit from SIMD[DType.uint64, 4] if supported
-    var a_new = a + b + 2 * (a & 0xFFFFFFFF) * (b & 0xFFFFFFFF)
+fn f_bla_mka(x: UInt64, y: UInt64) -> UInt64:
+    return x + y + 2 * (x & MASK32) * (y & MASK32)
+
+@always_inline
+fn gb(a: UInt64, b: UInt64, c: UInt64, d: UInt64) -> Tuple[UInt64, UInt64, UInt64, UInt64]:
+    var a_new = f_bla_mka(a, b)
     var d_new = rotate_bits_left[shift=32](d ^ a_new)
-    var c_new = c + d_new + 2 * (c & 0xFFFFFFFF) * (d_new & 0xFFFFFFFF)
+    var c_new = f_bla_mka(c, d_new)
     var b_new = rotate_bits_left[shift=40](b ^ c_new)
-    a_new = a_new + b_new + 2 * (a_new & 0xFFFFFFFF) * (b_new & 0xFFFFFFFF)
+    a_new = f_bla_mka(a_new, b_new)
     d_new = rotate_bits_left[shift=48](d_new ^ a_new)
-    c_new = c_new + d_new + 2 * (c_new & 0xFFFFFFFF) * (d_new & 0xFFFFFFFF)
+    c_new = f_bla_mka(c_new, d_new)
     b_new = rotate_bits_left[shift=1](b_new ^ c_new)
     return (a_new, b_new, c_new, d_new)
 
+@always_inline
+fn _p_column(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
+    var v0, v4, v8, v12 = gb(v[base + 0], v[base + 4], v[base + 8], v[base + 12])
+    var v1, v5, v9, v13 = gb(v[base + 1], v[base + 5], v[base + 9], v[base + 13])
+    var v2, v6, v10, v14 = gb(v[base + 2], v[base + 6], v[base + 10], v[base + 14])
+    var v3, v7, v11, v15 = gb(v[base + 3], v[base + 7], v[base + 11], v[base + 15])
+    v[base + 0] = v0
+    v[base + 4] = v4
+    v[base + 8] = v8
+    v[base + 12] = v12
+    v[base + 1] = v1
+    v[base + 5] = v5
+    v[base + 9] = v9
+    v[base + 13] = v13
+    v[base + 2] = v2
+    v[base + 6] = v6
+    v[base + 10] = v10
+    v[base + 14] = v14
+    v[base + 3] = v3
+    v[base + 7] = v7
+    v[base + 11] = v11
+    v[base + 15] = v15
 
+@always_inline
+fn _p_diagonal(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
+    var v0, v5, v10, v15 = gb(v[base + 0], v[base + 5], v[base + 10], v[base + 15])
+    var v1, v6, v11, v12 = gb(v[base + 1], v[base + 6], v[base + 11], v[base + 12])
+    var v2, v7, v8, v13 = gb(v[base + 2], v[base + 7], v[base + 8], v[base + 13])
+    var v3, v4, v9, v14 = gb(v[base + 3], v[base + 4], v[base + 9], v[base + 14])
+    v[base + 0] = v0
+    v[base + 5] = v5
+    v[base + 10] = v10
+    v[base + 15] = v15
+    v[base + 1] = v1
+    v[base + 6] = v6
+    v[base + 11] = v11
+    v[base + 12] = v12
+    v[base + 2] = v2
+    v[base + 7] = v7
+    v[base + 8] = v8
+    v[base + 13] = v13
+    v[base + 3] = v3
+    v[base + 4] = v4
+    v[base + 9] = v9
+    v[base + 14] = v14
+
+@always_inline
 fn compression_g(
-    out_ptr: MutUnsafePointer[UInt64, _],
-    x_ptr: ImmutUnsafePointer[UInt64, _],
-    y_ptr: ImmutUnsafePointer[UInt64, _],
+    out_ptr: UnsafePointer[UInt64, MutAnyOrigin],
+    x_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
+    y_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
     with_xor: Bool,
-    debug_print: Bool = False,
 ):
-    """Argon2 compression function G.
-    
-    Based on RFC 9106 Section 3.5-3.6.
-    The 1024-byte block is viewed as 64 16-byte registers (128 UInt64 words).
-    Each register S_i = (v_{2*i+1} || v_{2*i}) contains 2 UInt64 words.
-    
-    P operates on 8 registers (16 words) as a 4x4 matrix:
-      v_0  v_1  v_2  v_3
-      v_4  v_5  v_6  v_7
-      v_8  v_9 v_10 v_11
-     v_12 v_13 v_14 v_15
-    
-    First 4 GB calls are column-wise, then 4 are diagonal-wise.
-    """
-    # R = X XOR Y (128 words)
-    var r = InlineArray[UInt64, 128](uninitialized=True)
-    var r_backup = InlineArray[UInt64, 128](uninitialized=True)
+    var block = alloc[UInt64](128)
+    var block_xy = alloc[UInt64](128)
     
     for i in range(128):
         var val = x_ptr[i] ^ y_ptr[i]
-        r[i] = val
+        block[i] = val
         if with_xor:
-            r_backup[i] = val ^ out_ptr[i]
+            block_xy[i] = val ^ out_ptr[i]
         else:
-            r_backup[i] = val
-
-    # Row-wise pass: apply P to each row of 8 registers (16 words)
-    # Row i uses registers R_{i*8} to R_{i*8+7}, which are words 16*i to 16*i+15
-    for row in range(8):
-        var base = row * 16  # Word index base
-        
-        # Apply P to the 4x4 matrix of words
-        # Column-wise GB (first 4 calls)
-        # GB(v_0, v_4, v_8, v_12)
-        var a = r[base + 0]
-        var b = r[base + 4]
-        var c = r[base + 8]
-        var d = r[base + 12]
-        (a, b, c, d) = gb(a, b, c, d)
-        r[base + 0] = a
-        r[base + 4] = b
-        r[base + 8] = c
-        r[base + 12] = d
-        
-        # GB(v_1, v_5, v_9, v_13)
-        a = r[base + 1]
-        b = r[base + 5]
-        c = r[base + 9]
-        d = r[base + 13]
-        (a, b, c, d) = gb(a, b, c, d)
-        r[base + 1] = a
-        r[base + 5] = b
-        r[base + 9] = c
-        r[base + 13] = d
-        
-        # GB(v_2, v_6, v_10, v_14)
-        a = r[base + 2]
-        b = r[base + 6]
-        c = r[base + 10]
-        d = r[base + 14]
-        (a, b, c, d) = gb(a, b, c, d)
-        r[base + 2] = a
-        r[base + 6] = b
-        r[base + 10] = c
-        r[base + 14] = d
-        
-        # GB(v_3, v_7, v_11, v_15)
-        a = r[base + 3]
-        b = r[base + 7]
-        c = r[base + 11]
-        d = r[base + 15]
-        (a, b, c, d) = gb(a, b, c, d)
-        r[base + 3] = a
-        r[base + 7] = b
-        r[base + 11] = c
-        r[base + 15] = d
-        
-        # Diagonal-wise GB (next 4 calls)
-        # GB(v_0, v_5, v_10, v_15)
-        a = r[base + 0]
-        b = r[base + 5]
-        c = r[base + 10]
-        d = r[base + 15]
-        (a, b, c, d) = gb(a, b, c, d)
-        r[base + 0] = a
-        r[base + 5] = b
-        r[base + 10] = c
-        r[base + 15] = d
-        
-        # GB(v_1, v_6, v_11, v_12)
-        a = r[base + 1]
-        b = r[base + 6]
-        c = r[base + 11]
-        d = r[base + 12]
-        (a, b, c, d) = gb(a, b, c, d)
-        r[base + 1] = a
-        r[base + 6] = b
-        r[base + 11] = c
-        r[base + 12] = d
-        
-        # GB(v_2, v_7, v_8, v_13)
-        a = r[base + 2]
-        b = r[base + 7]
-        c = r[base + 8]
-        d = r[base + 13]
-        (a, b, c, d) = gb(a, b, c, d)
-        r[base + 2] = a
-        r[base + 7] = b
-        r[base + 8] = c
-        r[base + 13] = d
-        
-        # GB(v_3, v_4, v_9, v_14)
-        a = r[base + 3]
-        b = r[base + 4]
-        c = r[base + 9]
-        d = r[base + 14]
-        (a, b, c, d) = gb(a, b, c, d)
-        r[base + 3] = a
-        r[base + 4] = b
-        r[base + 9] = c
-        r[base + 14] = d
-
-    # Column-wise pass: apply P to each column of 8 registers
-    # Column i uses registers R_i, R_{i+8}, R_{i+16}, ..., R_{i+56}
-    # Register R_j contains words 2*j and 2*j+1
-    # So column i uses words: 2*i, 2*i+1, 2*i+16, 2*i+17, ..., 2*i+112, 2*i+113
+            block_xy[i] = val
+    
+    for i in range(8):
+        var base = i * 16
+        _p_column(base, block)
+        _p_diagonal(base, block)
+    
     for col in range(8):
-        # Build the 4x4 matrix for this column
-        # Words are at: 2*col, 2*col+16, 2*col+32, ..., 2*col+112 (even indices)
-        # and 2*col+1, 2*col+17, 2*col+33, ..., 2*col+113 (odd indices)
+        var v0 = block[col * 2 + 0]
+        var v1 = block[col * 2 + 1]
+        var v2 = block[col * 2 + 16]
+        var v3 = block[col * 2 + 17]
+        var v4 = block[col * 2 + 32]
+        var v5 = block[col * 2 + 33]
+        var v6 = block[col * 2 + 48]
+        var v7 = block[col * 2 + 49]
+        var v8 = block[col * 2 + 64]
+        var v9 = block[col * 2 + 65]
+        var v10 = block[col * 2 + 80]
+        var v11 = block[col * 2 + 81]
+        var v12 = block[col * 2 + 96]
+        var v13 = block[col * 2 + 97]
+        var v14 = block[col * 2 + 112]
+        var v15 = block[col * 2 + 113]
         
-        # The 16 words for this column, arranged as a 4x4 matrix:
-        # Following the pattern from row-wise but with gathered words
-        # v_0=2*col+0, v_1=2*col+1, v_2=2*col+16, v_3=2*col+17
-        # v_4=2*col+32, v_5=2*col+33, v_6=2*col+48, v_7=2*col+49
-        # v_8=2*col+64, v_9=2*col+65, v_10=2*col+80, v_11=2*col+81
-        # v_12=2*col+96, v_13=2*col+97, v_14=2*col+112, v_15=2*col+113
+        v0, v4, v8, v12 = gb(v0, v4, v8, v12)
+        v1, v5, v9, v13 = gb(v1, v5, v9, v13)
+        v2, v6, v10, v14 = gb(v2, v6, v10, v14)
+        v3, v7, v11, v15 = gb(v3, v7, v11, v15)
         
-        var v0 = r[col * 2 + 0]
-        var v1 = r[col * 2 + 1]
-        var v2 = r[col * 2 + 16]
-        var v3 = r[col * 2 + 17]
-        var v4 = r[col * 2 + 32]
-        var v5 = r[col * 2 + 33]
-        var v6 = r[col * 2 + 48]
-        var v7 = r[col * 2 + 49]
-        var v8 = r[col * 2 + 64]
-        var v9 = r[col * 2 + 65]
-        var v10 = r[col * 2 + 80]
-        var v11 = r[col * 2 + 81]
-        var v12 = r[col * 2 + 96]
-        var v13 = r[col * 2 + 97]
-        var v14 = r[col * 2 + 112]
-        var v15 = r[col * 2 + 113]
+        v0, v5, v10, v15 = gb(v0, v5, v10, v15)
+        v1, v6, v11, v12 = gb(v1, v6, v11, v12)
+        v2, v7, v8, v13 = gb(v2, v7, v8, v13)
+        v3, v4, v9, v14 = gb(v3, v4, v9, v14)
         
-        # Column-wise GB
-        (v0, v4, v8, v12) = gb(v0, v4, v8, v12)
-        (v1, v5, v9, v13) = gb(v1, v5, v9, v13)
-        (v2, v6, v10, v14) = gb(v2, v6, v10, v14)
-        (v3, v7, v11, v15) = gb(v3, v7, v11, v15)
-        
-        # Diagonal-wise GB
-        (v0, v5, v10, v15) = gb(v0, v5, v10, v15)
-        (v1, v6, v11, v12) = gb(v1, v6, v11, v12)
-        (v2, v7, v8, v13) = gb(v2, v7, v8, v13)
-        (v3, v4, v9, v14) = gb(v3, v4, v9, v14)
-        
-        # Store back
-        r[col * 2 + 0] = v0
-        r[col * 2 + 1] = v1
-        r[col * 2 + 16] = v2
-        r[col * 2 + 17] = v3
-        r[col * 2 + 32] = v4
-        r[col * 2 + 33] = v5
-        r[col * 2 + 48] = v6
-        r[col * 2 + 49] = v7
-        r[col * 2 + 64] = v8
-        r[col * 2 + 65] = v9
-        r[col * 2 + 80] = v10
-        r[col * 2 + 81] = v11
-        r[col * 2 + 96] = v12
-        r[col * 2 + 97] = v13
-        r[col * 2 + 112] = v14
-        r[col * 2 + 113] = v15
-
-    # Output: Z XOR R
+        block[col * 2 + 0] = v0
+        block[col * 2 + 1] = v1
+        block[col * 2 + 16] = v2
+        block[col * 2 + 17] = v3
+        block[col * 2 + 32] = v4
+        block[col * 2 + 33] = v5
+        block[col * 2 + 48] = v6
+        block[col * 2 + 49] = v7
+        block[col * 2 + 64] = v8
+        block[col * 2 + 65] = v9
+        block[col * 2 + 80] = v10
+        block[col * 2 + 81] = v11
+        block[col * 2 + 96] = v12
+        block[col * 2 + 97] = v13
+        block[col * 2 + 112] = v14
+        block[col * 2 + 113] = v15
+    
     for i in range(128):
-        out_ptr[i] = r[i] ^ r_backup[i]
+        out_ptr[i] = block[i] ^ block_xy[i]
+    
+    zero_and_free_u64(block, 128)
+    zero_and_free_u64(block_xy, 128)
 
 
-fn le32(val: Int) -> List[UInt8]:
-    var res = List[UInt8](capacity=4)
-    res.append(UInt8(val & 0xFF))
-    res.append(UInt8((val >> 8) & 0xFF))
-    res.append(UInt8((val >> 16) & 0xFF))
-    res.append(UInt8((val >> 24) & 0xFF))
-    return res^
+@always_inline
+fn store_le32(ptr: UnsafePointer[UInt8, MutAnyOrigin], offset: Int, val: Int):
+    ptr[offset + 0] = UInt8(val & 0xFF)
+    ptr[offset + 1] = UInt8((val >> 8) & 0xFF)
+    ptr[offset + 2] = UInt8((val >> 16) & 0xFF)
+    ptr[offset + 3] = UInt8((val >> 24) & 0xFF)
 
 
-fn le64(val: Int) -> List[UInt8]:
-    var res = List[UInt8](capacity=8)
-    res.append(UInt8(val & 0xFF))
-    res.append(UInt8((val >> 8) & 0xFF))
-    res.append(UInt8((val >> 16) & 0xFF))
-    res.append(UInt8((val >> 24) & 0xFF))
-    res.append(UInt8((val >> 32) & 0xFF))
-    res.append(UInt8((val >> 40) & 0xFF))
-    res.append(UInt8((val >> 48) & 0xFF))
-    res.append(UInt8((val >> 56) & 0xFF))
-    return res^
+@always_inline
+fn store_le64(ptr: UnsafePointer[UInt8, MutAnyOrigin], offset: Int, val: Int):
+    ptr[offset + 0] = UInt8(val & 0xFF)
+    ptr[offset + 1] = UInt8((val >> 8) & 0xFF)
+    ptr[offset + 2] = UInt8((val >> 16) & 0xFF)
+    ptr[offset + 3] = UInt8((val >> 24) & 0xFF)
+    ptr[offset + 4] = UInt8((val >> 32) & 0xFF)
+    ptr[offset + 5] = UInt8((val >> 40) & 0xFF)
+    ptr[offset + 6] = UInt8((val >> 48) & 0xFF)
+    ptr[offset + 7] = UInt8((val >> 56) & 0xFF)
 
 
-fn variable_length_hash(t_len: Int, input: Span[UInt8]) -> List[UInt8]:
+fn blake2b_with_le32_prefix(digest_size: Int, prefix_val: Int, input: Span[UInt8]) -> List[UInt8]:
+    var ctx = Blake2b(digest_size)
+    var le_buf = alloc[UInt8](4)
+    store_le32(le_buf, 0, prefix_val)
+    ctx.update(Span[UInt8](ptr=le_buf, length=4))
+    ctx.update(input)
+    le_buf.free()
+    return ctx.finalize()
+
+
+fn variable_length_hash_to_ptr(t_len: Int, input: Span[UInt8], out_ptr: UnsafePointer[UInt8, MutAnyOrigin]):
     if t_len <= 64:
         var ctx = Blake2b(t_len)
-        ctx.update(Span[UInt8](le32(t_len)))
+        var le_buf = alloc[UInt8](4)
+        store_le32(le_buf, 0, t_len)
+        ctx.update(Span[UInt8](ptr=le_buf, length=4))
         ctx.update(input)
-        return ctx.finalize()
+        le_buf.free()
+        var result = ctx.finalize()
+        for i in range(len(result)):
+            out_ptr[i] = result[i]
+        return
 
     var r = (t_len + 31) // 32 - 2
+    var v_buf = alloc[UInt8](64)
+    
     var ctx1 = Blake2b(64)
-    ctx1.update(Span[UInt8](le32(t_len)))
+    var le_buf = alloc[UInt8](4)
+    store_le32(le_buf, 0, t_len)
+    ctx1.update(Span[UInt8](ptr=le_buf, length=4))
     ctx1.update(input)
+    le_buf.free()
     var v = ctx1.finalize()
+    for k in range(64):
+        v_buf[k] = v[k]
 
-    var out_buf = List[UInt8]()
+    var out_offset = 0
     for _ in range(r - 1):
         for k in range(32):
-            out_buf.append(v[k])
+            out_ptr[out_offset + k] = v_buf[k]
+        out_offset += 32
+        
         var ctx = Blake2b(64)
-        ctx.update(Span[UInt8](v))
+        ctx.update(Span[UInt8](ptr=v_buf, length=64))
         v = ctx.finalize()
+        for k in range(64):
+            v_buf[k] = v[k]
 
     for k in range(32):
-        out_buf.append(v[k])
+        out_ptr[out_offset + k] = v_buf[k]
+    out_offset += 32
 
     var last_len = t_len - 32 * r
     var ctx_last = Blake2b(last_len)
-    ctx_last.update(Span[UInt8](v))
+    ctx_last.update(Span[UInt8](ptr=v_buf, length=64))
     var v_last = ctx_last.finalize()
-
     for k in range(len(v_last)):
-        out_buf.append(v_last[k])
+        out_ptr[out_offset + k] = v_last[k]
 
-    return out_buf^
+    zero_and_free(v_buf, 64)
+
+
+fn variable_length_hash(t_len: Int, input: Span[UInt8]) -> List[UInt8]:
+    var out_buf = alloc[UInt8](t_len)
+    variable_length_hash_to_ptr(t_len, input, out_buf)
+    var result = List[UInt8](capacity=t_len)
+    for i in range(t_len):
+        result.append(out_buf[i])
+    zero_and_free(out_buf, t_len)
+    return result^
 
 
 struct Argon2id:
@@ -349,7 +310,7 @@ struct Argon2id:
         self.memory_size_kb = memory_size_kb
         self.iterations = iterations
         self.version = version
-        self.type_code = 2  # Argon2id
+        self.type_code = 2
         self.salt = List[UInt8](capacity=len(salt))
         for i in range(len(salt)):
             self.salt.append(salt[i])
@@ -372,7 +333,7 @@ struct Argon2id:
         self.memory_size_kb = memory_size_kb
         self.iterations = iterations
         self.version = version
-        self.type_code = 2  # Argon2id
+        self.type_code = 2
         self.salt = List[UInt8](capacity=len(salt))
         for i in range(len(salt)):
             self.salt.append(salt[i])
@@ -385,19 +346,44 @@ struct Argon2id:
 
     fn hash(self, password: Span[UInt8]) -> List[UInt8]:
         var h0_ctx = Blake2b(64)
-        h0_ctx.update(Span[UInt8](le32(self.parallelism)))
-        h0_ctx.update(Span[UInt8](le32(self.tag_length)))
-        h0_ctx.update(Span[UInt8](le32(self.memory_size_kb)))
-        h0_ctx.update(Span[UInt8](le32(self.iterations)))
-        h0_ctx.update(Span[UInt8](le32(self.version)))
-        h0_ctx.update(Span[UInt8](le32(self.type_code)))
-        h0_ctx.update(Span[UInt8](le32(len(password))))
+        
+        var le_buf = alloc[UInt8](4)
+        store_le32(le_buf, 0, self.parallelism)
+        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        store_le32(le_buf, 0, self.tag_length)
+        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        store_le32(le_buf, 0, self.memory_size_kb)
+        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        store_le32(le_buf, 0, self.iterations)
+        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        store_le32(le_buf, 0, self.version)
+        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        store_le32(le_buf, 0, self.type_code)
+        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        store_le32(le_buf, 0, len(password))
+        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        le_buf.free()
+        
         h0_ctx.update(password)
-        h0_ctx.update(Span[UInt8](le32(len(self.salt))))
+        
+        le_buf = alloc[UInt8](4)
+        store_le32(le_buf, 0, len(self.salt))
+        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        le_buf.free()
         h0_ctx.update(Span[UInt8](self.salt))
-        h0_ctx.update(Span[UInt8](le32(len(self.secret))))
-        h0_ctx.update(Span[UInt8](le32(len(self.ad))))
+        
+        le_buf = alloc[UInt8](4)
+        store_le32(le_buf, 0, len(self.secret))
+        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        le_buf.free()
+        h0_ctx.update(Span[UInt8](self.secret))
+        
+        le_buf = alloc[UInt8](4)
+        store_le32(le_buf, 0, len(self.ad))
+        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        le_buf.free()
         h0_ctx.update(Span[UInt8](self.ad))
+        
         var h0 = h0_ctx.finalize()
 
         var m_blocks = self.memory_size_kb
@@ -410,26 +396,27 @@ struct Argon2id:
         var segment_length = q // 4
 
         var memory = alloc[UInt64](m_prime_blocks * 128)
-        var memory_ptr = memory
+
+        var h0_input = alloc[UInt8](72)
+        for k in range(64):
+            h0_input[k] = h0[k]
 
         for i in range(self.parallelism):
             for block_idx in range(2):
-                var input = List[UInt8]()
-                for k in range(len(h0)):
-                    input.append(h0[k])
-                var le_idx = le32(block_idx)
-                var lei = le32(i)
-                for k in range(4):
-                    input.append(le_idx[k])
-                for k in range(4):
-                    input.append(lei[k])
-
-                var b_bytes = variable_length_hash(1024, Span[UInt8](input))
+                store_le32(h0_input, 64, block_idx)
+                store_le32(h0_input, 68, i)
+                
+                var b_bytes = alloc[UInt8](1024)
+                variable_length_hash_to_ptr(1024, Span[UInt8](ptr=h0_input, length=72), b_bytes)
+                
                 for k in range(128):
                     var word: UInt64 = 0
                     for b_i in range(8):
                         word |= UInt64(b_bytes[k * 8 + b_i]) << (b_i * 8)
-                    memory_ptr.store(i * q * 128 + block_idx * 128 + k, word)
+                    memory[i * q * 128 + block_idx * 128 + k] = word
+                zero_and_free(b_bytes, 1024)
+
+        zero_and_free(h0_input, 72)
 
         for t in range(self.iterations):
             for slice_idx in range(4):
@@ -439,9 +426,7 @@ struct Argon2id:
                     var seg_start = slice_idx * segment_length
                     var seg_end = (slice_idx + 1) * segment_length
 
-                    var addressing_block = InlineArray[UInt64, 128](
-                        uninitialized=True
-                    )
+                    var addressing_block = alloc[UInt64](128)
                     var has_addressing_block = False
 
                     for index in range(seg_start, seg_end):
@@ -459,67 +444,35 @@ struct Argon2id:
                             if not has_addressing_block or (
                                 seg_offset % 128 == 0
                             ):
-                                var z_input = InlineArray[UInt8, 1024](fill=0)
-                                var z_in_ptr = z_input.unsafe_ptr()
-
-                                @always_inline
-                                fn store_le64(offset: Int, val: Int):
-                                    for i in range(8):
-                                        z_in_ptr.store(
-                                            offset + i,
-                                            UInt8((val >> (i * 8)) & 0xFF),
-                                        )
-
-                                store_le64(0, t)
-                                store_le64(8, lane)
-                                store_le64(16, slice_idx)
-                                store_le64(24, m_prime_blocks)
-                                store_le64(32, self.iterations)
-                                store_le64(40, self.type_code)
-                                store_le64(48, (seg_offset // 128) + 1)
-
-                                var z_u64 = InlineArray[UInt64, 128](
-                                    uninitialized=True
-                                )
-                                var z_u64_ptr = z_u64.unsafe_ptr()
+                                var z_u64 = alloc[UInt64](128)
                                 for k in range(128):
-                                    var w: UInt64 = 0
-                                    for b_i in range(8):
-                                        w |= UInt64(
-                                            z_in_ptr.load(k * 8 + b_i)
-                                        ) << (b_i * 8)
-                                    z_u64_ptr.store(k, w)
+                                    z_u64[k] = 0
+                                z_u64[0] = UInt64(t)
+                                z_u64[1] = UInt64(lane)
+                                z_u64[2] = UInt64(slice_idx)
+                                z_u64[3] = UInt64(m_prime_blocks)
+                                z_u64[4] = UInt64(self.iterations)
+                                z_u64[5] = UInt64(self.type_code)
+                                z_u64[6] = UInt64((seg_offset // 128) + 1)
 
-                                var zero_u64 = InlineArray[UInt64, 128](fill=0)
-                                var tmp_addr = InlineArray[UInt64, 128](
-                                    uninitialized=True
-                                )
+                                var zero_u64 = alloc[UInt64](128)
+                                for k in range(128):
+                                    zero_u64[k] = 0
+                                var tmp_addr = alloc[UInt64](128)
 
-                                compression_g(
-                                    tmp_addr.unsafe_ptr().bitcast[UInt64](),
-                                    zero_u64.unsafe_ptr().bitcast[UInt64](),
-                                    z_u64.unsafe_ptr().bitcast[UInt64](),
-                                    False,
-                                    t == 0 and slice_idx == 0 and index == 2,
-                                )
-                                compression_g(
-                                    addressing_block.unsafe_ptr().bitcast[
-                                        UInt64
-                                    ](),
-                                    zero_u64.unsafe_ptr().bitcast[UInt64](),
-                                    tmp_addr.unsafe_ptr().bitcast[UInt64](),
-                                    False,
-                                    False,
-                                )
+                                compression_g(tmp_addr, zero_u64, z_u64, False)
+                                compression_g(addressing_block, zero_u64, tmp_addr, False)
                                 has_addressing_block = True
+                                
+                                zero_and_free_u64(z_u64, 128)
+                                zero_and_free_u64(zero_u64, 128)
+                                zero_and_free_u64(tmp_addr, 128)
 
                             var val = addressing_block[seg_offset % 128]
                             j1 = UInt32(val & 0xFFFFFFFF)
                             j2 = UInt32(val >> 32)
                         else:
-                            var v0 = memory_ptr[
-                                lane * q * 128 + prev_index * 128
-                            ]
+                            var v0 = memory[lane * q * 128 + prev_index * 128]
                             j1 = UInt32(v0 & 0xFFFFFFFF)
                             j2 = UInt32(v0 >> 32)
 
@@ -566,38 +519,36 @@ struct Argon2id:
                                 ) * segment_length
                             ref_index = (start_pos + Int(zz)) % q
 
-                        var p_ptr = (
-                            memory_ptr + (lane * q * 128 + prev_index * 128)
-                        ).bitcast[UInt64]()
-                        var r_ptr = (
-                            memory_ptr + (ref_lane * q * 128 + ref_index * 128)
-                        ).bitcast[UInt64]()
-                        var c_ptr = (
-                            memory_ptr + (lane * q * 128 + index * 128)
-                        ).bitcast[UInt64]()
+                        var p_ptr = memory + (lane * q * 128 + prev_index * 128)
+                        var r_ptr = memory + (ref_lane * q * 128 + ref_index * 128)
+                        var c_ptr = memory + (lane * q * 128 + index * 128)
 
-                        compression_g(
-                            c_ptr,
-                            p_ptr,
-                            r_ptr,
-                            t > 0,
-                        )
+                        compression_g(c_ptr, p_ptr, r_ptr, t > 0)
+
+                    zero_and_free_u64(addressing_block, 128)
 
                 parallelize[process_lane](self.parallelism)
 
-        var c_block = InlineArray[UInt64, 128](fill=0)
+        var c_block = alloc[UInt64](128)
+        for k in range(128):
+            c_block[k] = 0
         for i in range(self.parallelism):
-            var last_ptr = memory_ptr + (i * q * 128 + (q - 1) * 128)
+            var last_ptr = memory + (i * q * 128 + (q - 1) * 128)
             for k in range(128):
                 c_block[k] ^= last_ptr[k]
 
-        var c_bytes = List[UInt8](capacity=1024)
+        var c_bytes = alloc[UInt8](1024)
         for k in range(128):
             var w = c_block[k]
             for b_i in range(8):
-                c_bytes.append(UInt8((w >> (b_i * 8)) & 0xFF))
+                c_bytes[k * 8 + b_i] = UInt8((w >> (b_i * 8)) & 0xFF)
 
-        return variable_length_hash(self.tag_length, Span[UInt8](c_bytes))
+        zero_and_free_u64(c_block, 128)
+        zero_and_free_u64(memory, m_prime_blocks * 128)
+        
+        var result = variable_length_hash(self.tag_length, Span[UInt8](ptr=c_bytes, length=1024))
+        zero_and_free(c_bytes, 1024)
+        return result^
 
 
 fn argon2id_hash_string(password: String, salt: String) -> String:

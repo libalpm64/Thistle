@@ -30,8 +30,6 @@ from memory.unsafe_pointer import UnsafePointer, alloc
 from builtin.type_aliases import MutExternalOrigin
 from bit import rotate_bits_left
 
-
-# ChaCha20 constants per RFC 7539 Section 2.3
 comptime CHACHA_CONSTANTS = SIMD[DType.uint32, 4](
     0x61707865, 0x3320646E, 0x79622D32, 0x6B206574,
 )
@@ -45,7 +43,6 @@ fn simd_quarter_round(
 ) -> Tuple[SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4]]:
     """SIMD vectorized quarter round operating on 4 columns in parallel.
     
-    Processes 4 quarter-rounds simultaneously using SIMD operations.
     ChaCha20 quarter round: a += b; d ^= a; d <<<= 16; c += d; b ^= c; b <<<= 12;
                             a += b; d ^= a; d <<<= 8; c += d; b ^= c; b <<<= 7
     """
@@ -94,7 +91,7 @@ fn shuffle_for_diagonal(
       QR(3,4,9,14):  s3, s4, s9, s14  = row0[3], row1[0], row2[1], row3[2]
     
     For simd_quarter_round to process these, we need:
-      a = [s0, s1, s2, s3] = row0 (unchanged)
+      a = [s0, s1, s2, s3] = row0 (no changes)
       b = [s5, s6, s7, s4] = row1.rotate_left[1]()
       c = [s10, s11, s8, s9] = row2.rotate_left[2]()
       d = [s15, s12, s13, s14] = row3.rotate_left[3]()
@@ -128,11 +125,11 @@ fn unshuffle_from_diagonal(
       row2 = [s8', s9', s10', s11'] = c.rotate_right[2]()
       row3 = [s12', s13', s14', s15'] = d.rotate_right[3]()
     """
-    var row0 = a  # No change needed
-    var row1 = b.rotate_right[1]()  # SIMD element rotate right by 1
-    var row2 = c.rotate_right[2]()  # SIMD element rotate right by 2
-    var row3 = d.rotate_right[3]()  # SIMD element rotate right by 3
-    
+    var row0 = a
+    var row1 = b.rotate_right[1]()
+    var row2 = c.rotate_right[2]()
+    var row3 = d.rotate_right[3]()
+
     return Tuple(row0, row1, row2, row3)
 
 
@@ -143,27 +140,18 @@ fn simd_double_round(
     mut row2: SIMD[DType.uint32, 4],
     mut row3: SIMD[DType.uint32, 4],
 ) -> Tuple[SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4]]:
-    """Execute one ChaCha20 double-round using SIMD operations.
-    
-    Processes column rounds and diagonal rounds on 4 quarter-rounds in parallel.
-    """
-    # Column rounds: QR(0,4,8,12), QR(1,5,9,13), QR(2,6,10,14), QR(3,7,11,15)
-    # row0[i], row1[i], row2[i], row3[i] for i=0,1,2,3
+
     var qr = simd_quarter_round(row0, row1, row2, row3)
     row0 = qr[0]; row1 = qr[1]; row2 = qr[2]; row3 = qr[3]
     
-    # Shuffle for diagonal processing
     var shuffled = shuffle_for_diagonal(row0, row1, row2, row3)
     var diag_a = shuffled[0]; var diag_b = shuffled[1]
     var diag_c = shuffled[2]; var diag_d = shuffled[3]
     
-    # Diagonal rounds: QR(0,5,10,15), QR(1,6,11,12), QR(2,7,8,13), QR(3,4,9,14)
     qr = simd_quarter_round(diag_a, diag_b, diag_c, diag_d)
     diag_a = qr[0]; diag_b = qr[1]; diag_c = qr[2]; diag_d = qr[3]
     
-    # Unshuffle back to row layout
     return unshuffle_from_diagonal(diag_a, diag_b, diag_c, diag_d)
-
 
 @always_inline
 fn simd_quarter_round_8x(
@@ -172,7 +160,7 @@ fn simd_quarter_round_8x(
     mut c: SIMD[DType.uint32, 8],
     mut d: SIMD[DType.uint32, 8],
 ) -> Tuple[SIMD[DType.uint32, 8], SIMD[DType.uint32, 8], SIMD[DType.uint32, 8], SIMD[DType.uint32, 8]]:
-    """SIMD quarter round for 8-element vectors (2 blocks in parallel using AVX2)."""
+    """SIMD quarter round for 8-element vectors."""
     # a += b; d ^= a; d <<<= 16
     a = a + b
     d = d ^ a
@@ -203,14 +191,12 @@ fn simd_double_round_8x(
     mut row2: SIMD[DType.uint32, 8],
     mut row3: SIMD[DType.uint32, 8],
 ) -> Tuple[SIMD[DType.uint32, 8], SIMD[DType.uint32, 8], SIMD[DType.uint32, 8], SIMD[DType.uint32, 8]]:
-    """Execute one ChaCha20 double-round on 2 blocks in parallel using 256-bit SIMD."""
+    """One ChaCha20 double-round on 2 blocks in parallel using 256-bit SIMD."""
     # Column rounds
     var qr = simd_quarter_round_8x(row0, row1, row2, row3)
     row0 = qr[0]; row1 = qr[1]; row2 = qr[2]; row3 = qr[3]
     
     # Shuffle for diagonal: rotate within each 4-element half
-    # Block 1: indices 0-3, Block 2: indices 4-7
-    # rotate_left[1] within each half: [1,2,3,0, 5,6,7,4]
     var b = row1.shuffle[1, 2, 3, 0, 5, 6, 7, 4]()
     var c = row2.shuffle[2, 3, 0, 1, 6, 7, 4, 5]()
     var d = row3.shuffle[3, 0, 1, 2, 7, 4, 5, 6]()
@@ -220,7 +206,6 @@ fn simd_double_round_8x(
     var diag_a = qr[0]; var diag_b = qr[1]; var diag_c = qr[2]; var diag_d = qr[3]
     
     # Unshuffle: rotate right within each 4-element half
-    # rotate_right[1] within each half: [3,0,1,2, 7,4,5,6]
     row1 = diag_b.shuffle[3, 0, 1, 2, 7, 4, 5, 6]()
     row2 = diag_c.shuffle[2, 3, 0, 1, 6, 7, 4, 5]()
     row3 = diag_d.shuffle[1, 2, 3, 0, 5, 6, 7, 4]()
@@ -235,9 +220,8 @@ fn chacha20_dual_block_core(
     counter2: UInt32,
     nonce: SIMD[DType.uint32, 3],
 ) -> Tuple[SIMD[DType.uint32, 16], SIMD[DType.uint32, 16]]:
-    """Process 2 ChaCha20 blocks in parallel using 256-bit AVX2 SIMD.
-    
-    Returns two 16-word state blocks.
+    """Process 2 ChaCha20 blocks in parallel
+	Returns two 16-word state blocks.
     """
     # Constants replicated for 8-element vectors
     comptime CONST8 = SIMD[DType.uint32, 8](
@@ -261,7 +245,7 @@ fn chacha20_dual_block_core(
     var init2 = row2
     var init3 = row3
     
-    # 10 double-rounds, fully unrolled
+    # 10 double-rounds
     var dr = simd_double_round_8x(row0, row1, row2, row3)
     row0 = dr[0]; row1 = dr[1]; row2 = dr[2]; row3 = dr[3]
     
@@ -292,13 +276,13 @@ fn chacha20_dual_block_core(
     dr = simd_double_round_8x(row0, row1, row2, row3)
     row0 = dr[0]; row1 = dr[1]; row2 = dr[2]; row3 = dr[3]
     
-    # Add initial state
+    # initial states
     row0 = row0 + init0
     row1 = row1 + init1
     row2 = row2 + init2
     row3 = row3 + init3
     
-    # Extract block 1 (first 4 elements of each row) and block 2 (last 4 elements)
+    # Extract block 1 and block 2
     var block1 = SIMD[DType.uint32, 16](
         row0[0], row0[1], row0[2], row0[3],
         row1[0], row1[1], row1[2], row1[3],
@@ -341,10 +325,9 @@ fn chacha20_block_core(
       - row0[1], row1[1], row2[1], row3[1] = s1, s5, s9, s13 (column 1)
       - etc.
     
-    Fully unrolled 10 double-rounds for maximum performance.
     """
-    # Initialize state vectors (row-wise organization for SIMD column processing)
-    var row0 = CHACHA_CONSTANTS  # s0-s3: constants
+    # Initialize state vectors
+    var row0 = CHACHA_CONSTANTS
     var row1 = SIMD[DType.uint32, 4](key[0], key[1], key[2], key[3])  # s4-s7: key first half
     var row2 = SIMD[DType.uint32, 4](key[4], key[5], key[6], key[7])  # s8-s11: key second half
     var row3 = SIMD[DType.uint32, 4](counter, nonce[0], nonce[1], nonce[2])  # s12-s15: counter + nonce
@@ -355,7 +338,7 @@ fn chacha20_block_core(
     var init2 = row2
     var init3 = row3
     
-    # 10 double-rounds, fully unrolled
+	# Double round
     var dr = simd_double_round(row0, row1, row2, row3)
     row0 = dr[0]; row1 = dr[1]; row2 = dr[2]; row3 = dr[3]
     
@@ -420,10 +403,7 @@ fn xor_block_simd[
     keystream: SIMD[DType.uint32, 16],
     offset: Int,
 ):
-    """XOR 64 bytes in-place with keystream using SIMD operations.
-    
-    Uses bitcast for efficient memory operations instead of scalar byte ops.
-    """
+    """XOR 64 bytes in-place with keystream"""
     # Load 64 bytes as 16 uint32 values using bitcast
     # We need to load from the span data
     var d0 = SIMD[DType.uint32, 4](
@@ -519,11 +499,7 @@ fn xor_block(
     keystream: SIMD[DType.uint32, 16],
     offset: Int,
 ):
-    """XOR 64 bytes of plaintext with keystream using direct SIMD load/store.
-    
-    Uses pointer bitcast and SIMD load/store to eliminate all scalar operations.
-    Processes the entire 64-byte block in just 8 uint64 operations, fully unrolled.
-    """
+    """XOR 64 bytes of plaintext with keystream using direct SIMD load/store."""
     # Cast keystream to 64-bit chunks for efficient XOR
     var ks_u64 = bitcast[DType.uint64, 8](keystream)
     
@@ -537,7 +513,7 @@ fn xor_block(
     # Calculate base offset in uint64 elements
     var base = offset // 8
     
-    # Fully unrolled: 8 load-XOR-store operations
+    # 8 load-XOR-store operations
     (dst_u64 + base + 0).store((src_u64 + base + 0).load[width=1]() ^ ks_u64[0])
     (dst_u64 + base + 1).store((src_u64 + base + 1).load[width=1]() ^ ks_u64[1])
     (dst_u64 + base + 2).store((src_u64 + base + 2).load[width=1]() ^ ks_u64[2])
@@ -554,11 +530,7 @@ fn xor_block_inplace[origin: Origin[mut=True]](
     keystream: SIMD[DType.uint32, 16],
     offset: Int,
 ):
-    """XOR 64 bytes in-place with keystream using direct SIMD load/store.
-    
-    Uses pointer bitcast and SIMD load/store to eliminate all scalar operations.
-    Processes the entire 64-byte block in just 8 uint64 operations, fully unrolled.
-    """
+    """XOR 64 bytes in-place with keystream using direct SIMD load/store."""
     # Cast keystream to 64-bit chunks
     var ks_u64 = bitcast[DType.uint64, 8](keystream)
     
@@ -568,7 +540,7 @@ fn xor_block_inplace[origin: Origin[mut=True]](
     # Calculate base offset in uint64 elements
     var base = offset // 8
     
-    # Fully unrolled: 8 load-XOR-store operations
+    # load-XOR-store operations
     (data_u64 + base + 0).store((data_u64 + base + 0).load[width=1]() ^ ks_u64[0])
     (data_u64 + base + 1).store((data_u64 + base + 1).load[width=1]() ^ ks_u64[1])
     (data_u64 + base + 2).store((data_u64 + base + 2).load[width=1]() ^ ks_u64[2])

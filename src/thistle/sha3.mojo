@@ -27,7 +27,7 @@ By Libalpm64, Attribute not required.
 """
 
 from collections import List
-from memory import UnsafePointer
+from memory import UnsafePointer, alloc, memcpy
 from bit import rotate_bits_left
 
 comptime KECCAK_RC = SIMD[DType.uint64, 24](
@@ -57,13 +57,6 @@ comptime KECCAK_RC = SIMD[DType.uint64, 24](
     0x8000000080008008,
 )
 
-# Rho rotation offsets: state[x][y] rotates by ROTATIONS[x][y]
-# x=0  1  2  3  4
-# y=0  0  1 62 28 27
-# y=1 36 44  6 55 20
-# y=2  3 10 43 25 39
-# y=3 41 45 15 21  8
-# y=4 18  2 61 56 14
 
 @always_inline
 fn rotl64[n: Int](x: UInt64) -> UInt64:
@@ -71,131 +64,170 @@ fn rotl64[n: Int](x: UInt64) -> UInt64:
     return rotate_bits_left[n](x)
 
 
-fn keccak_f1600(mut state: InlineArray[UInt64, 25]):
-    """Keccak-f[1600] permutation with 24 rounds.
-    
-    State is organized as 5x5 lanes of 64-bit words.
-    Uses SIMD vectors for efficient parallel processing.
-    """
-    var r0 = SIMD[DType.uint64, 8](
-        state[0], state[1], state[2], state[3], state[4], 0, 0, 0
-    )
-    var r1 = SIMD[DType.uint64, 8](
-        state[5], state[6], state[7], state[8], state[9], 0, 0, 0
-    )
-    var r2 = SIMD[DType.uint64, 8](
-        state[10], state[11], state[12], state[13], state[14], 0, 0, 0
-    )
-    var r3 = SIMD[DType.uint64, 8](
-        state[15], state[16], state[17], state[18], state[19], 0, 0, 0
-    )
-    var r4 = SIMD[DType.uint64, 8](
-        state[20], state[21], state[22], state[23], state[24], 0, 0, 0
-    )
-
-    @parameter
-    for round in range(24):
-        # Theta step
-        var C = r0 ^ r1 ^ r2 ^ r3 ^ r4
-        var C40123 = SIMD[DType.uint64, 8](
-            C[4], C[0], C[1], C[2], C[3], 0, 0, 0
-        )
-        var C12340 = SIMD[DType.uint64, 8](
-            C[1], C[2], C[3], C[4], C[0], 0, 0, 0
-        )
-        var D = C40123 ^ ((C12340 << 1) | (C12340 >> 63))
-        r0 ^= D
-        r1 ^= D
-        r2 ^= D
-        r3 ^= D
-        r4 ^= D
-        # Rho and Pi steps
-        var b0 = SIMD[DType.uint64, 8](
-            r0[0],
-            rotl64[44](r1[1]),
-            rotl64[43](r2[2]),
-            rotl64[21](r3[3]),
-            rotl64[14](r4[4]),
-            0,
-            0,
-            0,
-        )
-        var b1 = SIMD[DType.uint64, 8](
-            rotl64[28](r0[3]),
-            rotl64[20](r1[4]),
-            rotl64[3](r2[0]),
-            rotl64[45](r3[1]),
-            rotl64[61](r4[2]),
-            0,
-            0,
-            0,
-        )
-        var b2 = SIMD[DType.uint64, 8](
-            rotl64[1](r0[1]),
-            rotl64[6](r1[2]),
-            rotl64[25](r2[3]),
-            rotl64[8](r3[4]),
-            rotl64[18](r4[0]),
-            0,
-            0,
-            0,
-        )
-        var b3 = SIMD[DType.uint64, 8](
-            rotl64[27](r0[4]),
-            rotl64[36](r1[0]),
-            rotl64[10](r2[1]),
-            rotl64[15](r3[2]),
-            rotl64[56](r4[3]),
-            0,
-            0,
-            0,
-        )
-        var b4 = SIMD[DType.uint64, 8](
-            rotl64[62](r0[2]),
-            rotl64[55](r1[3]),
-            rotl64[39](r2[4]),
-            rotl64[41](r3[0]),
-            rotl64[2](r4[1]),
-            0,
-            0,
-            0,
-        )
-        # Chi step: A[x,y] = B[x,y] ^ ((~B[x+1,y]) & B[x+2,y])
-        r0 = b0 ^ (
-            ~SIMD[DType.uint64, 8](b0[1], b0[2], b0[3], b0[4], b0[0], 0, 0, 0)
-            & SIMD[DType.uint64, 8](b0[2], b0[3], b0[4], b0[0], b0[1], 0, 0, 0)
-        )
-        r1 = b1 ^ (
-            ~SIMD[DType.uint64, 8](b1[1], b1[2], b1[3], b1[4], b1[0], 0, 0, 0)
-            & SIMD[DType.uint64, 8](b1[2], b1[3], b1[4], b1[0], b1[1], 0, 0, 0)
-        )
-        r2 = b2 ^ (
-            ~SIMD[DType.uint64, 8](b2[1], b2[2], b2[3], b2[4], b2[0], 0, 0, 0)
-            & SIMD[DType.uint64, 8](b2[2], b2[3], b2[4], b2[0], b2[1], 0, 0, 0)
-        )
-        r3 = b3 ^ (
-            ~SIMD[DType.uint64, 8](b3[1], b3[2], b3[3], b3[4], b3[0], 0, 0, 0)
-            & SIMD[DType.uint64, 8](b3[2], b3[3], b3[4], b3[0], b3[1], 0, 0, 0)
-        )
-        r4 = b4 ^ (
-            ~SIMD[DType.uint64, 8](b4[1], b4[2], b4[3], b4[4], b4[0], 0, 0, 0)
-            & SIMD[DType.uint64, 8](b4[2], b4[3], b4[4], b4[0], b4[1], 0, 0, 0)
-        )
-        # Iota step
-        r0[0] = r0[0] ^ KECCAK_RC[round]
-
-    for x in range(5):
-        state[x] = r0[x]
-        state[x + 5] = r1[x]
-        state[x + 10] = r2[x]
-        state[x + 15] = r3[x]
-        state[x + 20] = r4[x]
+@always_inline
+fn zero_buffer(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
+    for i in range(len):
+        ptr[i] = 0
 
 
 @always_inline
-fn rotl64_simd(v: SIMD[DType.uint64, 8], s: Int) -> SIMD[DType.uint64, 8]:
-    """Rotate left for SIMD vector."""
-    return (v << s) | (v >> (64 - s))
+fn zero_and_free(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
+    zero_buffer(ptr, len)
+    ptr.free()
+
+
+@always_inline
+fn zero_and_free_u64(ptr: UnsafePointer[UInt64, MutAnyOrigin], len: Int):
+    for i in range(len):
+        ptr[i] = 0
+    ptr.free()
+
+
+fn keccak_f1600(mut state: UnsafePointer[UInt64, MutAnyOrigin]):
+    var a0 = state[0]
+    var a1 = state[1]
+    var a2 = state[2]
+    var a3 = state[3]
+    var a4 = state[4]
+    var a5 = state[5]
+    var a6 = state[6]
+    var a7 = state[7]
+    var a8 = state[8]
+    var a9 = state[9]
+    var a10 = state[10]
+    var a11 = state[11]
+    var a12 = state[12]
+    var a13 = state[13]
+    var a14 = state[14]
+    var a15 = state[15]
+    var a16 = state[16]
+    var a17 = state[17]
+    var a18 = state[18]
+    var a19 = state[19]
+    var a20 = state[20]
+    var a21 = state[21]
+    var a22 = state[22]
+    var a23 = state[23]
+    var a24 = state[24]
+
+    for round in range(24):
+        var c0 = a0 ^ a5 ^ a10 ^ a15 ^ a20
+        var c1 = a1 ^ a6 ^ a11 ^ a16 ^ a21
+        var c2 = a2 ^ a7 ^ a12 ^ a17 ^ a22
+        var c3 = a3 ^ a8 ^ a13 ^ a18 ^ a23
+        var c4 = a4 ^ a9 ^ a14 ^ a19 ^ a24
+
+        var d0 = c4 ^ rotl64[1](c1)
+        var d1 = c0 ^ rotl64[1](c2)
+        var d2 = c1 ^ rotl64[1](c3)
+        var d3 = c2 ^ rotl64[1](c4)
+        var d4 = c3 ^ rotl64[1](c0)
+
+        a0 ^= d0
+        a1 ^= d1
+        a2 ^= d2
+        a3 ^= d3
+        a4 ^= d4
+        a5 ^= d0
+        a6 ^= d1
+        a7 ^= d2
+        a8 ^= d3
+        a9 ^= d4
+        a10 ^= d0
+        a11 ^= d1
+        a12 ^= d2
+        a13 ^= d3
+        a14 ^= d4
+        a15 ^= d0
+        a16 ^= d1
+        a17 ^= d2
+        a18 ^= d3
+        a19 ^= d4
+        a20 ^= d0
+        a21 ^= d1
+        a22 ^= d2
+        a23 ^= d3
+        a24 ^= d4
+
+        var b0 = a0
+        var b1 = rotl64[44](a6)
+        var b2 = rotl64[43](a12)
+        var b3 = rotl64[21](a18)
+        var b4 = rotl64[14](a24)
+        var b5 = rotl64[28](a3)
+        var b6 = rotl64[20](a9)
+        var b7 = rotl64[3](a10)
+        var b8 = rotl64[45](a16)
+        var b9 = rotl64[61](a22)
+        var b10 = rotl64[1](a1)
+        var b11 = rotl64[6](a7)
+        var b12 = rotl64[25](a13)
+        var b13 = rotl64[8](a19)
+        var b14 = rotl64[18](a20)
+        var b15 = rotl64[27](a4)
+        var b16 = rotl64[36](a5)
+        var b17 = rotl64[10](a11)
+        var b18 = rotl64[15](a17)
+        var b19 = rotl64[56](a23)
+        var b20 = rotl64[62](a2)
+        var b21 = rotl64[55](a8)
+        var b22 = rotl64[39](a14)
+        var b23 = rotl64[41](a15)
+        var b24 = rotl64[2](a21)
+
+        a0 = b0 ^ (~b1 & b2)
+        a1 = b1 ^ (~b2 & b3)
+        a2 = b2 ^ (~b3 & b4)
+        a3 = b3 ^ (~b4 & b0)
+        a4 = b4 ^ (~b0 & b1)
+        a5 = b5 ^ (~b6 & b7)
+        a6 = b6 ^ (~b7 & b8)
+        a7 = b7 ^ (~b8 & b9)
+        a8 = b8 ^ (~b9 & b5)
+        a9 = b9 ^ (~b5 & b6)
+        a10 = b10 ^ (~b11 & b12)
+        a11 = b11 ^ (~b12 & b13)
+        a12 = b12 ^ (~b13 & b14)
+        a13 = b13 ^ (~b14 & b10)
+        a14 = b14 ^ (~b10 & b11)
+        a15 = b15 ^ (~b16 & b17)
+        a16 = b16 ^ (~b17 & b18)
+        a17 = b17 ^ (~b18 & b19)
+        a18 = b18 ^ (~b19 & b15)
+        a19 = b19 ^ (~b15 & b16)
+        a20 = b20 ^ (~b21 & b22)
+        a21 = b21 ^ (~b22 & b23)
+        a22 = b22 ^ (~b23 & b24)
+        a23 = b23 ^ (~b24 & b20)
+        a24 = b24 ^ (~b20 & b21)
+
+        a0 ^= KECCAK_RC[round]
+
+    state[0] = a0
+    state[1] = a1
+    state[2] = a2
+    state[3] = a3
+    state[4] = a4
+    state[5] = a5
+    state[6] = a6
+    state[7] = a7
+    state[8] = a8
+    state[9] = a9
+    state[10] = a10
+    state[11] = a11
+    state[12] = a12
+    state[13] = a13
+    state[14] = a14
+    state[15] = a15
+    state[16] = a16
+    state[17] = a17
+    state[18] = a18
+    state[19] = a19
+    state[20] = a20
+    state[21] = a21
+    state[22] = a22
+    state[23] = a23
+    state[24] = a24
 
 
 @always_inline
@@ -230,69 +262,80 @@ fn string_to_bytes(s: String) -> List[UInt8]:
 
 struct SHA3Context(Movable):
     """SHA-3 hashing context."""
-    var state: InlineArray[UInt64, 25]
+    var state: UnsafePointer[UInt64, MutAnyOrigin]
     var rate_bytes: Int
-    var buffer: InlineArray[UInt8, 168]
+    var buffer: UnsafePointer[UInt8, MutAnyOrigin]
     var buffer_len: Int
 
     fn __init__(out self, rate_bits: Int):
-        self.state = InlineArray[UInt64, 25](fill=0)
+        self.state = alloc[UInt64](25)
+        for i in range(25):
+            self.state[i] = 0
         self.rate_bytes = rate_bits // 8
-        self.buffer = InlineArray[UInt8, 168](fill=0)
+        self.buffer = alloc[UInt8](168)
+        for i in range(168):
+            self.buffer[i] = 0
         self.buffer_len = 0
 
     fn __moveinit__(out self, deinit other: Self):
-        self.state = other.state^
+        self.state = other.state
         self.rate_bytes = other.rate_bytes
-        self.buffer = other.buffer^
+        self.buffer = other.buffer
         self.buffer_len = other.buffer_len
 
+    fn __del__(deinit self):
+        zero_and_free_u64(self.state, 25)
+        zero_and_free(self.buffer, 168)
 
-fn sha3_absorb_block(mut state: InlineArray[UInt64, 25], block: Span[UInt8]):
-    """XOR block into state and apply permutation."""
-    var block_ptr = block.unsafe_ptr().bitcast[UInt64]()
-    for i in range(len(block) // 8):
-        state[i] ^= block_ptr[i]
+
+@always_inline
+fn sha3_absorb_block(mut state: UnsafePointer[UInt64, MutAnyOrigin], block: UnsafePointer[UInt8, ImmutAnyOrigin], rate_bytes: Int):
+    var block_u64 = block.bitcast[UInt64]()
+    var full_lanes = rate_bytes // 8
+    for i in range(full_lanes):
+        state[i] ^= block_u64[i]
     keccak_f1600(state)
 
 
 fn sha3_update(mut ctx: SHA3Context, data: Span[UInt8]):
-    """Update context with input data."""
     var i = 0
     var total_len = len(data)
-    
+
     if ctx.buffer_len > 0:
         var available = ctx.rate_bytes - ctx.buffer_len
         if total_len >= available:
-            for j in range(available):
-                ctx.buffer[ctx.buffer_len + j] = data[i + j]
-            sha3_absorb_block(
-                ctx.state,
-                Span[UInt8](ptr=ctx.buffer.unsafe_ptr(), length=ctx.rate_bytes),
+            memcpy(
+                dest=ctx.buffer + ctx.buffer_len,
+                src=data.unsafe_ptr(),
+                count=available,
             )
+            sha3_absorb_block(ctx.state, ctx.buffer, ctx.rate_bytes)
             ctx.buffer_len = 0
             i += available
         else:
-            for j in range(len(data)):
-                ctx.buffer[ctx.buffer_len + j] = data[i + j]
-            ctx.buffer_len += len(data)
+            memcpy(
+                dest=ctx.buffer + ctx.buffer_len,
+                src=data.unsafe_ptr(),
+                count=total_len,
+            )
+            ctx.buffer_len += total_len
             return
 
-    while i + ctx.rate_bytes <= len(data):
-        sha3_absorb_block(ctx.state, data[i : i + ctx.rate_bytes])
+    while i + ctx.rate_bytes <= total_len:
+        sha3_absorb_block(ctx.state, data.unsafe_ptr() + i, ctx.rate_bytes)
         i += ctx.rate_bytes
 
-    if i < len(data):
-        for j in range(len(data) - i):
-            ctx.buffer[ctx.buffer_len + j] = data[i + j]
-        ctx.buffer_len += len(data) - i
+    if i < total_len:
+        var remaining = total_len - i
+        memcpy(
+            dest=ctx.buffer,
+            src=data.unsafe_ptr() + i,
+            count=remaining,
+        )
+        ctx.buffer_len = remaining
 
 
 fn sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
-    """Finalize and return hash output.
-    
-    Applies SHA-3 padding (domain separation 0x06, pad10*1).
-    """
     ctx.buffer[ctx.buffer_len] = 0x06
     ctx.buffer_len += 1
 
@@ -302,39 +345,23 @@ fn sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
 
     ctx.buffer[ctx.rate_bytes - 1] |= 0x80
 
-    sha3_absorb_block(
-        ctx.state,
-        Span[UInt8](ptr=ctx.buffer.unsafe_ptr(), length=ctx.rate_bytes),
-    )
+    sha3_absorb_block(ctx.state, ctx.buffer, ctx.rate_bytes)
 
     var output = List[UInt8](capacity=output_len_bytes)
-    var output_offset = 0
+    var offset = 0
 
-    while output_offset < output_len_bytes:
+    while offset < output_len_bytes:
         var limit = ctx.rate_bytes
-        if output_len_bytes - output_offset < limit:
-            limit = output_len_bytes - output_offset
+        if output_len_bytes - offset < limit:
+            limit = output_len_bytes - offset
 
-        for i in range(limit // 8):
-            var lane = ctx.state[i]
-            output.append(UInt8(lane & 0xFF))
-            output.append(UInt8((lane >> 8) & 0xFF))
-            output.append(UInt8((lane >> 16) & 0xFF))
-            output.append(UInt8((lane >> 24) & 0xFF))
-            output.append(UInt8((lane >> 32) & 0xFF))
-            output.append(UInt8((lane >> 40) & 0xFF))
-            output.append(UInt8((lane >> 48) & 0xFF))
-            output.append(UInt8((lane >> 56) & 0xFF))
+        var state_bytes = ctx.state.bitcast[UInt8]()
+        for i in range(limit):
+            output.append(state_bytes[i])
 
-        var remaining = limit % 8
-        if remaining > 0:
-            var lane = ctx.state[limit // 8]
-            for k in range(remaining):
-                output.append(UInt8((lane >> (k * 8)) & 0xFF))
+        offset += limit
 
-        output_offset += limit
-
-        if output_offset < output_len_bytes:
+        if offset < output_len_bytes:
             keccak_f1600(ctx.state)
 
     return output^

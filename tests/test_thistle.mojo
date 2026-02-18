@@ -144,7 +144,18 @@ fn main():
         salt=Span[UInt8](salt_bytes), memory_size_kb=32, iterations=3
     )
     _ = argon2.hash(Span[UInt8](pwd_bytes))
-    #print("  Argon2id run success")
+
+    print("\nPBKDF2:")
+    all_passed &= check_test(
+        'PBKDF2-SHA256("password", "salt", 1, 32)',
+        bytes_to_hex(pbkdf2_hmac_sha256("password".as_bytes(), "salt".as_bytes(), 1, 32)),
+        "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b",
+    )
+    all_passed &= check_test(
+        'PBKDF2-SHA512("password", "salt", 1, 64)',
+        bytes_to_hex(pbkdf2_hmac_sha512("password".as_bytes(), "salt".as_bytes(), 1, 64)),
+        "867f70cf1ade02cff3752599a3a53dc4af34c7a669815ae5d513554e1c8cf252c02d470a285a0501bad999bfe943c08f050235d7d68b1da55e63f73b60a57fce",
+    )
 
     print("\nCamellia Implementation")
     var cam_k128 = hex_str_to_bytes(
