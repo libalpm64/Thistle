@@ -45,6 +45,7 @@ Thistle was written to avoid the **150x performance drops** when Mojo has to cal
 Currently AES-NI/RSA PSS (The one that is immune to sidechannels)/Camellia (Using the Linux Kernels AES-NI optimizations) are extremely difficult to implement in Mojo currently due to inlined assembly lacking opcode format recognization and only executing 1 instruction. Additonally the target system in Mojo needs a lot of work interop between Multiple architectures, Multiple OS's is currently impossible without having to use other languages.
 
 The goal is to be simillar to Golangs approach to their standard library they have a module that interops GO and assembly directly which is really awesome. (If you are unware of GO's standard library [https://github.com/golang/go/tree/master/src/crypto/internal/fips140/sha256]() this is very impressive). Additonally, if this is possible in Mojo we can also do GPU Crypto which can make matrix multplication instant making the hash rate *millions of times faster (in some operations) with GPU acceleration.
+
 ---
 
 ### What is not on the roadmap:
