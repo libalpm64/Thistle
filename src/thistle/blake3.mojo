@@ -441,7 +441,7 @@ fn compress_parallel_8(
     for round_idxes in _round_idxes_arr:
 
         @parameter
-        for v_idx in range(len(v_idxes_arr)):
+        for v_idx in range(len(_v_idxes_arr)):
             comptime v_i = _v_idxes_arr[v_idx]
             comptime m_i = round_idxes[v_idx]
             g_vertical(
@@ -855,8 +855,7 @@ fn blake3_parallel_hash(input: Span[UInt8], out_len: Int = 32) -> List[UInt8]:
                         mb.unsafe_set(joff + 2, t2b.shuffle[mask_even](t3b))
                         mb.unsafe_set(joff + 3, t2b.shuffle[mask_odd](t3b))
 
-                    # TODO: maybe a huge linear 16x8 shuffle gives better perf here?
-                    var am: InlineArray[SIMD[DType.uint32, 16], 8] = [
+                    var am: InlineArray[SIMD[DType.uint32, 16], 16] = [
                         ma[0].join(mb[0]),
                         ma[1].join(mb[1]),
                         ma[2].join(mb[2]),
