@@ -86,6 +86,23 @@ comptime CHUNK_LEN = 1024
 """The length of a BLAKE3 chunk in bytes."""
 
 
+# fmt: off
+comptime _round_idxes_arr = [
+    [(0, 1), (2, 3), (4, 5), (6, 7), (8, 9), (10, 11), (12, 13), (14, 15)],
+    [(2, 6), (3, 10), (7, 0), (4, 13), (1, 11), (12, 5), (9, 14), (15, 8)],
+    [(3, 4), (10, 12), (13, 2), (7, 14), (6, 5), (9, 0), (11, 15), (8, 1)],
+    [(10, 7), (12, 9), (14, 3), (13, 15), (4, 0), (11, 2), (5, 8), (1, 6)],
+    [(12, 13), (9, 11), (15, 10), (14, 8), (7, 2), (5, 3), (0, 1), (6, 4)],
+    [(9, 14), (11, 5), (8, 12), (15, 1), (13, 3), (0, 10), (2, 6), (4, 7)],
+    [(11, 15), (5, 0), (1, 9), (8, 6), (14, 10), (2, 12), (3, 4), (7, 13)],
+]
+comptime _v_idxes_arr = [
+    (0, 4, 8, 12), (1, 5, 9, 13), (2, 6, 10, 14), (3, 7, 11, 15),
+    (0, 5, 10, 15), (1, 6, 11, 12), (2, 7, 8, 13), (3, 4, 9, 14)
+]
+# fmt: on
+
+
 @always_inline
 fn bit_rotr[n: Int, w: Int](v: SIMD[DType.uint32, w]) -> SIMD[DType.uint32, w]:
     """Right-rotate a SIMD vector of 32-bit integers.
@@ -322,7 +339,7 @@ fn compress_internal_16way(
     base_counter: UInt64,
     blen: UInt8,
     flags: UInt8,
-    out_ptr: UnsafePointer[SIMD[DType.uint32, 16], MutAnyOrigin],
+    out_ptr: UnsafePointer[SIMD[DType.uint32, 16]],
 ):
     """16-way SIMD internal compression.
 
@@ -418,27 +435,14 @@ fn compress_parallel_8(
         {UInt32(blen)},
         {UInt32(flags)},
     ]
-    comptime round_idxes_arr = [
-        [(0, 1), (2, 3), (4, 5), (6, 7), (8, 9), (10, 11), (12, 13), (14, 15)],
-        [(2, 6), (3, 10), (7, 0), (4, 13), (1, 11), (12, 5), (9, 14), (15, 8)],
-        [(3, 4), (10, 12), (13, 2), (7, 14), (6, 5), (9, 0), (11, 15), (8, 1)],
-        [(10, 7), (12, 9), (14, 3), (13, 15), (4, 0), (11, 2), (5, 8), (1, 6)],
-        [(12, 13), (9, 11), (15, 10), (14, 8), (7, 2), (5, 3), (0, 1), (6, 4)],
-        [(9, 14), (11, 5), (8, 12), (15, 1), (13, 3), (0, 10), (2, 6), (4, 7)],
-        [(11, 15), (5, 0), (1, 9), (8, 6), (9, 10), (14, 2), (3, 4), (7, 13)],
-    ]
-    comptime v_idxes_arr = [
-        (0, 4, 8, 12), (1, 5, 9, 13), (2, 6, 10, 14), (3, 7, 11, 15),
-        (0, 5, 10, 15), (1, 6, 11, 12), (2, 7, 8, 13), (3, 4, 9, 14)
-    ]
     # fmt: on
 
     @parameter
-    for round_idxes in round_idxes_arr:
+    for round_idxes in _round_idxes_arr:
 
         @parameter
         for v_idx in range(len(v_idxes_arr)):
-            comptime v_i = v_idxes_arr[v_idx]
+            comptime v_i = _v_idxes_arr[v_idx]
             comptime m_i = round_idxes[v_idx]
             g_vertical(
                 v[v_i[0]], v[v_i[1]], v[v_i[2]], v[v_i[3]], m[m_i[0]], m[m_i[1]]
@@ -524,27 +528,12 @@ fn compress_parallel_16_per_lane(
     var va = _from_slice(va_t)
     var vb = _from_slice(vb_t)
 
-    comptime round_idxes_arr = [
-        [(0, 1), (2, 3), (4, 5), (6, 7), (8, 9), (10, 11), (12, 13), (14, 15)],
-        [(2, 6), (3, 10), (7, 0), (4, 13), (1, 11), (12, 5), (9, 14), (15, 8)],
-        [(3, 4), (10, 12), (13, 2), (7, 14), (6, 5), (9, 0), (11, 15), (8, 1)],
-        [(10, 7), (12, 9), (14, 3), (13, 15), (4, 0), (11, 2), (5, 8), (1, 6)],
-        [(12, 13), (9, 11), (15, 10), (14, 8), (7, 2), (5, 3), (0, 1), (6, 4)],
-        [(9, 14), (11, 5), (8, 12), (15, 1), (13, 3), (0, 10), (2, 6), (4, 7)],
-        [(11, 15), (5, 0), (1, 9), (8, 6), (9, 10), (14, 2), (3, 4), (7, 13)],
-    ]
-    comptime v_idxes_arr = [
-        (0, 4, 8, 12), (1, 5, 9, 13), (2, 6, 10, 14), (3, 7, 11, 15),
-        (0, 5, 10, 15), (1, 6, 11, 12), (2, 7, 8, 13), (3, 4, 9, 14)
-    ]
-    # fmt: on
-
     @parameter
-    for round_idxes in round_idxes_arr:
+    for round_idxes in _round_idxes_arr:
 
         @parameter
-        for v_idx in range(len(v_idxes_arr)):
-            comptime v = v_idxes[v_idx]
+        for v_idx in range(len(_v_idxes_arr)):
+            comptime v = _v_idxes_arr[v_idx]
             comptime m_i = round_idxes[v_idx]
             g_vertical(
                 va[v[0]], va[v[1]], va[v[2]], va[v[3]], ma[m_i[0]], ma[m_i[1]]
@@ -792,190 +781,131 @@ fn blake3_parallel_hash(input: Span[UInt8], out_len: Int = 32) -> List[UInt8]:
         fn process_batch(tid: Int):
             var task_base = tid * BSIZE
             var base_ptr = d.unsafe_ptr().bitcast[UInt32]()
-            var local_cvs = stack_allocation[64, SIMD[DType.uint32, 8]]()
-
+            var local_cvs = InlineArray[SIMD[DType.uint32, 8], 64](
+                uninitialized=True
+            )
+            # TODO: I think there is a lot of room for perf improvement here
+            # because these transformations are known at compile time, we should
+            # be able to vectorize this according to the device's simd_width
             for i in range(0, BSIZE, 16):
                 var base = task_base + i
-                var c0 = SIMD[DType.uint32, 16](IV[0])
-                var c1 = SIMD[DType.uint32, 16](IV[1])
-                var c2 = SIMD[DType.uint32, 16](IV[2])
-                var c3 = SIMD[DType.uint32, 16](IV[3])
-                var c4 = SIMD[DType.uint32, 16](IV[4])
-                var c5 = SIMD[DType.uint32, 16](IV[5])
-                var c6 = SIMD[DType.uint32, 16](IV[6])
-                var c7 = SIMD[DType.uint32, 16](IV[7])
+                # fmt: off
+                var c: InlineArray[SIMD[DType.uint32, 16], 8] = [
+                    {IV[0]}, {IV[1]}, {IV[2]}, {IV[3]},
+                    {IV[4]}, {IV[5]}, {IV[6]}, {IV[7]},
+                ]
+                # fmt: on
 
                 for b in range(16):
                     var flags = (CHUNK_START if b == 0 else UInt8(0)) | (
                         CHUNK_END if b == 15 else 0
                     )
-                    var ma = stack_allocation[16, SIMD[DType.uint32, 8]]()
-                    var mb = stack_allocation[16, SIMD[DType.uint32, 8]]()
+                    var ma = InlineArray[SIMD[DType.uint32, 8], 16](
+                        uninitialized=True
+                    )
+                    var mb = InlineArray[SIMD[DType.uint32, 8], 16](
+                        uninitialized=True
+                    )
 
                     for j in range(4):
-                        var joff = j * 4
-                        var v0a = base_ptr.load[width=4](
-                            (base + 0) * 256 + b * 16 + joff
-                        ).interleave(
-                            base_ptr.load[width=4](
-                                (base + 1) * 256 + b * 16 + joff
-                            )
-                        )
-                        var v1a = base_ptr.load[width=4](
-                            (base + 2) * 256 + b * 16 + joff
-                        ).interleave(
-                            base_ptr.load[width=4](
-                                (base + 3) * 256 + b * 16 + joff
-                            )
-                        )
-                        var v2a = base_ptr.load[width=4](
-                            (base + 4) * 256 + b * 16 + joff
-                        ).interleave(
-                            base_ptr.load[width=4](
-                                (base + 5) * 256 + b * 16 + joff
-                            )
-                        )
-                        var v3a = base_ptr.load[width=4](
-                            (base + 6) * 256 + b * 16 + joff
-                        ).interleave(
-                            base_ptr.load[width=4](
-                                (base + 7) * 256 + b * 16 + joff
-                            )
-                        )
-                        var t0a = v0a.shuffle[0, 1, 8, 9, 2, 3, 10, 11](v1a)
-                        var t1a = v2a.shuffle[0, 1, 8, 9, 2, 3, 10, 11](v3a)
-                        ma[joff + 0] = t0a.shuffle[0, 1, 2, 3, 8, 9, 10, 11](
-                            t1a
-                        )
-                        ma[joff + 1] = t0a.shuffle[4, 5, 6, 7, 12, 13, 14, 15](
-                            t1a
-                        )
-                        var t2a = v0a.shuffle[4, 5, 12, 13, 6, 7, 14, 15](v1a)
-                        var t3a = v2a.shuffle[4, 5, 12, 13, 6, 7, 14, 15](v3a)
-                        ma[joff + 2] = t2a.shuffle[0, 1, 2, 3, 8, 9, 10, 11](
-                            t3a
-                        )
-                        ma[joff + 3] = t2a.shuffle[4, 5, 6, 7, 12, 13, 14, 15](
-                            t3a
-                        )
 
-                        var v0b = base_ptr.load[width=4](
-                            (base + 8) * 256 + b * 16 + joff
-                        ).interleave(
-                            base_ptr.load[width=4](
-                                (base + 9) * 256 + b * 16 + joff
+                        @parameter
+                        @always_inline
+                        fn _load_idx(v: Int) -> SIMD[DType.uint32, 4]:
+                            return base_ptr.load[width=4](
+                                (base + v) * 256 + b * 16 + j * 4
                             )
-                        )
-                        var v1b = base_ptr.load[width=4](
-                            (base + 10) * 256 + b * 16 + joff
-                        ).interleave(
-                            base_ptr.load[width=4](
-                                (base + 11) * 256 + b * 16 + joff
-                            )
-                        )
-                        var v2b = base_ptr.load[width=4](
-                            (base + 12) * 256 + b * 16 + joff
-                        ).interleave(
-                            base_ptr.load[width=4](
-                                (base + 13) * 256 + b * 16 + joff
-                            )
-                        )
-                        var v3b = base_ptr.load[width=4](
-                            (base + 14) * 256 + b * 16 + joff
-                        ).interleave(
-                            base_ptr.load[width=4](
-                                (base + 15) * 256 + b * 16 + joff
-                            )
-                        )
-                        var t0b = v0b.shuffle[0, 1, 8, 9, 2, 3, 10, 11](v1b)
-                        var t1b = v2b.shuffle[0, 1, 8, 9, 2, 3, 10, 11](v3b)
-                        mb[joff + 0] = t0b.shuffle[0, 1, 2, 3, 8, 9, 10, 11](
-                            t1b
-                        )
-                        mb[joff + 1] = t0b.shuffle[4, 5, 6, 7, 12, 13, 14, 15](
-                            t1b
-                        )
-                        var t2b = v0b.shuffle[4, 5, 12, 13, 6, 7, 14, 15](v1b)
-                        var t3b = v2b.shuffle[4, 5, 12, 13, 6, 7, 14, 15](v3b)
-                        mb[joff + 2] = t2b.shuffle[0, 1, 2, 3, 8, 9, 10, 11](
-                            t3b
-                        )
-                        mb[joff + 3] = t2b.shuffle[4, 5, 6, 7, 12, 13, 14, 15](
-                            t3b
-                        )
 
-                    var am0 = ma[0].join(mb[0])
-                    var am1 = ma[1].join(mb[1])
-                    var am2 = ma[2].join(mb[2])
-                    var am3 = ma[3].join(mb[3])
-                    var am4 = ma[4].join(mb[4])
-                    var am5 = ma[5].join(mb[5])
-                    var am6 = ma[6].join(mb[6])
-                    var am7 = ma[7].join(mb[7])
-                    var am8 = ma[8].join(mb[8])
-                    var am9 = ma[9].join(mb[9])
-                    var am10 = ma[10].join(mb[10])
-                    var am11 = ma[11].join(mb[11])
-                    var am12 = ma[12].join(mb[12])
-                    var am13 = ma[13].join(mb[13])
-                    var am14 = ma[14].join(mb[14])
-                    var am15 = ma[15].join(mb[15])
+                        var v0a = _load_idx(0).interleave(_load_idx(1))
+                        var v1a = _load_idx(2).interleave(_load_idx(3))
+                        var v2a = _load_idx(4).interleave(_load_idx(5))
+                        var v3a = _load_idx(6).interleave(_load_idx(7))
+                        comptime t_01_mask: IndexList[8] = [
+                            0, 1, 8, 9, 2, 3, 10, 11
+                        ]
+                        comptime t_23_mask: IndexList[8] = [
+                            4, 5, 12, 13, 6, 7, 14, 15
+                        ]
+                        comptime mask_even: IndexList[8] = [
+                            0, 1, 2, 3, 8, 9, 10, 11
+                        ]
+                        comptime mask_odd: IndexList[8] = [
+                            4, 5, 6, 7, 12, 13, 14, 15
+                        ]
+                        var t0a = v0a.shuffle[t_01_mask](v1a)
+                        var t1a = v2a.shuffle[t_01_mask](v3a)
+                        ma.unsafe_set(joff + 0, t0a.shuffle[mask_even](t1a))
+                        ma.unsafe_set(joff + 1, t0a.shuffle[mask_odd](t1a))
+                        var t2a = v0a.shuffle[t_23_mask](v1a)
+                        var t3a = v2a.shuffle[t_23_mask](v3a)
+                        ma.unsafe_set(joff + 2, t2a.shuffle[mask_even](t3a))
+                        ma.unsafe_set(joff + 3, t2a.shuffle[mask_odd](t3a))
 
-                    var res = stack_allocation[8, SIMD[DType.uint32, 16]]()
+                        var v0b = _load_idx(8).interleave(_load_idx(9))
+                        var v1b = _load_idx(10).interleave(_load_idx(11))
+                        var v2b = _load_idx(12).interleave(_load_idx(13))
+                        var v3b = _load_idx(14).interleave(_load_idx(15))
+                        var t0b = v0b.shuffle[t_01_mask](v1b)
+                        var t1b = v2b.shuffle[t_01_mask](v3b)
+                        mb.unsafe_set(joff + 0, t0b.shuffle[mask_even](t1b))
+                        mb.unsafe_set(joff + 1, t0b.shuffle[mask_odd](t1b))
+                        var t2b = v0b.shuffle[t_23_mask](v1b)
+                        var t3b = v2b.shuffle[t_23_mask](v3b)
+                        mb.unsafe_set(joff + 2, t2b.shuffle[mask_even](t3b))
+                        mb.unsafe_set(joff + 3, t2b.shuffle[mask_odd](t3b))
+
+                    # TODO: maybe a huge linear 16x8 shuffle gives better perf here?
+                    var am: InlineArray[SIMD[DType.uint32, 16], 8] = [
+                        ma[0].join(mb[0]),
+                        ma[1].join(mb[1]),
+                        ma[2].join(mb[2]),
+                        ma[3].join(mb[3]),
+                        ma[4].join(mb[4]),
+                        ma[5].join(mb[5]),
+                        ma[6].join(mb[6]),
+                        ma[7].join(mb[7]),
+                        ma[8].join(mb[8]),
+                        ma[9].join(mb[9]),
+                        ma[10].join(mb[10]),
+                        ma[11].join(mb[11]),
+                        ma[12].join(mb[12]),
+                        ma[13].join(mb[13]),
+                        ma[14].join(mb[14]),
+                        ma[15].join(mb[15]),
+                    ]
+
+                    var res = InlineArray[SIMD[DType.uint32, 16], 8](
+                        uninitialized=True
+                    )
                     compress_internal_16way(
-                        c0,
-                        c1,
-                        c2,
-                        c3,
-                        c4,
-                        c5,
-                        c6,
-                        c7,
-                        am0,
-                        am1,
-                        am2,
-                        am3,
-                        am4,
-                        am5,
-                        am6,
-                        am7,
-                        am8,
-                        am9,
-                        am10,
-                        am11,
-                        am12,
-                        am13,
-                        am14,
-                        am15,
+                        c,
+                        am,
                         UInt64(base),
                         64,
                         flags,
-                        res,
+                        res.unsafe_ptr(),
                     )
-                    c0 = res[0]
-                    c1 = res[1]
-                    c2 = res[2]
-                    c3 = res[3]
-                    c4 = res[4]
-                    c5 = res[5]
-                    c6 = res[6]
-                    c7 = res[7]
+                    c = res
 
                 for k in range(16):
-                    local_cvs[i + k] = SIMD[DType.uint32, 8](
-                        c0[k], c1[k], c2[k], c3[k], c4[k], c5[k], c6[k], c7[k]
+                    # fmt: off
+                    var vec = SIMD[DType.uint32, 8](
+                        c[0][k], c[1][k], c[2][k], c[3][k],
+                        c[4][k], c[5][k], c[6][k], c[7][k],
                     )
+                    # fmt: on
+                    local_cvs.unsafe_set(i + k, vec)
 
             var current_len = 64
             while current_len > 1:
                 current_len >>= 1
                 for i in range(current_len):
-                    var left = local_cvs[i * 2]
-                    var right = local_cvs[i * 2 + 1]
+                    var left = local_cvs.unsafe_get(i * 2)
+                    var right = local_cvs.unsafe_get(i * 2 + 1)
                     var combined = compress_core(
                         IV, left.join(right), 0, 64, PARENT
                     )
-                    local_cvs[i] = combined.slice[8]()
+                    local_cvs.unsafe_set(i, combined.slice[8]())
             batch_roots_ptr[tid] = local_cvs[0]
 
         parallelize[process_batch](num_full_batches)
