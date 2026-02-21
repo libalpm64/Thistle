@@ -221,7 +221,7 @@ fn compress_internal[
         # fmt: on
 
     @parameter
-    for _ in range(6):
+    for _ in range(7):
         round()
         transform()
 
@@ -296,7 +296,7 @@ fn compress_core(
         The resulting 16 words (32 bytes of CV and 32 bytes of output).
     """
     # fmt: off
-    var m: InlineArray[SIMD[DType.uint32, w], 16] = [
+    var m: InlineArray[UInt32, 16] = [
         block[0], block[1], block[2], block[3],
         block[4], block[5], block[6], block[7],
         block[8], block[9], block[10], block[11],
@@ -327,7 +327,7 @@ fn compress_internal_16way(
     """16-way SIMD internal compression.
 
     Args:
-        c0: State vectors.
+        c: State vectors.
         m: Message vectors.
         base_counter: Starting counter for the 16-way batch.
         blen: Block length.
@@ -438,7 +438,7 @@ fn compress_parallel_8(
 
         @parameter
         for v_idx in range(len(v_idxes_arr)):
-            comptime v_i = v_idxes[v_idx]
+            comptime v_i = v_idxes_arr[v_idx]
             comptime m_i = round_idxes[v_idx]
             g_vertical(
                 v[v_i[0]], v[v_i[1]], v[v_i[2]], v[v_i[3]], m[m_i[0]], m[m_i[1]]
@@ -497,39 +497,32 @@ fn compress_parallel_16_per_lane(
     var counters_low = SIMD[DType.uint32, 8](0, 1, 2, 3, 4, 5, 6, 7) + (
         UInt32(base_counter & 0xFFFFFFFF)
     )
-    # fmt: off
-    var va: InlineArray[SIMD[DType.uint32, 8], 16] = [
-        va_t.slice[8, offset=0](),
-        va_t.slice[8, offset=1](),
-        va_t.slice[8, offset=2](),
-        va_t.slice[8, offset=3](),
-        va_t.slice[8, offset=4](),
-        va_t.slice[8, offset=5](),
-        va_t.slice[8, offset=6](),
-        va_t.slice[8, offset=7](),
-        {IV[0]}, {IV[1]}, {IV[2]}, {IV[3]},
-        {counters_low},
-        {UInt32(base_counter >> 32)},
-        {UInt32(blen)},
-        {UInt32(flags)},
-    ]
 
-    var vb: InlineArray[SIMD[DType.uint32, 8], 16] = [
-        vb_t.slice[8, offset=0](),
-        vb_t.slice[8, offset=8](),
-        vb_t.slice[8, offset=2 * 8](),
-        vb_t.slice[8, offset=3 * 8](),
-        vb_t.slice[8, offset=4 * 8](),
-        vb_t.slice[8, offset=5 * 8](),
-        vb_t.slice[8, offset=6 * 8](),
-        vb_t.slice[8, offset=7 * 8](),
-        {IV[0]}, {IV[1]}, {IV[2]}, {IV[3]},
-        {counters_low},
-        {UInt32(base_counter >> 32)},
-        {UInt32(blen)},
-        {UInt32(flags)},
-    ]
-    # fmt: on
+    @always_inline
+    fn _from_slice(
+        vec: SIMD[DType.uint32, 64]
+    ) -> InlineArray[SIMD[DType.uint32, 8], 16]:
+        # fmt: off
+        return [
+            vec.slice[8, offset=0](),
+            vec.slice[8, offset=8](),
+            vec.slice[8, offset=2 * 8](),
+            vec.slice[8, offset=3 * 8](),
+            vec.slice[8, offset=4 * 8](),
+            vec.slice[8, offset=5 * 8](),
+            vec.slice[8, offset=6 * 8](),
+            vec.slice[8, offset=7 * 8](),
+            {IV[0]}, {IV[1]}, {IV[2]}, {IV[3]},
+            {counters_low},
+            {UInt32(base_counter >> 32)},
+            {UInt32(blen)},
+            {UInt32(flags)},
+        ]
+        # fmt: on
+
+
+    var va = _from_slice(va_t)
+    var vb = _from_slice(vb_t)
 
     comptime round_idxes_arr = [
         [(0, 1), (2, 3), (4, 5), (6, 7), (8, 9), (10, 11), (12, 13), (14, 15)],
@@ -551,13 +544,13 @@ fn compress_parallel_16_per_lane(
 
         @parameter
         for v_idx in range(len(v_idxes_arr)):
-            comptime v_i = v_idxes[v_idx]
+            comptime v = v_idxes[v_idx]
             comptime m_i = round_idxes[v_idx]
             g_vertical(
                 va[v[0]], va[v[1]], va[v[2]], va[v[3]], ma[m_i[0]], ma[m_i[1]]
             )
             g_vertical(
-                vb[v[0]], vb[v[1]], vb[v[2]], vb[v[3]], ma[m_i[0]], ma[m_i[1]]
+                vb[v[0]], vb[v[1]], vb[v[2]], vb[v[3]], mb[m_i[0]], mb[m_i[1]]
             )
 
     var res_a: InlineArray[SIMD[DType.uint32, 8], 8] = [
@@ -580,8 +573,12 @@ fn compress_parallel_16_per_lane(
         vb[6] ^ vb[14],
         vb[7] ^ vb[15],
     ]
-    var res_a_t = res_a.unsafe_ptr().bitcast[UInt32]().load[64]().shuffle[transpose_8x8_idxes]()
-    var res_b_t = res_b.unsafe_ptr().bitcast[UInt32]().load[64]().shuffle[transpose_8x8_idxes]()
+    var res_a_t = (
+        res_a.unsafe_ptr().bitcast[UInt32]().load[64]()
+    ).shuffle[transpose_8x8_idxes]()
+    var res_b_t = (
+        res_b.unsafe_ptr().bitcast[UInt32]().load[64]()
+    ).shuffle[transpose_8x8_idxes]()
 
     out_ptr.bitcast[UInt32]().store(res_a_t)
     (out_ptr + 8).bitcast[UInt32]().store(res_b_t)
