@@ -693,10 +693,11 @@ struct Hasher:
             out_ptr: Pointer to write the resulting hash to.
             out_len: The number of bytes to write.
         """
-        var temp_buf = InlineArray[UInt8, 64]()
+        var temp_buf = InlineArray[UInt8, 64](uninitialized=True)
         # Initialize temp_buf to 0 and copy self.buf
         # TODO: maybe if we have self.buf always have 0 where > self.buf_len
-        # we can avoid this entirely
+        # we can avoid this entirely. We could also just load the whole
+        # vector and mask based on self.buf_len.
 
         @parameter
         for i in range(64):
