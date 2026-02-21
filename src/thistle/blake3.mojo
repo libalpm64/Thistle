@@ -808,12 +808,13 @@ fn blake3_parallel_hash(input: Span[UInt8], out_len: Int = 32) -> List[UInt8]:
                     )
 
                     for j in range(4):
+                        var joff = j * 4
 
                         @parameter
                         @always_inline
                         fn _load_idx(v: Int) -> SIMD[DType.uint32, 4]:
                             return base_ptr.load[width=4](
-                                (base + v) * 256 + b * 16 + j * 4
+                                (base + v) * 256 + b * 16 + joff
                             )
 
                         var v0a = _load_idx(0).interleave(_load_idx(1))
