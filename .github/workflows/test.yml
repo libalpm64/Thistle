@@ -9,7 +9,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -22,5 +21,19 @@ jobs:
       - name: Run tests
         run: pixi run test
 
-      - name: Run benchmarks
-        run: pixi run bench
+  test-pq:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0.9.4
+        with:
+          cache: false
+          locked: false
+          activate-environment: true
+
+      - name: Build PQ libraries
+        run: pixi run build-pq
+
+      - name: Run PQ tests
+        run: pixi run test-pq

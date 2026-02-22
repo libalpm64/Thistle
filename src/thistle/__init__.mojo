@@ -12,7 +12,10 @@ from .pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
 from .sha2 import sha256_hash, sha512_hash
 from .sha3 import sha3_256, sha3_512
 from .kcipher2 import KCipher2
+from .random import random_bytes, random_fill
+from .ml_dsa_native import mldsa44_keypair_internal, mldsa44_signature, mldsa44_verify
+from .ml_dsa_native import MLDSA44_SECRETKEYBYTES, MLDSA44_PUBLICKEYBYTES, MLDSA44_BYTES
+from .ml_dsa_native import MLD_ERR_OK, bytes_to_hex_str
 
-# Update Package Version
-comptime VERSION = "1.0.1"
+comptime VERSION = "1.0.2"
 comptime AUTHOR = "Libalpm64, Lostlab Technologies"

@@ -21,7 +21,7 @@
 # SOFTWARE.
 
 """
-SHA-3 (Keccak) Implementation in Mojo
+SHA-3 (Keccak) + shake128/shake256 Implementation in Mojo
 FIPS 202
 By Libalpm64, Attribute not required.
 """
@@ -420,3 +420,57 @@ fn sha3_512_hash_string(s: String) -> String:
     var data = string_to_bytes(s)
     var hash = sha3_512(Span[UInt8](data))
     return bytes_to_hex(hash)
+
+
+fn shake128(data: Span[UInt8], output_len_bytes: Int) -> List[UInt8]:
+    """SHAKE128 XOF (capacity=256 bits, rate=1344 bits)."""
+    var ctx = SHA3Context(1344)
+    sha3_update(ctx, data)
+    ctx.buffer[ctx.buffer_len] = 0x1F
+    ctx.buffer_len += 1
+    while ctx.buffer_len < ctx.rate_bytes:
+        ctx.buffer[ctx.buffer_len] = 0
+        ctx.buffer_len += 1
+    ctx.buffer[ctx.rate_bytes - 1] |= 0x80
+    sha3_absorb_block(ctx.state, ctx.buffer, ctx.rate_bytes)
+    
+    var output = List[UInt8](capacity=output_len_bytes)
+    var offset = 0
+    while offset < output_len_bytes:
+        var limit = ctx.rate_bytes
+        if output_len_bytes - offset < limit:
+            limit = output_len_bytes - offset
+        var state_bytes = ctx.state.bitcast[UInt8]()
+        for i in range(limit):
+            output.append(state_bytes[i])
+        offset += limit
+        if offset < output_len_bytes:
+            keccak_f1600(ctx.state)
+    return output^
+
+
+fn shake256(data: Span[UInt8], output_len_bytes: Int) -> List[UInt8]:
+    """SHAKE256 XOF (capacity=512 bits, rate=1088 bits)."""
+    var ctx = SHA3Context(1088)
+    sha3_update(ctx, data)
+    ctx.buffer[ctx.buffer_len] = 0x1F
+    ctx.buffer_len += 1
+    while ctx.buffer_len < ctx.rate_bytes:
+        ctx.buffer[ctx.buffer_len] = 0
+        ctx.buffer_len += 1
+    ctx.buffer[ctx.rate_bytes - 1] |= 0x80
+    sha3_absorb_block(ctx.state, ctx.buffer, ctx.rate_bytes)
+    
+    var output = List[UInt8](capacity=output_len_bytes)
+    var offset = 0
+    while offset < output_len_bytes:
+        var limit = ctx.rate_bytes
+        if output_len_bytes - offset < limit:
+            limit = output_len_bytes - offset
+        var state_bytes = ctx.state.bitcast[UInt8]()
+        for i in range(limit):
+            output.append(state_bytes[i])
+        offset += limit
+        if offset < output_len_bytes:
+            keccak_f1600(ctx.state)
+    return output^

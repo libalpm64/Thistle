@@ -1,0 +1,12 @@
+std_read_only/
+mojo_docs.jsonl
+libs/src/mldsa-native/
+libs/src/mlkem-native/
+libs/*.so
+libs/*.a
+libs/*.dylib
+*.so
+*.a
+*.dylib
+build/
+.pixi/

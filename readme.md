@@ -20,11 +20,25 @@ Thistle was written to avoid the **150x performance drops** when Mojo has to cal
 * **SHA3** (Parity/Close)
 * **ChaCha20** (Parity)
 * **KCipher-2** (Faster than Native C)
+* ML-KEM / ML-DSA (FFI Linked Post-Quantum Crypto)
+
+---
+
+### Build:
+
+ML-KEM/ML-DSA/Random require native libraries built from source:
+
+```bash
+pixi install
+pixi run build-pq
+```
+
+Platforms: Linux, macOS
+
 ---
 
 ### Current Roadmap:
 
-* **Post Quantum Crypto** (ML-KEM / ML-DSA)
 * **ECDSA / ECDH** (NIST P-256, P-384)
 * **RSA** (PSS only)
 
