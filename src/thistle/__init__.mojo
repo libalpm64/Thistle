@@ -11,6 +11,7 @@ from .camellia import CamelliaCipher
 from .pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
 from .sha2 import sha256_hash, sha512_hash
 from .sha3 import sha3_256, sha3_512
+from .kcipher2 import KCipher2
 
 # Package Metadata
 comptime VERSION = "0.1.0"

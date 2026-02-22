@@ -3,23 +3,24 @@ name: CI
 on:
   push:
     branches: [ main ]
-  pull_request: 
+  pull_request:
     branches: [ main ]
 
 jobs:
-  run-tests:
+  test:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Pixi
-        uses: prefix-dev/setup-pixi@v0.9.4
+      - uses: prefix-dev/setup-pixi@v0.9.4
         with:
           cache: false
           locked: false
           activate-environment: true
 
-      - name: Run All Tests and Benchmarks
-        run: pixi run test-all
+      - name: Run tests
+        run: pixi run test
+
+      - name: Run benchmarks
+        run: pixi run bench

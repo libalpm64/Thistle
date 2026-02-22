@@ -19,12 +19,11 @@ Thistle was written to avoid the **150x performance drops** when Mojo has to cal
 * **SHA2** (Much slower ~5x slower lacks NI)
 * **SHA3** (Parity/Close)
 * **ChaCha20** (Parity)
-
+* **KCipher-2** (Faster than Native C)
 ---
 
 ### Current Roadmap:
 
-* **KCipher-2** (rfc7008)
 * **Post Quantum Crypto** (ML-KEM / ML-DSA)
 * **ECDSA / ECDH** (NIST P-256, P-384)
 * **RSA** (PSS only)
