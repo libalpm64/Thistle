@@ -21,7 +21,11 @@ echo "Building for platform: $OSTYPE (shared lib: .$SHARED_EXT)"
 echo "Compiler: $CC"
 
 echo "Building randombytes..."
-$CC -shared -fPIC -O2 -o "$SCRIPT_DIR/randombytes.$SHARED_EXT" "$PROJECT_ROOT/src/native/randombytes.c"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	$CC -shared -fPIC -O2 -arch arm64 -o "$SCRIPT_DIR/randombytes.$SHARED_EXT" "$PROJECT_ROOT/src/native/randombytes.c"
+else
+	$CC -shared -fPIC -O2 -o "$SCRIPT_DIR/randombytes.$SHARED_EXT" "$PROJECT_ROOT/src/native/randombytes.c"
+fi
 
 echo "Building ML-DSA..."
 if [ ! -d "$SCRIPT_DIR/src/mldsa-native" ]; then
@@ -29,7 +33,11 @@ if [ ! -d "$SCRIPT_DIR/src/mldsa-native" ]; then
 fi
 cd "$SCRIPT_DIR/src/mldsa-native"
 make clean 2>/dev/null || true
-make EXTRA_CFLAGS="-fPIC -O2" build
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	make EXTRA_CFLAGS="-fPIC -O2 -arch arm64" EXTRA_ASMFLAGS="-arch arm64" build
+else
+	make EXTRA_CFLAGS="-fPIC -O2" build
+fi
 
 echo "Creating ML-DSA shared libraries..."
 for variant in 44 65 87; do
@@ -49,7 +57,11 @@ if [ ! -d "$SCRIPT_DIR/src/mlkem-native" ]; then
 fi
 cd "$SCRIPT_DIR/src/mlkem-native"
 make clean 2>/dev/null || true
-make EXTRA_CFLAGS="-fPIC -O2" build
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	make EXTRA_CFLAGS="-fPIC -O2 -arch arm64" EXTRA_ASMFLAGS="-arch arm64" build
+else
+	make EXTRA_CFLAGS="-fPIC -O2" build
+fi
 
 echo "Creating ML-KEM shared libraries..."
 for variant in 512 768 1024; do
