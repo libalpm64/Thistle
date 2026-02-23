@@ -9,16 +9,20 @@ cd "$SCRIPT_DIR"
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
 	SHARED_EXT="dll"
 	CC="${CC:-gcc}"
+	NATIVE_ARCH="x86_64"
 elif [[ "$OSTYPE" == "darwin"* ]]; then
 	SHARED_EXT="dylib"
 	CC="${CC:-clang}"
+	NATIVE_ARCH="aarch64"
 else
 	SHARED_EXT="so"
 	CC="${CC:-gcc}"
+	NATIVE_ARCH="x86_64"
 fi
 
 echo "Building for platform: $OSTYPE (shared lib: .$SHARED_EXT)"
 echo "Compiler: $CC"
+echo "Target architecture: $NATIVE_ARCH"
 
 echo "Building randombytes..."
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -41,13 +45,19 @@ fi
 
 echo "Creating ML-DSA shared libraries..."
 for variant in 44 65 87; do
-	ar -x test/build/libmldsa${variant}.a
+	mkdir -p "$SCRIPT_DIR/tmp_mldsa${variant}"
+	cd "$SCRIPT_DIR/tmp_mldsa${variant}"
+	cp "$SCRIPT_DIR/src/mldsa-native/test/build/mldsa${variant}/mldsa/src"/*.o .
+	cp "$SCRIPT_DIR/src/mldsa-native/test/build/mldsa${variant}/mldsa/src/native/${NATIVE_ARCH}/src"/*.o .
+	cp "$SCRIPT_DIR/src/mldsa-native/test/build/mldsa${variant}/mldsa/src/fips202"/*.o .
+	cp "$SCRIPT_DIR/src/mldsa-native/test/build/mldsa${variant}/mldsa/src/fips202/native/${NATIVE_ARCH}/src"/*.o .
 	if [[ "$SHARED_EXT" == "dylib" ]]; then
-		$CC -dynamiclib -o "$SCRIPT_DIR/libmldsa${variant}.$SHARED_EXT" *.o
+		$CC -dynamiclib -o "$SCRIPT_DIR/libmldsa${variant}.$SHARED_EXT" *.o "$SCRIPT_DIR/randombytes.$SHARED_EXT"
 	else
-		$CC -shared -z noexecstack -o "$SCRIPT_DIR/libmldsa${variant}.$SHARED_EXT" *.o
+		$CC -shared -z noexecstack -o "$SCRIPT_DIR/libmldsa${variant}.$SHARED_EXT" *.o "$SCRIPT_DIR/randombytes.$SHARED_EXT"
 	fi
-	rm -f *.o
+	cd "$SCRIPT_DIR"
+	rm -rf "$SCRIPT_DIR/tmp_mldsa${variant}"
 done
 
 echo "Building ML-KEM..."
@@ -65,13 +75,19 @@ fi
 
 echo "Creating ML-KEM shared libraries..."
 for variant in 512 768 1024; do
-	ar -x test/build/libmlkem${variant}.a
+	mkdir -p "$SCRIPT_DIR/tmp_mlkem${variant}"
+	cd "$SCRIPT_DIR/tmp_mlkem${variant}"
+	cp "$SCRIPT_DIR/src/mlkem-native/test/build/mlkem${variant}/mlkem/src"/*.o .
+	cp "$SCRIPT_DIR/src/mlkem-native/test/build/mlkem${variant}/mlkem/src/native/${NATIVE_ARCH}/src"/*.o .
+	cp "$SCRIPT_DIR/src/mlkem-native/test/build/mlkem${variant}/mlkem/src/fips202"/*.o .
+	cp "$SCRIPT_DIR/src/mlkem-native/test/build/mlkem${variant}/mlkem/src/fips202/native/${NATIVE_ARCH}/src"/*.o .
 	if [[ "$SHARED_EXT" == "dylib" ]]; then
-		$CC -dynamiclib -o "$SCRIPT_DIR/libmlkem${variant}.$SHARED_EXT" *.o
+		$CC -dynamiclib -o "$SCRIPT_DIR/libmlkem${variant}.$SHARED_EXT" *.o "$SCRIPT_DIR/randombytes.$SHARED_EXT"
 	else
-		$CC -shared -z noexecstack -o "$SCRIPT_DIR/libmlkem${variant}.$SHARED_EXT" *.o
+		$CC -shared -z noexecstack -o "$SCRIPT_DIR/libmlkem${variant}.$SHARED_EXT" *.o "$SCRIPT_DIR/randombytes.$SHARED_EXT"
 	fi
-	rm -f *.o
+	cd "$SCRIPT_DIR"
+	rm -rf "$SCRIPT_DIR/tmp_mlkem${variant}"
 done
 
 echo ""
