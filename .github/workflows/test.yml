@@ -35,5 +35,8 @@ jobs:
       - name: Build PQ libraries
         run: pixi run build-pq
 
+      - name: Clear Mojo cache
+        run: rm -rf ~/.mojo
+
       - name: Run PQ tests
         run: pixi run test-pq
