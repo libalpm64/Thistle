@@ -270,14 +270,14 @@ def main():
     var data = generate_data(100 * _MiB)
     var duration = 5.0
 
-    # print(benchmark_sha256(data, duration))
-    # print(benchmark_sha512(data, duration))
-    # print(benchmark_sha3_256(data, duration))
-    # print(benchmark_blake2b(data, duration))
+    print(benchmark_sha256(data, duration))
+    print(benchmark_sha512(data, duration))
+    print(benchmark_sha3_256(data, duration))
+    print(benchmark_blake2b(data, duration))
     print(benchmark_blake3(data, duration))
-    # print(benchmark_camellia(_MiB, duration))
-    # print(benchmark_chacha20(_MiB, duration))
-    # print(benchmark_kcipher2(_MiB, duration))
-    # print(benchmark_argon2(duration))
+    print(benchmark_camellia(_MiB, duration))
+    print(benchmark_chacha20(_MiB, duration))
+    print(benchmark_kcipher2(_MiB, duration))
+    print(benchmark_argon2(duration))
 
     print("\nAll benchmarks completed")
