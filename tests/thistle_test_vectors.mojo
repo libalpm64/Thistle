@@ -183,7 +183,7 @@ fn test_blake3(json_data: PythonObject, py: PythonObject) raises -> TestResult:
             passed += 1
         else:
             failed += 1
-            failures.append("BLAKE3 " + String(input_len) + " bytes: expected " + expected + ", got " + got)
+            failures.append(String("BLAKE3 ", input_len, " bytes: expected ", expected, ", got ", got))
     
     return TestResult(passed, failed, failures^)
 
