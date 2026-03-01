@@ -2,6 +2,8 @@ from time import perf_counter, perf_counter_ns
 from collections import List
 from algorithm import parallelize
 from random import random_ui64, seed
+from math import ceildiv
+
 from thistle.argon2 import Argon2id
 from thistle.blake2b import Blake2b
 from thistle.blake3 import blake3_parallel_hash
@@ -10,7 +12,21 @@ from thistle.chacha20 import ChaCha20
 from thistle.kcipher2 import KCipher2
 from thistle.sha2 import sha256_hash, sha512_hash
 from thistle.sha3 import sha3_256
+from thistle.aes import AESKey, SBOX, cpu_aes_encrypt, ROUNDS_128, gf_mul2, gf_mul3
+from thistle.aes_gpu import aes_kernel
+from gpu.host import DeviceContext
+from memory import alloc
+from utils import StaticTuple
 
+comptime TEST_KEY: StaticTuple[UInt8, 16] = StaticTuple[UInt8, 16](
+    0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c
+)
+comptime TEST_PT: StaticTuple[UInt8, 16] = StaticTuple[UInt8, 16](
+    0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a
+)
+comptime TEST_CT: StaticTuple[UInt8, 16] = StaticTuple[UInt8, 16](
+    0x3a, 0xd7, 0x7b, 0xb4, 0x0d, 0x7a, 0x36, 0x60, 0xa8, 0x9e, 0xca, 0xf3, 0x24, 0x66, 0xef, 0x97
+)
 
 fn generate_data(length: Int) -> List[UInt8]:
     var data = List[UInt8](capacity=length)
@@ -189,6 +205,117 @@ fn benchmark_argon2(duration_secs: Float64) -> String:
     return "argon2id | throughput: " + String(hps)[:6] + " h/s, hashes: " + String(count) + ", time: " + String(duration)[:4] + "s"
 
 
+fn benchmark_aes_cpu(duration_secs: Float64) raises -> String:
+    var key = AESKey(TEST_KEY)
+    var round_keys = key.round_keys()
+    var pt_bytes = alloc[UInt8](16)
+
+    # Warmup
+    for _ in range(100):
+        for i in range(16):
+            pt_bytes.store(i, TEST_PT[i])
+        cpu_aes_encrypt(pt_bytes, round_keys)
+
+    var count = 0
+    var start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        for i in range(16):
+            pt_bytes.store(i, TEST_PT[i])
+        cpu_aes_encrypt(pt_bytes, round_keys)
+        count += 1
+    var end = perf_counter()
+    var duration = end - start
+    
+    pt_bytes.free()
+    
+    var mbps = Float64(count * 16) / (1024 * 1024) / duration
+    return "aes-128-cpu | throughput: " + String(mbps)[:6] + " mb/s, blocks: " + String(count) + ", time: " + String(duration)[:4] + "s"
+
+
+fn benchmark_aes_gpu() raises -> String:
+    var has_gpu = False
+    try:
+        with DeviceContext() as ctx:
+            _ = ctx
+            has_gpu = True
+    except:
+        pass
+    
+    if not has_gpu:
+        return "aes-128-gpu | (GPU not available)"
+    
+    print("Running GPU benchmark (this may take a while)...")
+    
+    var key = AESKey(TEST_KEY)
+    var round_keys = key.round_keys()
+
+    var num_blocks = 131072
+    var total_bytes = num_blocks * 16
+
+    var input_host = alloc[Scalar[DType.uint8]](total_bytes)
+    var output_host = alloc[Scalar[DType.uint8]](total_bytes)
+
+    for i in range(total_bytes):
+        input_host[i] = TEST_PT[i % 16]
+
+    with DeviceContext() as ctx:
+        var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
+        var output_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
+        var round_keys_buffer = ctx.enqueue_create_buffer[DType.uint32](44)
+        
+        var sbox_host = alloc[Scalar[DType.uint8]](256)
+        for i in range(256):
+            sbox_host[i] = SBOX[i]
+        var sbox_buffer = ctx.enqueue_create_buffer[DType.uint8](256)
+
+        ctx.enqueue_copy(input_buffer, input_host)
+        ctx.enqueue_copy(round_keys_buffer, round_keys)
+        ctx.enqueue_copy(sbox_buffer, sbox_host)
+        ctx.synchronize()
+
+        var block_dim = 256
+        var grid_dim = ceildiv(num_blocks, block_dim)
+        
+        # Warmup
+        ctx.enqueue_function[aes_kernel, aes_kernel](
+            input_buffer.unsafe_ptr(),
+            output_buffer.unsafe_ptr(),
+            round_keys_buffer.unsafe_ptr(),
+            sbox_buffer.unsafe_ptr(),
+            ROUNDS_128,
+            num_blocks,
+            grid_dim=grid_dim,
+            block_dim=block_dim,
+        )
+        ctx.synchronize()
+
+        var iterations = 50
+        var start = perf_counter()
+        for _ in range(iterations):
+            ctx.enqueue_function[aes_kernel, aes_kernel](
+                input_buffer.unsafe_ptr(),
+                output_buffer.unsafe_ptr(),
+                round_keys_buffer.unsafe_ptr(),
+                sbox_buffer.unsafe_ptr(),
+                ROUNDS_128,
+                num_blocks,
+                grid_dim=grid_dim,
+                block_dim=block_dim,
+            )
+            ctx.synchronize()
+        var end = perf_counter()
+        var duration = end - start
+
+        var total_gb = Float64(iterations * total_bytes) / 1024.0 / 1024.0 / 1024.0
+        var gbps = total_gb / duration
+        
+        input_host.free()
+        output_host.free()
+        sbox_host.free()
+        
+        return "aes-128-gpu | throughput: " + String(gbps)[:6] + " gb/s, iterations: " + String(iterations)
+
+
 def main():
     print("Thistle benchmark:")
     print()
@@ -196,7 +323,7 @@ def main():
     print()
     
     var data = generate_data(100 * 1024 * 1024)
-    var duration = 5.0
+    var duration = 2.0
     
     print(benchmark_sha256(data, duration))
     print(benchmark_sha512(data, duration))
@@ -206,6 +333,8 @@ def main():
     print(benchmark_camellia(1024 * 1024, duration))
     print(benchmark_chacha20(1024 * 1024, duration))
     print(benchmark_kcipher2(1024 * 1024, duration))
+    print(benchmark_aes_cpu(duration))
+    print(benchmark_aes_gpu())
     print(benchmark_argon2(duration))
     
     print()

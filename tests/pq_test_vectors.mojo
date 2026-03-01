@@ -30,7 +30,6 @@ from thistle.sha2 import sha224_hash, sha256_hash, sha384_hash, sha512_hash
 from thistle.sha3 import sha3_224, sha3_256, sha3_384, sha3_512, shake128, shake256
 from memory import UnsafePointer, alloc
 
-
 fn hex_char_to_val(c: Int) -> UInt8:
     if c >= 48 and c <= 57:
         return UInt8(c - 48)

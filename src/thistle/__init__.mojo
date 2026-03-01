@@ -4,6 +4,10 @@
 # ===----------------------------------------------------------------------=== #
 
 from . import fips
+from .aes import AESKey, expand_key_128, SBOX, ROUNDS_128
+from .aes import gf_mul2, gf_mul3, sbox_lookup, sub_word
+from .aes import ttable0, ttable1, ttable2, ttable3
+from .aes_gpu import aes_kernel
 from .blake2b import blake2b_hash, Blake2b
 from .blake3 import blake3_hash, blake3_parallel_hash, Hasher
 from .argon2 import Argon2id, argon2id_hash_string
@@ -17,5 +21,5 @@ from .ml_dsa_native import mldsa44_keypair_internal, mldsa44_signature, mldsa44_
 from .ml_dsa_native import MLDSA44_SECRETKEYBYTES, MLDSA44_PUBLICKEYBYTES, MLDSA44_BYTES
 from .ml_dsa_native import MLD_ERR_OK, bytes_to_hex_str
 
-comptime VERSION = "1.0.2"
+comptime VERSION = "1.0.3"
 comptime AUTHOR = "Libalpm64, Lostlab Technologies"

@@ -52,7 +52,7 @@ Platforms supported: Linux, macOS
 
 ### Detailed:
 
-Currently AES-NI/RSA PSS (The one that is immune to sidechannels)/Camellia (Using the Linux Kernels AES-NI optimizations) are extremely difficult to implement in Mojo currently due to inlined assembly lacking opcode format recognization and only executing 1 instruction.
+Currently AES-NI/RSA PSS (The one that is immune to sidechannels)/Camellia (Using the Linux Kernels AES-NI optimizations) are difficult to implement in Mojo.
 
 ---
 
