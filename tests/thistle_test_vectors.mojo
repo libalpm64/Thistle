@@ -1,6 +1,7 @@
 from python import Python
 from python import PythonObject
 from collections import List
+from sys import has_accelerator
 from thistle.sha2 import bytes_to_hex
 from thistle.argon2 import Argon2id
 from thistle.blake2b import Blake2b
@@ -510,16 +511,16 @@ fn test_aes_gpu(json_data: PythonObject, py: PythonObject) raises -> TestResult:
     var passed = 0
     var failed = 0
     var failures = List[String]()
-    
-    var has_gpu = False
+
+    @parameter
+    if not has_accelerator():
+        print("  (GPU not available, skipping)")
+        return TestResult(0, 0, failures^)
+
     try:
         with DeviceContext() as ctx:
             _ = ctx
-            has_gpu = True
     except:
-        pass
-    
-    if not has_gpu:
         print("  (GPU not available, skipping)")
         return TestResult(0, 0, failures^)
     

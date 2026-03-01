@@ -3,6 +3,7 @@ from collections import List
 from algorithm import parallelize
 from random import random_ui64, seed
 from math import ceildiv
+from sys import has_accelerator
 
 from thistle.argon2 import Argon2id
 from thistle.blake2b import Blake2b
@@ -13,8 +14,6 @@ from thistle.kcipher2 import KCipher2
 from thistle.sha2 import sha256_hash, sha512_hash
 from thistle.sha3 import sha3_256
 from thistle.aes import AESKey, SBOX, cpu_aes_encrypt, ROUNDS_128, gf_mul2, gf_mul3
-from thistle.aes_gpu import aes_kernel
-from gpu.host import DeviceContext
 from memory import alloc
 from utils import StaticTuple
 
@@ -233,18 +232,12 @@ fn benchmark_aes_cpu(duration_secs: Float64) raises -> String:
 
 
 fn benchmark_aes_gpu() raises -> String:
-    var has_gpu = False
-    try:
-        with DeviceContext() as ctx:
-            _ = ctx
-            has_gpu = True
-    except:
-        pass
-    
-    if not has_gpu:
+    @parameter
+    if not has_accelerator():
         return "aes-128-gpu | (GPU not available)"
     
-    print("Running GPU benchmark (this may take a while)...")
+    from gpu.host import DeviceContext
+    from thistle.aes_gpu import aes_kernel
     
     var key = AESKey(TEST_KEY)
     var round_keys = key.round_keys()
