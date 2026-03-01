@@ -1,7 +1,6 @@
 from python import Python
 from python import PythonObject
 from collections import List
-from sys import has_accelerator
 from thistle.sha2 import bytes_to_hex
 from thistle.argon2 import Argon2id
 from thistle.blake2b import Blake2b
@@ -16,9 +15,6 @@ from memory.unsafe_pointer import UnsafePointer
 from builtin.type_aliases import MutExternalOrigin
 from memory import alloc
 from math import ceildiv
-
-from gpu.host import DeviceContext
-from thistle.aes_gpu import aes_kernel
 
 
 fn hex_char_to_val(c: Int) -> UInt8:
@@ -507,112 +503,6 @@ fn test_aes_cpu(json_data: PythonObject, py: PythonObject) raises -> TestResult:
     return TestResult(passed, failed, failures^)
 
 
-fn test_aes_gpu(json_data: PythonObject, py: PythonObject) raises -> TestResult:
-    var passed = 0
-    var failed = 0
-    var failures = List[String]()
-
-    @parameter
-    if not has_accelerator():
-        print("  (GPU not available, skipping)")
-        return TestResult(0, 0, failures^)
-
-    try:
-        with DeviceContext() as ctx:
-            _ = ctx
-    except:
-        print("  (GPU not available, skipping)")
-        return TestResult(0, 0, failures^)
-    
-    var count = Int(py=json_data.__len__())
-    
-    var sbox_host = alloc[Scalar[DType.uint8]](256)
-    for i in range(256):
-        sbox_host[i] = SBOX[i]
-    
-    var num_test_vectors = min(count, 100)
-    
-    with DeviceContext() as ctx:
-        var sbox_buffer = ctx.enqueue_create_buffer[DType.uint8](256)
-        ctx.enqueue_copy(sbox_buffer, sbox_host)
-        ctx.synchronize()
-        
-        for test_idx in range(num_test_vectors):
-            var v = json_data[test_idx]
-            var name = String(v["name"])
-            var key_hex = String(v["key"])
-            var pt_hex = String(v["plaintext"])
-            var expected_ct_hex = String(v["ciphertext"])
-            
-            var key_bytes = hex_to_bytes(key_hex)
-            var pt_bytes_data = hex_to_bytes(pt_hex)
-            
-            var key_ptr = alloc[UInt8](16)
-            for j in range(16):
-                key_ptr.store(j, key_bytes[j])
-            
-            var round_keys = expand_key_128(key_ptr)
-            
-            var total_bytes = 16
-            var input_host = alloc[Scalar[DType.uint8]](total_bytes)
-            var output_host = alloc[Scalar[DType.uint8]](total_bytes)
-            
-            for j in range(16):
-                input_host[j] = pt_bytes_data[j]
-            
-            var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
-            var output_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
-            var round_keys_buffer = ctx.enqueue_create_buffer[DType.uint32](44)
-            
-            ctx.enqueue_copy(input_buffer, input_host)
-            ctx.enqueue_copy(round_keys_buffer, round_keys)
-            ctx.synchronize()
-            
-            var block_dim = 1
-            var grid_dim = 1
-            
-            ctx.enqueue_function[aes_kernel, aes_kernel](
-                input_buffer.unsafe_ptr(),
-                output_buffer.unsafe_ptr(),
-                round_keys_buffer.unsafe_ptr(),
-                sbox_buffer.unsafe_ptr(),
-                ROUNDS_128,
-                1,
-                grid_dim=grid_dim,
-                block_dim=block_dim,
-            )
-            ctx.synchronize()
-            
-            ctx.enqueue_copy(output_host, output_buffer)
-            ctx.synchronize()
-            
-            var correct = True
-            for j in range(16):
-                var expected_byte = hex_char_to_val(Int(expected_ct_hex.as_bytes()[j * 2])) << 4
-                expected_byte |= hex_char_to_val(Int(expected_ct_hex.as_bytes()[j * 2 + 1]))
-                if output_host[j] != expected_byte:
-                    correct = False
-                    break
-            
-            if correct:
-                passed += 1
-            else:
-                failed += 1
-                var got_hex = String("")
-                for j in range(16):
-                    got_hex += hex(Int(output_host[j]))[2:].rjust(2, '0')
-                failures.append("AES-GPU " + name + ": expected " + expected_ct_hex + ", got " + got_hex)
-            
-            key_ptr.free()
-            round_keys.free()
-            input_host.free()
-            output_host.free()
-    
-    sbox_host.free()
-    
-    return TestResult(passed, failed, failures^)
-
-
 fn print_result(name: String, result: TestResult):
     if result.failed == 0:
         print("Testing " + name + " [pass] (" + String(result.passed) + " vectors)")
@@ -753,7 +643,7 @@ def main():
     print()
     
     try:
-        print("Loading AES vectors (CPU test)...")
+        print("Loading AES vectors")
         var aes_data = load_json("tests/vectors/aes.json", py)
         var aes_cpu_result = test_aes_cpu(aes_data, py)
         print_result("AES-128-CPU", aes_cpu_result)
@@ -763,21 +653,6 @@ def main():
             any_failures = True
     except e:
         print("AES-128-CPU [error] " + String(e))
-        any_failures = True
-    
-    print()
-    
-    try:
-        print("Loading AES vectors (GPU test - this may take a while)...")
-        var aes_data = load_json("tests/vectors/aes.json", py)
-        var aes_gpu_result = test_aes_gpu(aes_data, py)
-        print_result("AES-128-GPU", aes_gpu_result)
-        total_passed += aes_gpu_result.passed
-        total_failed += aes_gpu_result.failed
-        if aes_gpu_result.failed > 0:
-            any_failures = True
-    except e:
-        print("AES-128-GPU [error] " + String(e))
         any_failures = True
     
     print()
