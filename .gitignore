@@ -10,3 +10,4 @@ libs/*.dylib
 *.dylib
 build/
 .pixi/
+kgen.trace.*
