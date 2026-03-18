@@ -21,7 +21,7 @@ Thistle was written to avoid the **150x performance drops** when Mojo has to cal
 * **ChaCha20** (Parity)
 * **KCipher-2** (Faster than Native C)
 * **ML-KEM / ML-DSA** (FFI Linked Post-Quantum Crypto)
-* **AES-XTX-GPU**
+* **AES-GPU** (XTS/CBC/ECB/CTR/GCM/ECB/CTR)
 ---
 
 ### Build:
