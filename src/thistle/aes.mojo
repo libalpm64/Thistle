@@ -22,9 +22,9 @@
 
 
 """
-AES-128-CPU implementation
+AES CPU implementation
 By Libalpm64 no attribution required.
-Experimental - NOT meant for production.
+Experimental (Do not use in Prod).
 """
 
 from memory import alloc, memset
@@ -47,8 +47,6 @@ struct AESConfig:
 
 comptime ROUNDS_128: Int = 10
 comptime BLOCK_SIZE: Int = 16
-
-
 
 @always_inline
 fn gf_mul2(a: UInt8) -> UInt8:
@@ -352,6 +350,44 @@ fn expand_key_128(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> Unsaf
             temp = sub_word(rotated)
             temp ^= UInt32(RCON[i // 4 - 1]) << 24
         w.store(i, w.load(i - 4) ^ temp)
+    return w
+
+
+fn expand_key_192(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
+    var w = alloc[UInt32](52)
+    
+    for i in range(6):
+        var key_val: UInt32 = 0
+        for j in range(4):
+            key_val |= UInt32(key_bytes.load(i * 4 + j)) << ((3 - j) * 8)
+        w.store(i, key_val)
+    for i in range(6, 52):
+        var temp = w.load(i - 1)
+        if i % 6 == 0:
+            var rotated = (temp >> 24) | ((temp << 8) & 0xffffffff)
+            temp = sub_word(rotated)
+            temp ^= UInt32(RCON[i // 6 - 1]) << 24
+        w.store(i, w.load(i - 6) ^ temp)
+    return w
+
+
+fn expand_key_256(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
+    var w = alloc[UInt32](60)
+    
+    for i in range(8):
+        var key_val: UInt32 = 0
+        for j in range(4):
+            key_val |= UInt32(key_bytes.load(i * 4 + j)) << ((3 - j) * 8)
+        w.store(i, key_val)
+    for i in range(8, 60):
+        var temp = w.load(i - 1)
+        if i % 8 == 0:
+            var rotated = (temp >> 24) | ((temp << 8) & 0xffffffff)
+            temp = sub_word(rotated)
+            temp ^= UInt32(RCON[i // 8 - 1]) << 24
+        elif i % 8 == 4:
+            temp = sub_word(temp)
+        w.store(i, w.load(i - 8) ^ temp)
     return w
 
 

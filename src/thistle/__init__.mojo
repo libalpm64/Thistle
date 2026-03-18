@@ -4,7 +4,7 @@
 # ===----------------------------------------------------------------------=== #
 
 from . import fips
-from .aes import AESKey, expand_key_128, SBOX, ROUNDS_128
+from .aes import AESKey, expand_key_128, expand_key_192, expand_key_256, SBOX, ROUNDS_128
 from .aes import gf_mul2, gf_mul3, sbox_lookup, sub_word
 from .aes import ttable0, ttable1, ttable2, ttable3
 from .aes_gpu import aes_kernel
