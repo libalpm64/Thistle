@@ -1,27 +1,9 @@
 # SPDX-License-Identifier: MIT
-#
 # Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
 
 """
 Camellia block cipher implementation per RFC 3713
+By Libalpm no attribution required
 """
 
 from memory import bitcast
@@ -138,7 +120,7 @@ struct CamelliaCipher:
     var ke: SIMD[DType.uint64, 6]
     var is_128: Bool
     
-    fn __init__(out self, key: Span[UInt8]):
+    fn __init__(out self, key: Span[UInt8, ...]):
         self.kw = SIMD[DType.uint64, 4](0)
         self.k = SIMD[DType.uint64, 24](0)
         self.ke = SIMD[DType.uint64, 6](0)
@@ -152,10 +134,10 @@ struct CamelliaCipher:
             print("Error: Invalid key length. Must be 16, 24, or 32 bytes.")
 
     @always_inline
-    fn _bytes_to_u64_be(ref self, b: Span[UInt8]) -> UInt64:
+    fn _bytes_to_u64_be(ref self, b: Span[UInt8, ...]) -> UInt64:
         return byte_swap(bitcast[DType.uint64, 1](b.unsafe_ptr().load[width=8](0))[0])
 
-    fn _key_schedule_128(mut self, key: Span[UInt8]):
+    fn _key_schedule_128(mut self, key: Span[UInt8, ...]):
         var kl_h = self._bytes_to_u64_be(key[0:8])
         var kl_l = self._bytes_to_u64_be(key[8:16])
         var kr_h: UInt64 = 0
@@ -221,7 +203,7 @@ struct CamelliaCipher:
         self.kw[2] = rot[0]
         self.kw[3] = rot[1]
 
-    fn _key_schedule_192_256(mut self, key: Span[UInt8]):
+    fn _key_schedule_192_256(mut self, key: Span[UInt8, ...]):
         var kl_h = self._bytes_to_u64_be(key[0:8])
         var kl_l = self._bytes_to_u64_be(key[8:16])
         var kr_h: UInt64
@@ -413,8 +395,8 @@ struct CamelliaCipher:
         
         return bitcast[DType.uint8, 16](SIMD[DType.uint64, 2](byte_swap(d1), byte_swap(d2)))
 
-    fn encrypt(self, block: Span[UInt8]) -> SIMD[DType.uint8, 16]:
+    fn encrypt(self, block: Span[UInt8, ...]) -> SIMD[DType.uint8, 16]:
         return self.encrypt(block.unsafe_ptr().load[width=16](0))
 
-    fn decrypt(self, block: Span[UInt8]) -> SIMD[DType.uint8, 16]:
+    fn decrypt(self, block: Span[UInt8, ...]) -> SIMD[DType.uint8, 16]:
         return self.decrypt(block.unsafe_ptr().load[width=16](0))

@@ -1,24 +1,5 @@
 # SPDX-License-Identifier: MIT
-#
 # Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
 
 """
 Argon2id/Argon2d Implementation in Mojo
@@ -213,22 +194,22 @@ fn store_le64(ptr: UnsafePointer[UInt8, MutAnyOrigin], offset: Int, val: Int):
     ptr[offset + 7] = UInt8((val >> 56) & 0xFF)
 
 
-fn blake2b_with_le32_prefix(digest_size: Int, prefix_val: Int, input: Span[UInt8]) -> List[UInt8]:
+fn blake2b_with_le32_prefix(digest_size: Int, prefix_val: Int, input: Span[UInt8, ...]) -> List[UInt8]:
     var ctx = Blake2b(digest_size)
     var le_buf = alloc[UInt8](4)
     store_le32(le_buf, 0, prefix_val)
-    ctx.update(Span[UInt8](ptr=le_buf, length=4))
+    ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
     ctx.update(input)
     le_buf.free()
     return ctx.finalize()
 
 
-fn variable_length_hash_to_ptr(t_len: Int, input: Span[UInt8], out_ptr: UnsafePointer[UInt8, MutAnyOrigin]):
+fn variable_length_hash_to_ptr(t_len: Int, input: Span[UInt8, ...], out_ptr: UnsafePointer[UInt8, MutAnyOrigin]):
     if t_len <= 64:
         var ctx = Blake2b(t_len)
         var le_buf = alloc[UInt8](4)
         store_le32(le_buf, 0, t_len)
-        ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
         ctx.update(input)
         le_buf.free()
         var result = ctx.finalize()
@@ -242,7 +223,7 @@ fn variable_length_hash_to_ptr(t_len: Int, input: Span[UInt8], out_ptr: UnsafePo
     var ctx1 = Blake2b(64)
     var le_buf = alloc[UInt8](4)
     store_le32(le_buf, 0, t_len)
-    ctx1.update(Span[UInt8](ptr=le_buf, length=4))
+    ctx1.update(Span[UInt8, ...](ptr=le_buf, length=4))
     ctx1.update(input)
     le_buf.free()
     var v = ctx1.finalize()
@@ -256,7 +237,7 @@ fn variable_length_hash_to_ptr(t_len: Int, input: Span[UInt8], out_ptr: UnsafePo
         out_offset += 32
         
         var ctx = Blake2b(64)
-        ctx.update(Span[UInt8](ptr=v_buf, length=64))
+        ctx.update(Span[UInt8, ...](ptr=v_buf, length=64))
         v = ctx.finalize()
         for k in range(64):
             v_buf[k] = v[k]
@@ -267,7 +248,7 @@ fn variable_length_hash_to_ptr(t_len: Int, input: Span[UInt8], out_ptr: UnsafePo
 
     var last_len = t_len - 32 * r
     var ctx_last = Blake2b(last_len)
-    ctx_last.update(Span[UInt8](ptr=v_buf, length=64))
+    ctx_last.update(Span[UInt8, ...](ptr=v_buf, length=64))
     var v_last = ctx_last.finalize()
     for k in range(len(v_last)):
         out_ptr[out_offset + k] = v_last[k]
@@ -275,7 +256,7 @@ fn variable_length_hash_to_ptr(t_len: Int, input: Span[UInt8], out_ptr: UnsafePo
     zero_and_free(v_buf, 64)
 
 
-fn variable_length_hash(t_len: Int, input: Span[UInt8]) -> List[UInt8]:
+fn variable_length_hash(t_len: Int, input: Span[UInt8, ...]) -> List[UInt8]:
     var out_buf = alloc[UInt8](t_len)
     variable_length_hash_to_ptr(t_len, input, out_buf)
     var result = List[UInt8](capacity=t_len)
@@ -283,6 +264,122 @@ fn variable_length_hash(t_len: Int, input: Span[UInt8]) -> List[UInt8]:
         result.append(out_buf[i])
     zero_and_free(out_buf, t_len)
     return result^
+
+
+@always_inline
+fn _argon2_process_lane(
+    memory: UnsafePointer[UInt64, MutAnyOrigin],
+    lane: Int,
+    t: Int,
+    slice_idx: Int,
+    seg_start: Int,
+    seg_end: Int,
+    segment_length: Int,
+    q: Int,
+    m_prime_blocks: Int,
+    iterations: Int,
+    type_code: Int,
+    parallelism: Int,
+):
+    var addressing_block = alloc[UInt64](128)
+    var has_addressing_block = False
+
+    for index in range(seg_start, seg_end):
+        if t == 0 and index < 2:
+            continue
+        var prev_index = index - 1 if index > 0 else q - 1
+        var is_argon2i = t == 0 and slice_idx < 2
+
+        var j1: UInt32
+        var j2: UInt32
+
+        if is_argon2i:
+            var seg_offset = index % segment_length
+            if not has_addressing_block or (
+                seg_offset % 128 == 0
+            ):
+                var z_u64 = alloc[UInt64](128)
+                for k in range(128):
+                    z_u64[k] = 0
+                z_u64[0] = UInt64(t)
+                z_u64[1] = UInt64(lane)
+                z_u64[2] = UInt64(slice_idx)
+                z_u64[3] = UInt64(m_prime_blocks)
+                z_u64[4] = UInt64(iterations)
+                z_u64[5] = UInt64(type_code)
+                z_u64[6] = UInt64((seg_offset // 128) + 1)
+
+                var zero_u64 = alloc[UInt64](128)
+                for k in range(128):
+                    zero_u64[k] = 0
+                var tmp_addr = alloc[UInt64](128)
+
+                compression_g(tmp_addr, zero_u64, z_u64, False)
+                compression_g(addressing_block, zero_u64, tmp_addr, False)
+                has_addressing_block = True
+
+                zero_and_free_u64(z_u64, 128)
+                zero_and_free_u64(zero_u64, 128)
+                zero_and_free_u64(tmp_addr, 128)
+
+            var val = addressing_block[seg_offset % 128]
+            j1 = UInt32(val & 0xFFFFFFFF)
+            j2 = UInt32(val >> 32)
+        else:
+            var v0 = memory[lane * q * 128 + prev_index * 128]
+            j1 = UInt32(v0 & 0xFFFFFFFF)
+            j2 = UInt32(v0 >> 32)
+
+        var ref_lane = Int(j2) % parallelism
+        if t == 0 and slice_idx == 0:
+            ref_lane = lane
+
+        var window_size: Int
+        if t == 0:
+            if slice_idx == 0:
+                window_size = index
+            elif ref_lane == lane:
+                window_size = slice_idx * segment_length + (
+                    index % segment_length
+                )
+            else:
+                window_size = slice_idx * segment_length
+        else:
+            if ref_lane == lane:
+                window_size = (
+                    q
+                    - segment_length
+                    + (index % segment_length)
+                )
+            else:
+                window_size = q - segment_length
+
+        if ref_lane == lane:
+            window_size -= 1
+        elif (index % segment_length) == 0:
+            window_size -= 1
+
+        var ref_index: Int
+        if window_size <= 0:
+            ref_index = 0
+        else:
+            var x = (UInt64(j1) * UInt64(j1)) >> 32
+            var y = (UInt64(window_size) * x) >> 32
+            var zz = UInt64(window_size) - 1 - y
+            var start_pos = 0
+            if t > 0:
+                start_pos = (
+                    (slice_idx + 1) % 4
+                ) * segment_length
+            ref_index = (start_pos + Int(zz)) % q
+
+        var p_ptr = memory + (lane * q * 128 + prev_index * 128)
+        var r_ptr = memory + (ref_lane * q * 128 + ref_index * 128)
+        var c_ptr = memory + (lane * q * 128 + index * 128)
+
+        compression_g(c_ptr, p_ptr, r_ptr, t > 0)
+
+    zero_and_free_u64(addressing_block, 128)
 
 
 struct Argon2id:
@@ -298,7 +395,7 @@ struct Argon2id:
 
     fn __init__(
         out self,
-        salt: Span[UInt8],
+        salt: Span[UInt8, ...],
         parallelism: Int = 4,
         tag_length: Int = 32,
         memory_size_kb: Int = 65536,
@@ -319,9 +416,9 @@ struct Argon2id:
 
     fn __init__(
         out self,
-        salt: Span[UInt8],
-        secret: Span[UInt8],
-        ad: Span[UInt8],
+        salt: Span[UInt8, ...],
+        secret: Span[UInt8, ...],
+        ad: Span[UInt8, ...],
         parallelism: Int = 4,
         tag_length: Int = 32,
         memory_size_kb: Int = 65536,
@@ -344,45 +441,45 @@ struct Argon2id:
         for i in range(len(ad)):
             self.ad.append(ad[i])
 
-    fn hash(self, password: Span[UInt8]) -> List[UInt8]:
+    fn hash(self, password: Span[UInt8, ...]) -> List[UInt8]:
         var h0_ctx = Blake2b(64)
         
         var le_buf = alloc[UInt8](4)
         store_le32(le_buf, 0, self.parallelism)
-        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
         store_le32(le_buf, 0, self.tag_length)
-        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
         store_le32(le_buf, 0, self.memory_size_kb)
-        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
         store_le32(le_buf, 0, self.iterations)
-        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
         store_le32(le_buf, 0, self.version)
-        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
         store_le32(le_buf, 0, self.type_code)
-        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
         store_le32(le_buf, 0, len(password))
-        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
         le_buf.free()
         
         h0_ctx.update(password)
         
         le_buf = alloc[UInt8](4)
         store_le32(le_buf, 0, len(self.salt))
-        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
         le_buf.free()
-        h0_ctx.update(Span[UInt8](self.salt))
+        h0_ctx.update(Span[UInt8, ...](self.salt))
         
         le_buf = alloc[UInt8](4)
         store_le32(le_buf, 0, len(self.secret))
-        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
         le_buf.free()
-        h0_ctx.update(Span[UInt8](self.secret))
+        h0_ctx.update(Span[UInt8, ...](self.secret))
         
         le_buf = alloc[UInt8](4)
         store_le32(le_buf, 0, len(self.ad))
-        h0_ctx.update(Span[UInt8](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
         le_buf.free()
-        h0_ctx.update(Span[UInt8](self.ad))
+        h0_ctx.update(Span[UInt8, ...](self.ad))
         
         var h0 = h0_ctx.finalize()
 
@@ -407,7 +504,7 @@ struct Argon2id:
                 store_le32(h0_input, 68, i)
                 
                 var b_bytes = alloc[UInt8](1024)
-                variable_length_hash_to_ptr(1024, Span[UInt8](ptr=h0_input, length=72), b_bytes)
+                variable_length_hash_to_ptr(1024, Span[UInt8, ...](ptr=h0_input, length=72), b_bytes)
                 
                 for k in range(128):
                     var word: UInt64 = 0
@@ -418,116 +515,30 @@ struct Argon2id:
 
         zero_and_free(h0_input, 72)
 
-        for t in range(self.iterations):
-            for slice_idx in range(4):
+        var iterations = self.iterations
+        var type_code = self.type_code
+        var parallelism = self.parallelism
 
+        for t in range(iterations):
+            for slice_idx in range(4):
+                var seg_start = slice_idx * segment_length
+                var seg_end = (slice_idx + 1) * segment_length
+
+                @always_inline
+                @__copy_capture(
+                    memory, seg_start, seg_end, segment_length,
+                    q, m_prime_blocks, t, slice_idx, iterations,
+                    type_code, parallelism,
+                )
                 @parameter
                 fn process_lane(lane: Int):
-                    var seg_start = slice_idx * segment_length
-                    var seg_end = (slice_idx + 1) * segment_length
+                    _argon2_process_lane(
+                        memory, lane, t, slice_idx, seg_start, seg_end,
+                        segment_length, q, m_prime_blocks, iterations,
+                        type_code, parallelism,
+                    )
 
-                    var addressing_block = alloc[UInt64](128)
-                    var has_addressing_block = False
-
-                    for index in range(seg_start, seg_end):
-                        if t == 0 and index < 2:
-                            continue
-
-                        var prev_index = index - 1 if index > 0 else q - 1
-                        var is_argon2i = t == 0 and slice_idx < 2
-
-                        var j1: UInt32
-                        var j2: UInt32
-
-                        if is_argon2i:
-                            var seg_offset = index % segment_length
-                            if not has_addressing_block or (
-                                seg_offset % 128 == 0
-                            ):
-                                var z_u64 = alloc[UInt64](128)
-                                for k in range(128):
-                                    z_u64[k] = 0
-                                z_u64[0] = UInt64(t)
-                                z_u64[1] = UInt64(lane)
-                                z_u64[2] = UInt64(slice_idx)
-                                z_u64[3] = UInt64(m_prime_blocks)
-                                z_u64[4] = UInt64(self.iterations)
-                                z_u64[5] = UInt64(self.type_code)
-                                z_u64[6] = UInt64((seg_offset // 128) + 1)
-
-                                var zero_u64 = alloc[UInt64](128)
-                                for k in range(128):
-                                    zero_u64[k] = 0
-                                var tmp_addr = alloc[UInt64](128)
-
-                                compression_g(tmp_addr, zero_u64, z_u64, False)
-                                compression_g(addressing_block, zero_u64, tmp_addr, False)
-                                has_addressing_block = True
-                                
-                                zero_and_free_u64(z_u64, 128)
-                                zero_and_free_u64(zero_u64, 128)
-                                zero_and_free_u64(tmp_addr, 128)
-
-                            var val = addressing_block[seg_offset % 128]
-                            j1 = UInt32(val & 0xFFFFFFFF)
-                            j2 = UInt32(val >> 32)
-                        else:
-                            var v0 = memory[lane * q * 128 + prev_index * 128]
-                            j1 = UInt32(v0 & 0xFFFFFFFF)
-                            j2 = UInt32(v0 >> 32)
-
-                        var ref_lane = Int(j2) % self.parallelism
-                        if t == 0 and slice_idx == 0:
-                            ref_lane = lane
-
-                        var window_size: Int
-                        if t == 0:
-                            if slice_idx == 0:
-                                window_size = index
-                            elif ref_lane == lane:
-                                window_size = slice_idx * segment_length + (
-                                    index % segment_length
-                                )
-                            else:
-                                window_size = slice_idx * segment_length
-                        else:
-                            if ref_lane == lane:
-                                window_size = (
-                                    q
-                                    - segment_length
-                                    + (index % segment_length)
-                                )
-                            else:
-                                window_size = q - segment_length
-
-                        if ref_lane == lane:
-                            window_size -= 1
-                        elif (index % segment_length) == 0:
-                            window_size -= 1
-
-                        var ref_index: Int
-                        if window_size <= 0:
-                            ref_index = 0
-                        else:
-                            var x = (UInt64(j1) * UInt64(j1)) >> 32
-                            var y = (UInt64(window_size) * x) >> 32
-                            var zz = UInt64(window_size) - 1 - y
-                            var start_pos = 0
-                            if t > 0:
-                                start_pos = (
-                                    (slice_idx + 1) % 4
-                                ) * segment_length
-                            ref_index = (start_pos + Int(zz)) % q
-
-                        var p_ptr = memory + (lane * q * 128 + prev_index * 128)
-                        var r_ptr = memory + (ref_lane * q * 128 + ref_index * 128)
-                        var c_ptr = memory + (lane * q * 128 + index * 128)
-
-                        compression_g(c_ptr, p_ptr, r_ptr, t > 0)
-
-                    zero_and_free_u64(addressing_block, 128)
-
-                parallelize[process_lane](self.parallelism)
+                parallelize[process_lane](parallelism)
 
         var c_block = alloc[UInt64](128)
         for k in range(128):
@@ -546,7 +557,7 @@ struct Argon2id:
         zero_and_free_u64(c_block, 128)
         zero_and_free_u64(memory, m_prime_blocks * 128)
         
-        var result = variable_length_hash(self.tag_length, Span[UInt8](ptr=c_bytes, length=1024))
+        var result = variable_length_hash(self.tag_length, Span[UInt8, ...](ptr=c_bytes, length=1024))
         zero_and_free(c_bytes, 1024)
         return result^
 

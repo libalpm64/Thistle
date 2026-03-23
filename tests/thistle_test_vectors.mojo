@@ -1,7 +1,9 @@
-from python import Python
-from python import PythonObject
-from collections import List
-from thistle.sha2 import bytes_to_hex
+from std.python import Python, PythonObject
+from std.collections import List
+from std.memory import alloc
+from std.memory.unsafe_pointer import UnsafePointer
+from std.builtin.type_aliases import MutExternalOrigin
+from thistle.sha2 import bytes_to_hex, sha224_hash, sha256_hash, sha384_hash, sha512_hash
 from thistle.argon2 import Argon2id
 from thistle.blake2b import Blake2b
 from thistle.blake3 import blake3_parallel_hash
@@ -9,43 +11,63 @@ from thistle.camellia import CamelliaCipher
 from thistle.chacha20 import ChaCha20
 from thistle.kcipher2 import KCipher2
 from thistle.pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
-from thistle.sha2 import sha224_hash, sha256_hash, sha384_hash, sha512_hash
-from thistle.aes import AESKey, SBOX, cpu_aes_encrypt, expand_key_128, ROUNDS_128, gf_mul2, gf_mul3
-from memory.unsafe_pointer import UnsafePointer
-from builtin.type_aliases import MutExternalOrigin
-from memory import alloc
-from math import ceildiv
+from thistle.aes import cpu_aes_encrypt, expand_key_128
 
 
 fn hex_char_to_val(c: Int) -> UInt8:
-    if c >= 48 and c <= 57:
+    if c <= 57:
         return UInt8(c - 48)
-    if c >= 97 and c <= 102:
-        return UInt8(c - 97 + 10)
-    if c >= 65 and c <= 70:
-        return UInt8(c - 65 + 10)
-    return 0
-
+    if c <= 70:
+        return UInt8(c - 55)
+    return UInt8(c - 87)
 
 fn hex_to_bytes(hex_str: String) -> List[UInt8]:
     var res = List[UInt8]()
-    var s = hex_str
-    var bytes_view = s.as_bytes()
+    var bytes_view = hex_str.as_bytes()
     var i = 0
-    while i < len(s) - 1:
-        var high = hex_char_to_val(Int(bytes_view[i]))
-        var low = hex_char_to_val(Int(bytes_view[i + 1]))
-        res.append((high << 4) | low)
+    while i < len(hex_str) - 1:
+        res.append((hex_char_to_val(Int(bytes_view[i])) << 4) | hex_char_to_val(Int(bytes_view[i + 1])))
         i += 2
     return res^
 
+fn hex_to_u32_list(hex_str: String) -> SIMD[DType.uint32, 4]:
+    var result = SIMD[DType.uint32, 4](0)
+    var s = hex_str.as_bytes()
+    for i in range(4):
+        var val = 0
+        for j in range(8):
+            val = (val << 4) | Int(hex_char_to_val(Int(s[i * 8 + j])))
+        result[i] = UInt32(val)
+    return result
+
+fn u64_to_hex(z: UInt64) -> String:
+    var bytes = List[UInt8]()
+    for shift in range(56, -1, -8):
+        bytes.append(UInt8((z >> shift) & 0xFF))
+    return bytes_to_hex(bytes)
+
+fn byte_to_hex(b: UInt8) -> String:
+    var hi = Int(b >> 4)
+    var lo = Int(b & 0xF)
+    return chr(48 + hi if hi < 10 else 87 + hi) + chr(48 + lo if lo < 10 else 87 + lo)
+
+fn ptr_to_hex(ptr: UnsafePointer[UInt8, MutAnyOrigin], count: Int) -> String:
+    var s = String("")
+    for j in range(count):
+        s += byte_to_hex(ptr.load(j))
+    return s
+
+fn generate_blake3_input(length: Int) -> List[UInt8]:
+    var data = List[UInt8](capacity=length)
+    for i in range(length):
+        data.append(UInt8(i % 251))
+    return data^
 
 fn list_to_simd32(lst: List[UInt8]) -> SIMD[DType.uint8, 32]:
     var result = SIMD[DType.uint8, 32](0)
     for i in range(min(len(lst), 32)):
         result[i] = lst[i]
     return result
-
 
 fn list_to_simd12(lst: List[UInt8]) -> SIMD[DType.uint8, 12]:
     var result = SIMD[DType.uint8, 12](0)
@@ -54,207 +76,111 @@ fn list_to_simd12(lst: List[UInt8]) -> SIMD[DType.uint8, 12]:
     return result
 
 
-fn generate_blake3_input(length: Int) -> List[UInt8]:
-    var data = List[UInt8](capacity=length)
-    for i in range(length):
-        data.append(UInt8(i % 251))
-    return data^
-
-
-fn hex_to_u32_list(hex_str: String) -> SIMD[DType.uint32, 4]:
-    var result = SIMD[DType.uint32, 4](0)
-    var s_bytes = hex_str.as_bytes()
-    for i in range(4):
-        var val = 0
-        for j in range(8):
-            var c = s_bytes[i * 8 + j]
-            val = val << 4
-            if c >= 48 and c <= 57:
-                val = val + (Int(c) - 48)
-            elif c >= 97 and c <= 102:
-                val = val + (Int(c) - 97 + 10)
-            elif c >= 65 and c <= 70:
-                val = val + (Int(c) - 65 + 10)
-        result[i] = UInt32(val)
-    return result
-
-
-fn u64_to_hex(z: UInt64) -> String:
-    var bytes = List[UInt8]()
-    bytes.append(UInt8((z >> 56) & 0xFF))
-    bytes.append(UInt8((z >> 48) & 0xFF))
-    bytes.append(UInt8((z >> 40) & 0xFF))
-    bytes.append(UInt8((z >> 32) & 0xFF))
-    bytes.append(UInt8((z >> 24) & 0xFF))
-    bytes.append(UInt8((z >> 16) & 0xFF))
-    bytes.append(UInt8((z >> 8) & 0xFF))
-    bytes.append(UInt8(z & 0xFF))
-    return bytes_to_hex(bytes)
-
-
 @fieldwise_init
 struct TestResult(Copyable, Movable):
     var passed: Int
     var failed: Int
     var failures: List[String]
 
+fn load_json(path: String, py: PythonObject) raises -> PythonObject:
+    var builtins = Python.import_module("builtins")
+    var f = builtins.open(path, "r")
+    var data = py.loads(f.read())
+    f.close()
+    return data
 
-fn test_argon2(json_data: PythonObject, py: PythonObject) raises -> TestResult:
-    var passed = 0
-    var failed = 0
+fn test_argon2(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var passed, failed = 0, 0
     var failures = List[String]()
-    var count = Int(py=json_data.__len__())
-    
-    for i in range(count):
-        var v = json_data[i]
+    for i in range(Int(py=data.__len__())):
+        var v = data[i]
         var name = String(v["name"])
         var password = String(v["password"]).as_bytes()
         var salt = String(v["salt"]).as_bytes()
-        var parallelism = Int(py=v["parallelism"])
-        var memory_size_kb = Int(py=v["memory_size_kb"])
-        var iterations = Int(py=v["iterations"])
-        var tag_length = Int(py=v["tag_length"])
-        var version = Int(py=v["version"])
-        var expected = String(v["hash"])
-        
-        var argon2 = Argon2id(
-            salt,
-            parallelism=parallelism,
-            tag_length=tag_length,
-            memory_size_kb=memory_size_kb,
-            iterations=iterations,
-            version=version,
+        var argon2 = Argon2id(salt,
+            parallelism=Int(py=v["parallelism"]), tag_length=Int(py=v["tag_length"]),
+            memory_size_kb=Int(py=v["memory_size_kb"]), iterations=Int(py=v["iterations"]),
+            version=Int(py=v["version"]),
         )
-        var tag = argon2.hash(password)
-        var got = bytes_to_hex(tag)
-        
+        var got = bytes_to_hex(argon2.hash(password))
+        var expected = String(v["hash"])
         if got == expected:
             passed += 1
         else:
             failed += 1
             failures.append("Argon2 " + name + ": expected " + expected + ", got " + got)
-    
     return TestResult(passed, failed, failures^)
 
-
-fn test_blake2b(json_data: PythonObject, py: PythonObject) raises -> TestResult:
-    var passed = 0
-    var failed = 0
+fn test_blake2b(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var passed, failed = 0, 0
     var failures = List[String]()
-    var count = Int(py=json_data.__len__())
-    
-    for i in range(count):
-        var v = json_data[i]
+    for i in range(Int(py=data.__len__())):
+        var v = data[i]
         var name = String(v["name"])
         var expected = String(v["hash"])
-        var digest_size = Int(py=v["digest_size"])
-        var input_hex = String(v["input"])
-        
-        var input_bytes = hex_to_bytes(input_hex)
-        var ctx = Blake2b(digest_size)
-        ctx.update(Span[UInt8](input_bytes))
-        var hash = ctx.finalize()
-        var got = bytes_to_hex(hash)
-        
+        var ctx = Blake2b(Int(py=v["digest_size"]))
+        ctx.update(Span[UInt8, ...](hex_to_bytes(String(v["input"]))))
+        var got = bytes_to_hex(ctx.finalize())
         if got == expected:
             passed += 1
         else:
             failed += 1
             failures.append("BLAKE2b " + name + ": expected " + expected + ", got " + got)
-    
     return TestResult(passed, failed, failures^)
 
-
-fn test_blake3(json_data: PythonObject, py: PythonObject) raises -> TestResult:
-    var passed = 0
-    var failed = 0
+fn test_blake3(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var passed, failed = 0, 0
     var failures = List[String]()
-    var cases = json_data["cases"]
-    var count = Int(py=cases.__len__())
-    
-    for i in range(count):
+    var cases = data["cases"]
+    for i in range(Int(py=cases.__len__())):
         var v = cases[i]
         var input_len = Int(py=v["input_len"])
         var expected = String(v["hash"])
-        
-        var out_len = len(expected) // 2
-        var data = generate_blake3_input(input_len)
-        var hash_result = blake3_parallel_hash(Span[UInt8](data), out_len)
-        var got = bytes_to_hex(hash_result)
-        
+        var got = bytes_to_hex(blake3_parallel_hash(Span[UInt8, ...](generate_blake3_input(input_len)), len(expected) // 2))
         if got == expected:
             passed += 1
         else:
             failed += 1
             failures.append("BLAKE3 " + String(input_len) + " bytes: expected " + expected + ", got " + got)
-    
     return TestResult(passed, failed, failures^)
 
-
-fn test_camellia(json_data: PythonObject, py: PythonObject) raises -> TestResult:
-    var passed = 0
-    var failed = 0
+fn test_camellia(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var passed, failed = 0, 0
     var failures = List[String]()
-    var count = Int(py=json_data.__len__())
-    
-    for i in range(count):
-        var v = json_data[i]
+    for i in range(Int(py=data.__len__())):
+        var v = data[i]
         var name = String(v["name"])
-        var key_hex = String(v["key"])
+        var key = hex_to_bytes(String(v["key"]))
         var pt_hex = String(v["plaintext"])
         var ct_hex = String(v["ciphertext"])
-        
-        var key = hex_to_bytes(key_hex)
-        var pt = hex_to_bytes(pt_hex)
-        
-        var cipher = CamelliaCipher(Span[UInt8](key))
-        var got_ct = bytes_to_hex(cipher.encrypt(Span[UInt8](pt)))
-        
+        var cipher = CamelliaCipher(Span[UInt8, ...](key))
+        var got_ct = bytes_to_hex(cipher.encrypt(Span[UInt8, ...](hex_to_bytes(pt_hex))))
         if got_ct == ct_hex:
             passed += 1
         else:
             failed += 1
             failures.append("Camellia " + name + " enc: expected " + ct_hex + ", got " + got_ct)
-        
-        var ct = hex_to_bytes(ct_hex)
-        var got_pt = bytes_to_hex(cipher.decrypt(Span[UInt8](ct)))
+        var got_pt = bytes_to_hex(cipher.decrypt(Span[UInt8, ...](hex_to_bytes(ct_hex))))
         if got_pt == pt_hex:
             passed += 1
         else:
             failed += 1
             failures.append("Camellia " + name + " dec: expected " + pt_hex + ", got " + got_pt)
-    
     return TestResult(passed, failed, failures^)
 
-
-fn test_chacha20(json_data: PythonObject, py: PythonObject) raises -> TestResult:
-    var passed = 0
-    var failed = 0
+fn test_chacha20(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var passed, failed = 0, 0
     var failures = List[String]()
-    var count = Int(py=json_data.__len__())
-    
-    for i in range(count):
-        var v = json_data[i]
+    for i in range(Int(py=data.__len__())):
+        var v = data[i]
         var name = String(v["name"])
-        var key_hex = String(v["key"])
-        var nonce_hex = String(v["nonce"])
-        var counter = UInt32(Int(py=v["counter"]))
-        var pt_hex = String(v["plaintext"])
-        var ct_hex = String(v["ciphertext"])
-        
-        var key_bytes = hex_to_bytes(key_hex)
-        var nonce_bytes = hex_to_bytes(nonce_hex)
-        var pt_bytes = hex_to_bytes(pt_hex)
-        var expected_ct = hex_to_bytes(ct_hex)
-        
-        var key = list_to_simd32(key_bytes)
-        var nonce = list_to_simd12(nonce_bytes)
-        
-        var cipher = ChaCha20(key, nonce, counter)
-        
+        var cipher = ChaCha20(list_to_simd32(hex_to_bytes(String(v["key"]))),
+            list_to_simd12(hex_to_bytes(String(v["nonce"]))), UInt32(Int(py=v["counter"])))
+        var pt_bytes = hex_to_bytes(String(v["plaintext"]))
+        var expected_ct = hex_to_bytes(String(v["ciphertext"]))
         if len(pt_bytes) == 0:
             var null_ptr: UnsafePointer[UInt8, MutExternalOrigin] = {}
-            var result_ptr = cipher.encrypt(Span[UInt8](ptr=null_ptr, length=0))
+            var result_ptr = cipher.encrypt(Span[UInt8, ...](ptr=null_ptr, length=0))
             var null_check: UnsafePointer[UInt8, MutExternalOrigin] = {}
             if result_ptr == null_check and len(expected_ct) == 0:
                 passed += 1
@@ -263,402 +189,203 @@ fn test_chacha20(json_data: PythonObject, py: PythonObject) raises -> TestResult
                 failures.append("ChaCha20 " + name + ": empty plaintext test failed")
         else:
             var ct_ptr = cipher.encrypt(Span(pt_bytes))
-            var test_passed = True
-            if len(pt_bytes) != len(expected_ct):
-                test_passed = False
-            else:
+            var ok = len(pt_bytes) == len(expected_ct)
+            if ok:
                 for j in range(len(pt_bytes)):
                     if ct_ptr[j] != expected_ct[j]:
-                        test_passed = False
+                        ok = False
                         break
-            
-            if test_passed:
+            if ok:
                 passed += 1
             else:
-                var got_hex = String("")
-                for j in range(min(len(pt_bytes), 16)):
-                    got_hex += hex(Int(ct_ptr[j]))[2:].rjust(2, '0')
-                failures.append("ChaCha20 " + name + ": expected " + ct_hex[:32] + "..., got " + got_hex + "...")
                 failed += 1
-            
+                failures.append("ChaCha20 " + name + ": expected " + String(v["ciphertext"]) + ", got " + ptr_to_hex(ct_ptr, min(len(pt_bytes), 16)) + "...")
             ct_ptr.free()
-    
     return TestResult(passed, failed, failures^)
 
-
-fn test_kcipher2(json_data: PythonObject, py: PythonObject) raises -> TestResult:
-    var passed = 0
-    var failed = 0
+fn test_kcipher2(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var passed, failed = 0, 0
     var failures = List[String]()
-    var vectors = json_data["test_vectors"]
-    var count = Int(py=vectors.__len__())
-    
-    for i in range(count):
+    var vectors = data["test_vectors"]
+    for i in range(Int(py=vectors.__len__())):
         var v = vectors[i]
-        var key_hex = String(v["key"])
-        var iv_hex = String(v["iv"])
+        var kc2 = KCipher2(hex_to_u32_list(String(v["key"])), hex_to_u32_list(String(v["iv"])))
         var key_streams = v["key_streams"]
-        
-        var key = hex_to_u32_list(key_hex)
-        var iv = hex_to_u32_list(iv_hex)
-        var kc2 = KCipher2(key, iv)
-        
         for j in range(Int(py=key_streams.__len__())):
             var expected = String(key_streams[j]).upper()
             var z = kc2.stream()
             kc2._next(1)
             var got = u64_to_hex(z).upper()
-            
             if got == expected:
                 passed += 1
             else:
                 failed += 1
                 failures.append("KCipher2 vector " + String(i) + " stream " + String(j) + ": expected " + expected + ", got " + got)
-    
     return TestResult(passed, failed, failures^)
 
-
-fn test_pbkdf2(json_data: PythonObject, py: PythonObject) raises -> TestResult:
-    var passed = 0
-    var failed = 0
+fn _test_pbkdf2_algo[
+    hash_fn: fn(Span[UInt8, ...], Span[UInt8, ...], Int, Int) -> List[UInt8]
+](data: PythonObject, py: PythonObject, name: String) raises -> TestResult:
+    var passed, failed = 0, 0
     var failures = List[String]()
-    
-    var sha256_data = json_data["sha256"]
-    var sha256_count = Int(py=sha256_data.__len__())
-    for i in range(sha256_count):
-        var v = sha256_data[i]
+    for i in range(Int(py=data.__len__())):
+        var v = data[i]
         var password = String(v["password_ascii"]).as_bytes()
-        var salt_hex = String(v["salt"])
-        var iterations = Int(py=v["iterations"])
-        var dklen = Int(py=v["dklen"])
+        var salt = hex_to_bytes(String(v["salt"]))
+        var got = bytes_to_hex(hash_fn(password, Span[UInt8, ...](salt), Int(py=v["iterations"]), Int(py=v["dklen"])))
         var expected = String(v["derived_key"])
-        
-        var salt = hex_to_bytes(salt_hex)
-        var got = bytes_to_hex(pbkdf2_hmac_sha256(password, Span[UInt8](salt), iterations, dklen))
-        
         if got == expected:
             passed += 1
         else:
             failed += 1
-            failures.append("PBKDF2-SHA256: expected " + expected + ", got " + got)
-    
-    var sha512_data = json_data["sha512"]
-    var sha512_count = Int(py=sha512_data.__len__())
-    for i in range(sha512_count):
-        var v = sha512_data[i]
-        var password = String(v["password_ascii"]).as_bytes()
-        var salt_hex = String(v["salt"])
-        var iterations = Int(py=v["iterations"])
-        var dklen = Int(py=v["dklen"])
-        var expected = String(v["derived_key"])
-        
-        var salt = hex_to_bytes(salt_hex)
-        var got = bytes_to_hex(pbkdf2_hmac_sha512(password, Span[UInt8](salt), iterations, dklen))
-        
-        if got == expected:
-            passed += 1
-        else:
-            failed += 1
-            failures.append("PBKDF2-SHA512: expected " + expected + ", got " + got)
-    
+            failures.append("PBKDF2-" + name + ": expected " + expected + ", got " + got)
     return TestResult(passed, failed, failures^)
 
+fn test_pbkdf2(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var r = _test_pbkdf2_algo[pbkdf2_hmac_sha256](data["sha256"], py, "SHA256")
+    var r2 = _test_pbkdf2_algo[pbkdf2_hmac_sha512](data["sha512"], py, "SHA512")
+    r.passed += r2.passed
+    r.failed += r2.failed
+    for i in range(len(r2.failures)):
+        r.failures.append(r2.failures[i])
+    return r^
 
-fn test_sha(json_data: PythonObject, py: PythonObject) raises -> TestResult:
-    var passed = 0
-    var failed = 0
+fn _test_sha_algo[
+    hash_fn: fn(Span[UInt8, ...]) -> List[UInt8]
+](data: PythonObject, py: PythonObject, name: String) raises -> TestResult:
+    var passed, failed = 0, 0
     var failures = List[String]()
-    
-    var sha224_data = json_data["sha224"]
-    var sha224_count = Int(py=sha224_data.__len__())
-    for i in range(sha224_count):
-        var v = sha224_data[i]
+    for i in range(Int(py=data.__len__())):
+        var v = data[i]
         var bit_len = Int(py=v["len"])
-        var msg_hex = String(v["msg"])
+        var msg = hex_to_bytes(String(v["msg"])) if bit_len > 0 else List[UInt8]()
+        var got = bytes_to_hex(hash_fn(Span[UInt8, ...](msg)))
         var expected = String(v["md"])
-        
-        var got_hash: List[UInt8]
-        if bit_len == 0:
-            var empty_msg = List[UInt8]()
-            got_hash = sha224_hash(Span[UInt8](empty_msg))
-        else:
-            var msg = hex_to_bytes(msg_hex)
-            got_hash = sha224_hash(Span[UInt8](msg))
-        var got = bytes_to_hex(got_hash)
-        
         if got == expected:
             passed += 1
         else:
             failed += 1
-            failures.append("SHA224 len=" + String(bit_len) + ": expected " + expected + ", got " + got)
-    
-    var sha256_data = json_data["sha256"]
-    var sha256_count = Int(py=sha256_data.__len__())
-    for i in range(sha256_count):
-        var v = sha256_data[i]
-        var bit_len = Int(py=v["len"])
-        var msg_hex = String(v["msg"])
-        var expected = String(v["md"])
-        
-        var got_hash: List[UInt8]
-        if bit_len == 0:
-            var empty_msg = List[UInt8]()
-            got_hash = sha256_hash(Span[UInt8](empty_msg))
-        else:
-            var msg = hex_to_bytes(msg_hex)
-            got_hash = sha256_hash(Span[UInt8](msg))
-        var got = bytes_to_hex(got_hash)
-        
-        if got == expected:
-            passed += 1
-        else:
-            failed += 1
-            failures.append("SHA256 len=" + String(bit_len) + ": expected " + expected + ", got " + got)
-    
-    var sha384_data = json_data["sha384"]
-    var sha384_count = Int(py=sha384_data.__len__())
-    for i in range(sha384_count):
-        var v = sha384_data[i]
-        var bit_len = Int(py=v["len"])
-        var msg_hex = String(v["msg"])
-        var expected = String(v["md"])
-        
-        var got_hash: List[UInt8]
-        if bit_len == 0:
-            var empty_msg = List[UInt8]()
-            got_hash = sha384_hash(Span[UInt8](empty_msg))
-        else:
-            var msg = hex_to_bytes(msg_hex)
-            got_hash = sha384_hash(Span[UInt8](msg))
-        var got = bytes_to_hex(got_hash)
-        
-        if got == expected:
-            passed += 1
-        else:
-            failed += 1
-            failures.append("SHA384 len=" + String(Int(py=v["len"])) + ": expected " + expected + ", got " + got)
-    
+            failures.append(name + " len=" + String(bit_len) + ": expected " + expected + ", got " + got)
     return TestResult(passed, failed, failures^)
 
+fn test_sha(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var r = _test_sha_algo[sha224_hash](data["sha224"], py, "SHA224")
+    var r256 = _test_sha_algo[sha256_hash](data["sha256"], py, "SHA256")
+    var r384 = _test_sha_algo[sha384_hash](data["sha384"], py, "SHA384")
+    r.passed += r256.passed + r384.passed
+    r.failed += r256.failed + r384.failed
+    for i in range(len(r256.failures)):
+        r.failures.append(r256.failures[i])
+    for i in range(len(r384.failures)):
+        r.failures.append(r384.failures[i])
+    return r^
 
-fn load_json(path: String, py: PythonObject) raises -> PythonObject:
-    var builtins = Python.import_module("builtins")
-    var f = builtins.open(path, "r")
-    var data_str = f.read()
-    f.close()
-    return py.loads(data_str)
-
-
-
-
-fn test_aes_cpu(json_data: PythonObject, py: PythonObject) raises -> TestResult:
-    var passed = 0
-    var failed = 0
+fn test_aes_cpu(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var passed, failed = 0, 0
     var failures = List[String]()
-    var count = Int(py=json_data.__len__())
-    
-    for i in range(count):
-        var v = json_data[i]
-        var name = String(v["name"])
-        var key_hex = String(v["key"])
-        var pt_hex = String(v["plaintext"])
-        var expected_ct_hex = String(v["ciphertext"])
-        
-        var key_bytes = hex_to_bytes(key_hex)
-        var pt_bytes = hex_to_bytes(pt_hex)
-        
+    for i in range(Int(py=data.__len__())):
+        var v = data[i]
+        var key_bytes = hex_to_bytes(String(v["key"]))
+        var pt_bytes = hex_to_bytes(String(v["plaintext"]))
+        var expected_ct = String(v["ciphertext"])
         var key_ptr = alloc[UInt8](16)
-        for j in range(16):
-            key_ptr.store(j, key_bytes[j])
-        
-        var round_keys = expand_key_128(key_ptr)
-        
         var pt_ptr = alloc[UInt8](16)
         for j in range(16):
+            key_ptr.store(j, key_bytes[j])
             pt_ptr.store(j, pt_bytes[j])
-        
+        var round_keys = expand_key_128(key_ptr)
         cpu_aes_encrypt(pt_ptr, round_keys)
-        
-        var correct = True
-        for j in range(16):
-            var expected_byte = hex_char_to_val(Int(expected_ct_hex.as_bytes()[j * 2])) << 4
-            expected_byte |= hex_char_to_val(Int(expected_ct_hex.as_bytes()[j * 2 + 1]))
-            if pt_ptr.load(j) != expected_byte:
-                correct = False
-                break
-        
-        if correct:
+        var got = ptr_to_hex(pt_ptr, 16)
+        if got == expected_ct:
             passed += 1
         else:
             failed += 1
-            var got_hex = String("")
-            for j in range(16):
-                got_hex += hex(Int(pt_ptr.load(j)))[2:].rjust(2, '0')
-            failures.append("AES-CPU " + name + ": expected " + expected_ct_hex + ", got " + got_hex)
-        
+            failures.append("AES-CPU " + String(v["name"]) + ": expected " + expected_ct + ", got " + got)
         key_ptr.free()
         round_keys.free()
         pt_ptr.free()
-    
     return TestResult(passed, failed, failures^)
 
 
-fn print_result(name: String, result: TestResult):
+fn print_result(name: String, result: TestResult, mut tp: Int, mut tf: Int, mut af: Bool):
     if result.failed == 0:
         print("Testing " + name + " [pass] (" + String(result.passed) + " vectors)")
     else:
         print("Testing " + name + " [fail] (" + String(result.passed) + "/" + String(result.passed + result.failed) + " passed)")
         for i in range(len(result.failures)):
             print("  - " + result.failures[i])
+    tp += result.passed
+    tf += result.failed
+    if result.failed > 0: af = True
 
-
-def main():
-    print("Thistle Crypto Test Vectors")
-    print()
-    
+def main() raises:
+    print("Thistle Crypto Test Vectors\n")
     var py = Python.import_module("json")
-    
-    var total_passed = 0
-    var total_failed = 0
-    var any_failures = False
-    
+    var tp, tf = 0, 0
+    var af = False
+
     try:
         print("Loading Argon2 vectors...")
-        var argon2_data = load_json("tests/vectors/argon2.json", py)
-        var argon2_result = test_argon2(argon2_data, py)
-        print_result("Argon2", argon2_result)
-        total_passed += argon2_result.passed
-        total_failed += argon2_result.failed
-        if argon2_result.failed > 0:
-            any_failures = True
+        print_result("Argon2", test_argon2(load_json("tests/vectors/argon2.json", py), py), tp, tf, af)
     except e:
-        print("Argon2 [error] " + String(e))
-        any_failures = True
-    
+        print("Argon2 [error] " + String(e)); af = True
     print()
-    
+
     try:
         print("Loading BLAKE2b vectors...")
-        var blake2b_data = load_json("tests/vectors/blake2b.json", py)
-        var blake2b_result = test_blake2b(blake2b_data, py)
-        print_result("BLAKE2b", blake2b_result)
-        total_passed += blake2b_result.passed
-        total_failed += blake2b_result.failed
-        if blake2b_result.failed > 0:
-            any_failures = True
+        print_result("BLAKE2b", test_blake2b(load_json("tests/vectors/blake2b.json", py), py), tp, tf, af)
     except e:
-        print("BLAKE2b [error] " + String(e))
-        any_failures = True
-    
+        print("BLAKE2b [error] " + String(e)); af = True
     print()
-    
+
     try:
         print("Loading BLAKE3 vectors...")
-        var blake3_data = load_json("tests/vectors/blake3.json", py)
-        var blake3_result = test_blake3(blake3_data, py)
-        print_result("BLAKE3", blake3_result)
-        total_passed += blake3_result.passed
-        total_failed += blake3_result.failed
-        if blake3_result.failed > 0:
-            any_failures = True
+        print_result("BLAKE3", test_blake3(load_json("tests/vectors/blake3.json", py), py), tp, tf, af)
     except e:
-        print("BLAKE3 [error] " + String(e))
-        any_failures = True
-    
+        print("BLAKE3 [error] " + String(e)); af = True
     print()
-    
+
     try:
         print("Loading Camellia vectors...")
-        var camellia_data = load_json("tests/vectors/camellia.json", py)
-        var camellia_result = test_camellia(camellia_data, py)
-        print_result("Camellia", camellia_result)
-        total_passed += camellia_result.passed
-        total_failed += camellia_result.failed
-        if camellia_result.failed > 0:
-            any_failures = True
+        print_result("Camellia", test_camellia(load_json("tests/vectors/camellia.json", py), py), tp, tf, af)
     except e:
-        print("Camellia [error] " + String(e))
-        any_failures = True
-    
+        print("Camellia [error] " + String(e)); af = True
     print()
-    
+
     try:
         print("Loading ChaCha20 vectors...")
-        var chacha20_data = load_json("tests/vectors/chacha20.json", py)
-        var chacha20_result = test_chacha20(chacha20_data, py)
-        print_result("ChaCha20", chacha20_result)
-        total_passed += chacha20_result.passed
-        total_failed += chacha20_result.failed
-        if chacha20_result.failed > 0:
-            any_failures = True
+        print_result("ChaCha20", test_chacha20(load_json("tests/vectors/chacha20.json", py), py), tp, tf, af)
     except e:
-        print("ChaCha20 [error] " + String(e))
-        any_failures = True
-    
+        print("ChaCha20 [error] " + String(e)); af = True
     print()
-    
+
     try:
         print("Loading KCipher2 vectors...")
-        var kcipher2_data = load_json("tests/vectors/kcipher2.json", py)
-        var kcipher2_result = test_kcipher2(kcipher2_data, py)
-        print_result("KCipher2", kcipher2_result)
-        total_passed += kcipher2_result.passed
-        total_failed += kcipher2_result.failed
-        if kcipher2_result.failed > 0:
-            any_failures = True
+        print_result("KCipher2", test_kcipher2(load_json("tests/vectors/kcipher2.json", py), py), tp, tf, af)
     except e:
-        print("KCipher2 [error] " + String(e))
-        any_failures = True
-    
+        print("KCipher2 [error] " + String(e)); af = True
     print()
-    
+
     try:
         print("Loading PBKDF2 vectors...")
-        var pbkdf2_data = load_json("tests/vectors/pbkdf2.json", py)
-        var pbkdf2_result = test_pbkdf2(pbkdf2_data, py)
-        print_result("PBKDF2", pbkdf2_result)
-        total_passed += pbkdf2_result.passed
-        total_failed += pbkdf2_result.failed
-        if pbkdf2_result.failed > 0:
-            any_failures = True
+        print_result("PBKDF2", test_pbkdf2(load_json("tests/vectors/pbkdf2.json", py), py), tp, tf, af)
     except e:
-        print("PBKDF2 [error] " + String(e))
-        any_failures = True
-    
+        print("PBKDF2 [error] " + String(e)); af = True
     print()
-    
+
     try:
         print("Loading SHA vectors...")
-        var sha_data = load_json("tests/vectors/sha.json", py)
-        var sha_result = test_sha(sha_data, py)
-        print_result("SHA", sha_result)
-        total_passed += sha_result.passed
-        total_failed += sha_result.failed
-        if sha_result.failed > 0:
-            any_failures = True
+        print_result("SHA", test_sha(load_json("tests/vectors/sha.json", py), py), tp, tf, af)
     except e:
-        print("SHA [error] " + String(e))
-        any_failures = True
-    
+        print("SHA [error] " + String(e)); af = True
     print()
-    
+
     try:
-        print("Loading AES vectors")
-        var aes_data = load_json("tests/vectors/aes.json", py)
-        var aes_cpu_result = test_aes_cpu(aes_data, py)
-        print_result("AES-128-CPU", aes_cpu_result)
-        total_passed += aes_cpu_result.passed
-        total_failed += aes_cpu_result.failed
-        if aes_cpu_result.failed > 0:
-            any_failures = True
+        print("Loading AES vectors...")
+        print_result("AES-128-CPU", test_aes_cpu(load_json("tests/vectors/aes.json", py), py), tp, tf, af)
     except e:
-        print("AES-128-CPU [error] " + String(e))
-        any_failures = True
-    
+        print("AES-128-CPU [error] " + String(e)); af = True
     print()
-    print("Total: " + String(total_passed) + " pass, " + String(total_failed) + " fail")
-    
-    if any_failures:
-        print("Tests fail")
-    else:
-        print("Tests pass")
+
+    print("Total: " + String(tp) + " pass, " + String(tf) + " fail")
+    print("Tests pass" if not af else "Tests fail")

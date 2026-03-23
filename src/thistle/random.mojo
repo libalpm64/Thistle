@@ -1,8 +1,7 @@
-from sys.ffi import OwnedDLHandle
-from memory import UnsafePointer, alloc
-from collections import List
-from python import Python
-
+from ffi import OwnedDLHandle
+from std.memory import UnsafePointer, alloc
+from std.collections import List
+from std.python import Python
 
 fn _get_random_lib_path() raises -> String:
     var os_mod = Python.import_module("os")

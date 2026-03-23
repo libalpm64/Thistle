@@ -23,7 +23,7 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
     ](
         out self,
         *,
-        var storage: VariadicListMem[
+        var storage: VariadicList[
             elt_is_mutable=True, origin=origin, Self.ElementType, is_owned=True
         ],
     ):
@@ -80,7 +80,7 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
         return self._ptr[i]
 
     @always_inline
-    fn __getitem__[
+    fn __getitem_param__[
         idx: Some[Indexer]
     ](ref self) -> ref[MutExternalOrigin] Self.ElementType:
         comptime i = index(idx)
@@ -90,7 +90,7 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
 
     # FIXME: temporary workaround
     @always_inline
-    fn __getitem__[
+    fn __getitem_param__[
         idx: Int
     ](ref self) -> ref[MutExternalOrigin] Self.ElementType:
         comptime i = index(idx)
@@ -98,9 +98,17 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
         return self.unsafe_get(i)
 
     @always_inline
+    fn __getitem__(ref self, idx: Int) -> ref[MutExternalOrigin] Self.ElementType:
+        debug_assert(
+            0 <= idx < Self.size,
+            "Index out of bounds: ", idx, " should be in [0, ", Self.size, ")",
+        )
+        return self.unsafe_get(idx)
+
+    @always_inline
     fn unsafe_set[
         _T: Copyable & ImplicitlyDestructible
-    ](mut self: StackInlineArray[_T], idx: Int, var value: _T):
+    ](mut self: StackInlineArray[_T, ...], idx: Int, var value: _T):
         debug_assert(
             0 <= idx < Self.size,
             (

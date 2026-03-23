@@ -15,7 +15,7 @@ clean-pq = "rm -rf libs/src/mldsa-native libs/src/mlkem-native libs/*.so libs/*.
 [dependencies]
 python = ">=3.13"
 max = ">=26.1"
-mojo = "==0.26.1"
+mojo = "==0.26.2"
 
 git = "*"
 make = "*"

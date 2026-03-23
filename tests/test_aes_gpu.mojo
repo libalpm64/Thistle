@@ -451,7 +451,7 @@ def main():
     
     try:
         print("Loading AES mode vectors...")
-        var json_data = load_json("tests/aes_test_vectors.json", py)
+        var json_data = load_json("tests/vectors/aes_test_vectors.json", py)
         var modes = ["AES-128-ECB", "AES-192-ECB", "AES-256-ECB", 
                      "AES-128-CBC", "AES-192-CBC", "AES-256-CBC",
                      "AES-128-CTR", "AES-192-CTR", "AES-256-CTR",

@@ -1,25 +1,5 @@
 # SPDX-License-Identifier: MIT
-#
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies, Martinyuvk
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
+# Copyright (c) 2026 Libalpm64, Lostlab Technologies, Martinyuvk.
 
 """
 BLAKE3 cryptographic hash function
@@ -76,18 +56,6 @@ comptime _v_idxes_arr = [
 
 @always_inline
 fn bit_rotr[n: Int, w: Int](v: SIMD[DType.uint32, w]) -> SIMD[DType.uint32, w]:
-    """Right-rotate a SIMD vector of 32-bit integers.
-
-    Parameters:
-        n: The number of bits to rotate by.
-        w: The width of the SIMD vector.
-
-    Args:
-        v: The vector to rotate.
-
-    Returns:
-        The rotated vector.
-    """
     return (v >> n) | (v << (32 - n))
 
 
@@ -134,19 +102,6 @@ fn g_v[
     x: SIMD[DType.uint32, w],
     y: SIMD[DType.uint32, w],
 ):
-    """The BLAKE3 G function, operating on four columns (or one row) of the state.
-
-    Parameters:
-        w: The width of the SIMD vectors.
-
-    Args:
-        a: State vector a.
-        b: State vector b.
-        c: State vector c.
-        d: State vector d.
-        x: Message word x.
-        y: Message word y.
-    """
     g_v_half1[w](a, b, c, d, x)
     g_v_half2[w](a, b, c, d, y)
 
@@ -162,19 +117,7 @@ fn compress_internal[
     flags: UInt8,
     out_ptr: UnsafePointer[SIMD[DType.uint32, w], MutAnyOrigin],
 ):
-    """The core internal compression function performing 7 rounds of G.
-
-    Parameters:
-        w: The width of the SIMD vectors.
-
-    Args:
-        cv: The chaining value.
-        m: Message words.
-        counter: The chunk counter.
-        blen: The block length.
-        flags: The flag byte.
-        out_ptr: The output pointer to store the resulting 16 SIMD vectors.
-    """
+    """BLAKE3 compression: 7 rounds of G with message permutation."""
     # fmt: off
     var v: StackInlineArray[SIMD[DType.uint32, w], 16] = [
         {cv[0]}, {cv[1]}, {cv[2]}, {cv[3]}, {cv[4]}, {cv[5]}, {cv[6]}, {cv[7]},
@@ -220,17 +163,6 @@ fn compress_internal[
 
 @always_inline
 fn rot[n: Int](v: SIMD[DType.uint32, 8]) -> SIMD[DType.uint32, 8]:
-    """Rotate a SIMD vector of 8 32-bit integers.
-
-    Parameters:
-        n: The number of bits to rotate by.
-
-    Args:
-        v: The vector to rotate.
-
-    Returns:
-        The rotated vector.
-    """
     return (v >> n) | (v << (32 - n))
 
 
@@ -243,16 +175,6 @@ fn g_vertical(
     x: SIMD[DType.uint32, 8],
     y: SIMD[DType.uint32, 8],
 ):
-    """Vertical G function for width-8 SIMD types.
-
-    Args:
-        a: State vector a.
-        b: State vector b.
-        c: State vector c.
-        d: State vector d.
-        x: Message word x.
-        y: Message word y.
-    """
     a = a + b + x
     d = rot[16](d ^ a)
     c = c + d
@@ -271,18 +193,7 @@ fn compress_core(
     blen: UInt8,
     flags: UInt8,
 ) -> SIMD[DType.uint32, 16]:
-    """The core compression function for a single block.
-
-    Args:
-        cv: The chaining value.
-        block: The 64-byte message block.
-        counter: The chunk counter.
-        blen: The block length.
-        flags: The flag byte.
-
-    Returns:
-        The resulting 16 words (32 bytes of CV and 32 bytes of output).
-    """
+    """Single-block compression returning 16-word output."""
     # fmt: off
     var m: StackInlineArray[UInt32, 16] = [
         block[0], block[1], block[2], block[3],
@@ -310,19 +221,9 @@ fn compress_internal_16way(
     base_counter: UInt64,
     blen: UInt8,
     flags: UInt8,
-    out_ptr: UnsafePointer[mut=True, SIMD[DType.uint32, 16]],
+    out_ptr: UnsafePointer[SIMD[DType.uint32, 16], MutAnyOrigin],
 ):
-    """16-way SIMD internal compression.
-
-    Args:
-        c: State vectors.
-        m: Message vectors.
-        base_counter: Starting counter for the 16-way batch.
-        blen: Block length.
-        flags: Flag byte.
-        out_ptr: The output pointer to store the resulting 8 vectors of 16-way SIMD words.
-    """
-    # Per-lane sequential counters
+    """16-way SIMD compression with per-lane sequential counters."""
     var counters_low = SIMD[DType.uint32, 16](
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
     )
@@ -384,16 +285,7 @@ fn compress_parallel_8(
     flags: UInt8,
     out_ptr: UnsafePointer[SIMD[DType.uint32, 8], MutAnyOrigin],
 ):
-    """8-way parallel compression.
-
-    Args:
-        cv: The common chaining value for all 8 lanes.
-        m: The message words for all 8 lanes.
-        base_counter: The starting counter for the 8-way batch.
-        blen: The block length.
-        flags: The flags.
-        out_ptr: The output pointer to store the resulting 8 CVs.
-    """
+    """8-way parallel compression with shared CV."""
     var counters_low = SIMD[DType.uint32, 8](0, 1, 2, 3, 4, 5, 6, 7) + (
         UInt32(base_counter & 0xFFFFFFFF)
     )
@@ -439,17 +331,7 @@ fn compress_parallel_16_per_lane(
     flags: UInt8,
     out_ptr: UnsafePointer[SIMD[DType.uint32, 8], MutAnyOrigin],
 ):
-    """16-way parallel compression with per-lane CVs.
-
-    Args:
-        cv_lanes: The 16 chaining values.
-        ma: First 8 lanes' message words.
-        mb: Next 8 lanes' message words.
-        base_counter: Starting counter.
-        blen: Block length.
-        flags: Flags.
-        out_ptr: The output pointer to store the resulting 16 CVs.
-    """
+    """16-way parallel compression with per-lane CVs."""
 
     # fmt: off
     comptime transpose_8x8_idxes: IndexList[64] = [
@@ -567,16 +449,11 @@ struct Hasher:
         self.chunk_counter = 0
         self.blocks_compressed = 0
 
-    fn update(mut self, input: Span[UInt8]):
+    fn update(mut self, input: Span[UInt8, ...]):
         var d = input
         while len(d) > 0:
             if self.buf_len == 64:
-                # TODO: use simd_width_of[dtype]() and make the functions
-                # be more generic based on the width
                 var blk = (
-                    # Note: Defaults to AVX2 (AVX-512 = Width 32)
-                    # Will need to use Sys to set targets any target that dooesn't support AVX2 will spill (ARM)
-                    # Sys is just a pain to use at the moment there's like hundreds of targets so it's useless to try and target all cpus.
                     self.buf.unsafe_ptr().bitcast[UInt32]().load[width=16]()
                 )
 
@@ -656,11 +533,7 @@ struct Hasher:
 
     @always_inline
     fn finalize(self, out_len: Int, out out_buf: List[UInt8]):
-        """Finalize the hash and return the output.
-        
-        Args:
-            out_len: The number of bytes to write.
-        """
+        """Finalize the hash and return the output."""
         out_buf = {unsafe_uninit_length=out_len}
         var temp_buf = StackInlineArray[UInt8, 64](uninitialized=True)
 
@@ -668,9 +541,6 @@ struct Hasher:
         for i in range(64):
             temp_buf[i] = self.buf[i] & splat(i < self.buf_len)
 
-        # TODO: use simd_width_of[dtype]() and make everything more generic
-        # Note: Defaults to AVX2 (AVX-512 = Width 32)
-        # Will need to use Sys to set targets any target that dooesn't support AVX2 will spill (ARM)
         var blk = temp_buf.unsafe_ptr().bitcast[UInt32]().load[width=16]()
 
         var flags = (
@@ -726,7 +596,7 @@ struct Hasher:
 
 
 @always_inline
-fn blake3_parallel_hash(input: Span[UInt8], out_len: Int = 32) -> List[UInt8]:
+fn blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) -> List[UInt8]:
     var d = input
     var total_chunks = (len(d) + CHUNK_LEN - 1) // CHUNK_LEN
 
@@ -749,9 +619,6 @@ fn blake3_parallel_hash(input: Span[UInt8], out_len: Int = 32) -> List[UInt8]:
         var local_cvs = StackInlineArray[SIMD[DType.uint32, 8], 64](
             uninitialized=True
         )
-        # TODO: I think there is a lot of room for perf improvement here
-        # because these transformations are known at compile time, we should
-        # be able to vectorize this according to the device's simd_width
         for i in range(0, BSIZE, 16):
             var base = task_base + i
             # fmt: off
@@ -889,5 +756,5 @@ fn blake3_parallel_hash(input: Span[UInt8], out_len: Int = 32) -> List[UInt8]:
     return h.finalize(out_len)
 
 
-fn blake3_hash(input: Span[UInt8], out_len: Int = 32) -> List[UInt8]:
+fn blake3_hash(input: Span[UInt8, ...], out_len: Int = 32) -> List[UInt8]:
     return blake3_parallel_hash(input, out_len)

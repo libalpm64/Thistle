@@ -1,9 +1,9 @@
-from time import perf_counter, perf_counter_ns
-from collections import List
-from algorithm import parallelize
-from random import random_ui64, seed
-from math import ceildiv
-from sys import has_accelerator
+from std.time import perf_counter, perf_counter_ns
+from std.collections import List
+from std.algorithm import parallelize
+from std.random import random_ui64, seed
+from std.math import ceildiv
+from std.sys import has_accelerator
 
 from thistle.argon2 import Argon2id
 from thistle.blake2b import Blake2b
@@ -35,7 +35,7 @@ fn generate_data(length: Int) -> List[UInt8]:
 
 
 fn benchmark_sha256(data: List[UInt8], duration_secs: Float64) -> String:
-    var span = Span[UInt8](data)
+    var span = Span[UInt8, ...](data)
     _ = sha256_hash(span)
     var count = 0
     var start = perf_counter()
@@ -46,11 +46,11 @@ fn benchmark_sha256(data: List[UInt8], duration_secs: Float64) -> String:
     var duration = end - start
     var mb = Float64(len(data) * count) / (1024 * 1024)
     var mbps = mb / duration
-    return "sha256 | throughput: " + String(mbps)[:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[:4] + "s"
+    return "sha256 | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
 fn benchmark_sha512(data: List[UInt8], duration_secs: Float64) -> String:
-    var span = Span[UInt8](data)
+    var span = Span[UInt8, ...](data)
     _ = sha512_hash(span)
     var count = 0
     var start = perf_counter()
@@ -61,11 +61,11 @@ fn benchmark_sha512(data: List[UInt8], duration_secs: Float64) -> String:
     var duration = end - start
     var mb = Float64(len(data) * count) / (1024 * 1024)
     var mbps = mb / duration
-    return "sha512 | throughput: " + String(mbps)[:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[:4] + "s"
+    return "sha512 | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
 fn benchmark_sha3_256(data: List[UInt8], duration_secs: Float64) -> String:
-    var span = Span[UInt8](data)
+    var span = Span[UInt8, ...](data)
     _ = sha3_256(span)
     var count = 0
     var start = perf_counter()
@@ -76,11 +76,11 @@ fn benchmark_sha3_256(data: List[UInt8], duration_secs: Float64) -> String:
     var duration = end - start
     var mb = Float64(len(data) * count) / (1024 * 1024)
     var mbps = mb / duration
-    return "sha3-256 | throughput: " + String(mbps)[:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[:4] + "s"
+    return "sha3-256 | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
 fn benchmark_blake2b(data: List[UInt8], duration_secs: Float64) -> String:
-    var span = Span[UInt8](data)
+    var span = Span[UInt8, ...](data)
     var count = 0
     var start = perf_counter()
     while perf_counter() - start < duration_secs:
@@ -92,11 +92,11 @@ fn benchmark_blake2b(data: List[UInt8], duration_secs: Float64) -> String:
     var duration = end - start
     var mb = Float64(len(data) * count) / (1024 * 1024)
     var mbps = mb / duration
-    return "blake2b | throughput: " + String(mbps)[:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[:4] + "s"
+    return "blake2b | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
 fn benchmark_blake3(data: List[UInt8], duration_secs: Float64) -> String:
-    var span = Span[UInt8](data)
+    var span = Span[UInt8, ...](data)
     _ = blake3_parallel_hash(span)
     var count = 0
     var start = perf_counter()
@@ -107,19 +107,19 @@ fn benchmark_blake3(data: List[UInt8], duration_secs: Float64) -> String:
     var duration = end - start
     var mb = Float64(len(data) * count) / (1024 * 1024)
     var mbps = mb / duration
-    return "blake3 | throughput: " + String(mbps)[:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[:4] + "s"
+    return "blake3 | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
 fn benchmark_camellia(data_size: Int, duration_secs: Float64) -> String:
     var key = List[UInt8]()
     for i in range(16):
         key.append(UInt8(i))
-    var cipher = CamelliaCipher(Span[UInt8](key))
+    var cipher = CamelliaCipher(Span[UInt8, ...](key))
     
     var data = List[UInt8](capacity=16)
     for i in range(16):
         data.append(UInt8(i % 256))
-    var data_span = Span[UInt8](data)
+    var data_span = Span[UInt8, ...](data)
     
     var checksum: UInt64 = 0
     var count = 0
@@ -132,7 +132,7 @@ fn benchmark_camellia(data_size: Int, duration_secs: Float64) -> String:
     var duration = end - start
     _ = checksum
     var mbps = Float64(count * 16) / (1024 * 1024) / duration
-    return "camellia | throughput: " + String(mbps)[:6] + " mb/s, blocks: " + String(count) + ", time: " + String(duration)[:4] + "s"
+    return "camellia | throughput: " + String(mbps)[byte=:6] + " mb/s, blocks: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
 fn benchmark_chacha20(data_size: Int, duration_secs: Float64) -> String:
@@ -160,7 +160,7 @@ fn benchmark_chacha20(data_size: Int, duration_secs: Float64) -> String:
     _ = checksum
     var mb = Float64(data_size * count) / (1024 * 1024)
     var mbps = mb / duration
-    return "chacha20 | throughput: " + String(mbps)[:6] + " mb/s, encrypts: " + String(count) + ", time: " + String(duration)[:4] + "s"
+    return "chacha20 | throughput: " + String(mbps)[byte=:6] + " mb/s, encrypts: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
 fn benchmark_kcipher2(data_size: Int, duration_secs: Float64) -> String:
@@ -183,7 +183,7 @@ fn benchmark_kcipher2(data_size: Int, duration_secs: Float64) -> String:
     var duration = end - start
     var mb = Float64(data_size * count) / (1024 * 1024)
     var mbps = mb / duration
-    return "kcipher2 | throughput: " + String(mbps)[:6] + " mb/s, encrypts: " + String(count) + ", time: " + String(duration)[:4] + "s"
+    return "kcipher2 | throughput: " + String(mbps)[byte=:6] + " mb/s, encrypts: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
 fn benchmark_argon2(duration_secs: Float64) -> String:
@@ -201,7 +201,7 @@ fn benchmark_argon2(duration_secs: Float64) -> String:
     var end = perf_counter()
     var duration = end - start
     var hps = Float64(count) / duration
-    return "argon2id | throughput: " + String(hps)[:6] + " h/s, hashes: " + String(count) + ", time: " + String(duration)[:4] + "s"
+    return "argon2id | throughput: " + String(hps)[byte=:6] + " h/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
 fn benchmark_aes_cpu(duration_secs: Float64) raises -> String:
@@ -228,7 +228,7 @@ fn benchmark_aes_cpu(duration_secs: Float64) raises -> String:
     pt_bytes.free()
     
     var mbps = Float64(count * 16) / (1024 * 1024) / duration
-    return "aes-128-cpu | throughput: " + String(mbps)[:6] + " mb/s, blocks: " + String(count) + ", time: " + String(duration)[:4] + "s"
+    return "aes-128-cpu | throughput: " + String(mbps)[byte=:6] + " mb/s, blocks: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
 fn benchmark_aes_gpu_ecb() raises -> String:
@@ -308,7 +308,7 @@ fn benchmark_aes_gpu_ecb() raises -> String:
         round_keys.free()
         key_ptr.free()
         
-        return "aes-128-gpu-ecb | throughput: " + String(gbps)[:6] + " gb/s, iterations: " + String(iterations)
+        return "aes-128-gpu-ecb | throughput: " + String(gbps)[byte=:6] + " gb/s, iterations: " + String(iterations)
 
 
 fn benchmark_aes_gpu_cbc() raises -> String:
@@ -396,7 +396,7 @@ fn benchmark_aes_gpu_cbc() raises -> String:
         round_keys.free()
         key_ptr.free()
         
-        return "aes-128-gpu-cbc | throughput: " + String(gbps)[:6] + " gb/s, iterations: " + String(iterations)
+        return "aes-128-gpu-cbc | throughput: " + String(gbps)[byte=:6] + " gb/s, iterations: " + String(iterations)
 
 
 fn benchmark_aes_gpu_ctr() raises -> String:
@@ -484,10 +484,10 @@ fn benchmark_aes_gpu_ctr() raises -> String:
         round_keys.free()
         key_ptr.free()
         
-        return "aes-128-gpu-ctr | throughput: " + String(gbps)[:6] + " gb/s, iterations: " + String(iterations)
+        return "aes-128-gpu-ctr | throughput: " + String(gbps)[byte=:6] + " gb/s, iterations: " + String(iterations)
 
 
-def main():
+def main() raises:
     print("Thistle benchmark:")
     print()
     print("Testing.... please wait for all the tests to conclude.")

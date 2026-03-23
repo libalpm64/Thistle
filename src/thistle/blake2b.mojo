@@ -1,24 +1,5 @@
 # SPDX-License-Identifier: MIT
-#
 # Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
 
 """
 BLAKE2b Implementation in Mojo
@@ -134,7 +115,7 @@ struct Blake2b(Movable):
 
         self.h[0] ^= p0
 
-    fn __init__(out self, out_len: Int, key: Span[UInt8]):
+    fn __init__(out self, out_len: Int, key: Span[UInt8, ...]):
         self.out_len = out_len
         self.key_len = len(key)
         self.h = BLAKE2B_IV
@@ -157,14 +138,14 @@ struct Blake2b(Movable):
                 self.buffer[self.buffer_len] = 0
                 self.buffer_len += 1
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.h = other.h
-        self.t_low = other.t_low
-        self.t_high = other.t_high
-        self.buffer = other.buffer
-        self.buffer_len = other.buffer_len
-        self.out_len = other.out_len
-        self.key_len = other.key_len
+    fn __init__(out self, *, deinit take: Self):
+        self.h = take.h
+        self.t_low = take.t_low
+        self.t_high = take.t_high
+        self.buffer = take.buffer
+        self.buffer_len = take.buffer_len
+        self.out_len = take.out_len
+        self.key_len = take.key_len
 
     fn __del__(deinit self):
         zero_and_free(self.buffer, 128)
@@ -217,7 +198,7 @@ struct Blake2b(Movable):
         self.h[6] ^= v6 ^ v14
         self.h[7] ^= v7 ^ v15
 
-    fn update(mut self, data: Span[UInt8]):
+    fn update(mut self, data: Span[UInt8, ...]):
         var i = 0
         while i < len(data):
             if self.buffer_len == 128:
@@ -290,14 +271,14 @@ fn string_to_bytes(s: String) -> List[UInt8]:
     return data^
 
 
-fn blake2b_hash(data: Span[UInt8], out_len: Int = 64) -> List[UInt8]:
+fn blake2b_hash(data: Span[UInt8, ...], out_len: Int = 64) -> List[UInt8]:
     var ctx = Blake2b(out_len)
     ctx.update(data)
     return ctx.finalize()
 
 
 fn blake2b_hash_keyed(
-    data: Span[UInt8], key: Span[UInt8], out_len: Int = 64
+    data: Span[UInt8, ...], key: Span[UInt8, ...], out_len: Int = 64
 ) -> List[UInt8]:
     var ctx = Blake2b(out_len, key)
     ctx.update(data)
@@ -306,5 +287,5 @@ fn blake2b_hash_keyed(
 
 fn blake2b_hash_string(s: String, out_len: Int = 64) -> String:
     var data = string_to_bytes(s)
-    var hash = blake2b_hash(Span[UInt8](data), out_len)
+    var hash = blake2b_hash(Span[UInt8, ...](data), out_len)
     return bytes_to_hex(hash)

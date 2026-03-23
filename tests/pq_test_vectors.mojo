@@ -1,6 +1,6 @@
-from python import Python
-from python import PythonObject
-from collections import List
+from std.python import Python, PythonObject
+from std.collections import List, Dict
+from std.memory import UnsafePointer, alloc
 from thistle.ml_dsa_native import MLDSA44_SECRETKEYBYTES, MLDSA44_PUBLICKEYBYTES, MLDSA44_BYTES
 from thistle.ml_dsa_native import MLDSA65_SECRETKEYBYTES, MLDSA65_PUBLICKEYBYTES, MLDSA65_BYTES
 from thistle.ml_dsa_native import MLDSA87_SECRETKEYBYTES, MLDSA87_PUBLICKEYBYTES, MLDSA87_BYTES
@@ -28,7 +28,106 @@ from thistle.ml_kem_native import mlkem768_keypair_derand, mlkem768_enc_derand, 
 from thistle.ml_kem_native import mlkem1024_keypair_derand, mlkem1024_enc_derand, mlkem1024_dec, mlkem1024_check_pk, mlkem1024_check_sk
 from thistle.sha2 import sha224_hash, sha256_hash, sha384_hash, sha512_hash
 from thistle.sha3 import sha3_224, sha3_256, sha3_384, sha3_512, shake128, shake256
-from memory import UnsafePointer, alloc
+
+
+comptime KeyPairFn = fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) raises -> Int
+comptime SigIntFn = fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int) raises -> Int
+comptime SigPreHashFn = fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int) raises -> Int
+comptime VerifyFn = fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin]) raises -> Int
+comptime VerifyInternalFn = fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int) raises -> Int
+comptime VerifyPreHashFn = fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int) raises -> Int
+comptime VerifyExtFn = fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) raises -> Int
+comptime MLKKPFn = fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) raises -> Int
+comptime MLKEncFn = fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) raises -> Int
+comptime MLKDecFn = fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) raises -> Int
+comptime MLKCheckFn = fn(UnsafePointer[UInt8, ImmutAnyOrigin]) raises -> Int
+
+
+struct Tables:
+    var kp: Dict[String, KeyPairFn]
+    var sig: Dict[String, SigIntFn]
+    var sigph: Dict[String, SigPreHashFn]
+    var vf: Dict[String, VerifyFn]
+    var vi: Dict[String, VerifyInternalFn]
+    var vph: Dict[String, VerifyPreHashFn]
+    var vem: Dict[String, VerifyExtFn]
+    var mlk_kp: Dict[String, MLKKPFn]
+    var mlk_enc: Dict[String, MLKEncFn]
+    var mlk_dec: Dict[String, MLKDecFn]
+    var mlk_cek: Dict[String, MLKCheckFn]
+    var mlk_cpk: Dict[String, MLKCheckFn]
+
+    fn __init__(out self):
+        self.kp = Dict[String, KeyPairFn]()
+        self.sig = Dict[String, SigIntFn]()
+        self.sigph = Dict[String, SigPreHashFn]()
+        self.vf = Dict[String, VerifyFn]()
+        self.vi = Dict[String, VerifyInternalFn]()
+        self.vph = Dict[String, VerifyPreHashFn]()
+        self.vem = Dict[String, VerifyExtFn]()
+        self.mlk_kp = Dict[String, MLKKPFn]()
+        self.mlk_enc = Dict[String, MLKEncFn]()
+        self.mlk_dec = Dict[String, MLKDecFn]()
+        self.mlk_cek = Dict[String, MLKCheckFn]()
+        self.mlk_cpk = Dict[String, MLKCheckFn]()
+
+        self.kp["ML-DSA-44"] = mldsa44_keypair_internal
+        self.kp["ML-DSA-65"] = mldsa65_keypair_internal
+        self.kp["ML-DSA-87"] = mldsa87_keypair_internal
+
+        self.sig["ML-DSA-44"] = mldsa44_signature_internal
+        self.sig["ML-DSA-65"] = mldsa65_signature_internal
+        self.sig["ML-DSA-87"] = mldsa87_signature_internal
+
+        self.sigph["ML-DSA-44"] = mldsa44_signature_pre_hash_internal
+        self.sigph["ML-DSA-65"] = mldsa65_signature_pre_hash_internal
+        self.sigph["ML-DSA-87"] = mldsa87_signature_pre_hash_internal
+
+        self.vf["ML-DSA-44"] = mldsa44_verify
+        self.vf["ML-DSA-65"] = mldsa65_verify
+        self.vf["ML-DSA-87"] = mldsa87_verify
+
+        self.vi["ML-DSA-44"] = mldsa44_verify_internal
+        self.vi["ML-DSA-65"] = mldsa65_verify_internal
+        self.vi["ML-DSA-87"] = mldsa87_verify_internal
+
+        self.vph["ML-DSA-44"] = mldsa44_verify_pre_hash_internal
+        self.vph["ML-DSA-65"] = mldsa65_verify_pre_hash_internal
+        self.vph["ML-DSA-87"] = mldsa87_verify_pre_hash_internal
+
+        self.vem["ML-DSA-44"] = mldsa44_verify_extmu
+        self.vem["ML-DSA-65"] = mldsa65_verify_extmu
+        self.vem["ML-DSA-87"] = mldsa87_verify_extmu
+
+        self.mlk_kp["ML-KEM-512"] = mlkem512_keypair_derand
+        self.mlk_kp["ML-KEM-768"] = mlkem768_keypair_derand
+        self.mlk_kp["ML-KEM-1024"] = mlkem1024_keypair_derand
+
+        self.mlk_enc["ML-KEM-512"] = mlkem512_enc_derand
+        self.mlk_enc["ML-KEM-768"] = mlkem768_enc_derand
+        self.mlk_enc["ML-KEM-1024"] = mlkem1024_enc_derand
+
+        self.mlk_dec["ML-KEM-512"] = mlkem512_dec
+        self.mlk_dec["ML-KEM-768"] = mlkem768_dec
+        self.mlk_dec["ML-KEM-1024"] = mlkem1024_dec
+
+        self.mlk_cek["ML-KEM-512"] = mlkem512_check_sk
+        self.mlk_cek["ML-KEM-768"] = mlkem768_check_sk
+        self.mlk_cek["ML-KEM-1024"] = mlkem1024_check_sk
+
+        self.mlk_cpk["ML-KEM-512"] = mlkem512_check_pk
+        self.mlk_cpk["ML-KEM-768"] = mlkem768_check_pk
+        self.mlk_cpk["ML-KEM-1024"] = mlkem1024_check_pk
+
+
+# --- Helpers ---
+
+fn _copy_ptr(ptr: UnsafePointer[UInt8, MutAnyOrigin], size: Int) -> List[UInt8]:
+    var result = List[UInt8](capacity=size)
+    for i in range(size):
+        result.append(ptr[i])
+    return result^
+
 
 fn hex_char_to_val(c: Int) -> UInt8:
     if c >= 48 and c <= 57:
@@ -62,26 +161,25 @@ struct TestResult(Copyable, Movable):
 
 fn compute_hash(data: List[UInt8], alg: String) raises -> List[UInt8]:
     if alg == "SHA2-224":
-        return sha224_hash(Span[UInt8](data))
+        return sha224_hash(Span[UInt8, ...](data))
     if alg == "SHA2-256":
-        return sha256_hash(Span[UInt8](data))
+        return sha256_hash(Span[UInt8, ...](data))
     if alg == "SHA2-384":
-        return sha384_hash(Span[UInt8](data))
+        return sha384_hash(Span[UInt8, ...](data))
     if alg == "SHA2-512":
-        return sha512_hash(Span[UInt8](data))
+        return sha512_hash(Span[UInt8, ...](data))
     if alg == "SHA3-224":
-        return sha3_224(Span[UInt8](data))
+        return sha3_224(Span[UInt8, ...](data))
     if alg == "SHA3-256":
-        return sha3_256(Span[UInt8](data))
+        return sha3_256(Span[UInt8, ...](data))
     if alg == "SHA3-384":
-        return sha3_384(Span[UInt8](data))
+        return sha3_384(Span[UInt8, ...](data))
     if alg == "SHA3-512":
-        return sha3_512(Span[UInt8](data))
+        return sha3_512(Span[UInt8, ...](data))
     if alg == "SHAKE-128":
-        return shake128(Span[UInt8](data), 32)
+        return shake128(Span[UInt8, ...](data), 32)
     if alg == "SHAKE-256":
-        return shake256(Span[UInt8](data), 64)
-    # SHA2-512/224 and SHA2-512/256 not supported (Who uses this?)
+        return shake256(Span[UInt8, ...](data), 64)
     return List[UInt8]()
 
 
@@ -117,102 +215,103 @@ fn hash_alg_to_int(alg: String) -> Int:
     return 0
 
 
-fn test_mldsa_keygen(json_data: PythonObject, expected_data: PythonObject, py: PythonObject) raises -> TestResult:
+fn _mldsa_pk_size(ps: String) -> Int:
+    if ps == "ML-DSA-44":
+        return MLDSA44_PUBLICKEYBYTES
+    if ps == "ML-DSA-65":
+        return MLDSA65_PUBLICKEYBYTES
+    return MLDSA87_PUBLICKEYBYTES
+
+
+fn _mldsa_sk_size(ps: String) -> Int:
+    if ps == "ML-DSA-44":
+        return MLDSA44_SECRETKEYBYTES
+    if ps == "ML-DSA-65":
+        return MLDSA65_SECRETKEYBYTES
+    return MLDSA87_SECRETKEYBYTES
+
+
+fn _mldsa_sig_size(ps: String) -> Int:
+    if ps == "ML-DSA-44":
+        return MLDSA44_BYTES
+    if ps == "ML-DSA-65":
+        return MLDSA65_BYTES
+    return MLDSA87_BYTES
+
+
+# --- ML-DSA Test Functions ---
+
+fn test_mldsa_keygen(ref tables: Tables, json_data: PythonObject, expected_data: PythonObject, py: PythonObject) raises -> TestResult:
     var passed = 0
     var failed = 0
     var failures = List[String]()
-    
+
     var test_groups = json_data["testGroups"]
     var exp_groups = expected_data["testGroups"]
     var tg_count = Int(py=test_groups.__len__())
-    
+
     for tg_idx in range(tg_count):
         var tg = test_groups[tg_idx]
         var exp_tg = exp_groups[tg_idx]
         var tests = tg["tests"]
         var exp_tests = exp_tg["tests"]
         var tc_count = Int(py=tests.__len__())
-        
         var param_set = String(tg["parameterSet"])
-        
+
+        if param_set not in tables.kp:
+            failed += tc_count
+            failures.append("ML-DSA keygen: unknown parameter set " + param_set)
+            continue
+
+        var pk_size = _mldsa_pk_size(param_set)
+        var sk_size = _mldsa_sk_size(param_set)
+
         for tc_idx in range(tc_count):
             var tc = tests[tc_idx]
             var exp_tc = exp_tests[tc_idx]
             var tc_id = Int(py=tc["tcId"])
-            var seed_hex = String(tc["seed"])
-            var expected_pk_hex = String(exp_tc["pk"])
-            
-            var seed = hex_to_bytes(seed_hex)
-            
-            var pk_bytes: List[UInt8]
-            var sk_ptr: UnsafePointer[UInt8, MutAnyOrigin]
-            var pk_ptr: UnsafePointer[UInt8, MutAnyOrigin]
-            var result: Int
-            
-            if param_set == "ML-DSA-44":
-                pk_ptr = alloc[UInt8](MLDSA44_PUBLICKEYBYTES)
-                sk_ptr = alloc[UInt8](MLDSA44_SECRETKEYBYTES)
-                result = mldsa44_keypair_internal(pk_ptr, sk_ptr, seed.unsafe_ptr())
-                pk_bytes = List[UInt8](capacity=MLDSA44_PUBLICKEYBYTES)
-                for i in range(MLDSA44_PUBLICKEYBYTES):
-                    pk_bytes.append(pk_ptr[i])
-            elif param_set == "ML-DSA-65":
-                pk_ptr = alloc[UInt8](MLDSA65_PUBLICKEYBYTES)
-                sk_ptr = alloc[UInt8](MLDSA65_SECRETKEYBYTES)
-                result = mldsa65_keypair_internal(pk_ptr, sk_ptr, seed.unsafe_ptr())
-                pk_bytes = List[UInt8](capacity=MLDSA65_PUBLICKEYBYTES)
-                for i in range(MLDSA65_PUBLICKEYBYTES):
-                    pk_bytes.append(pk_ptr[i])
-            elif param_set == "ML-DSA-87":
-                pk_ptr = alloc[UInt8](MLDSA87_PUBLICKEYBYTES)
-                sk_ptr = alloc[UInt8](MLDSA87_SECRETKEYBYTES)
-                result = mldsa87_keypair_internal(pk_ptr, sk_ptr, seed.unsafe_ptr())
-                pk_bytes = List[UInt8](capacity=MLDSA87_PUBLICKEYBYTES)
-                for i in range(MLDSA87_PUBLICKEYBYTES):
-                    pk_bytes.append(pk_ptr[i])
-            else:
-                failed += 1
-                failures.append("ML-DSA keygen tcId " + String(tc_id) + ": unknown parameter set " + param_set)
-                continue
-            
+
+            var seed = hex_to_bytes(String(tc["seed"]))
+            var pk_ptr = alloc[UInt8](pk_size)
+            var sk_ptr = alloc[UInt8](sk_size)
+            var result = tables.kp[param_set](pk_ptr, sk_ptr, seed.unsafe_ptr())
+
             if result != MLD_ERR_OK:
                 pk_ptr.free()
                 sk_ptr.free()
                 failed += 1
-                failures.append("ML-DSA keygen tcId " + String(tc_id) + ": keypair generation failed with code " + String(result))
+                failures.append("ML-DSA keygen tcId " + String(tc_id) + ": keypair failed code " + String(result))
                 continue
-            
-            var got_pk_hex = bytes_to_hex_str(pk_bytes)
-            
+
+            var pk_bytes = _copy_ptr(pk_ptr, pk_size)
             pk_ptr.free()
             sk_ptr.free()
-            
-            if got_pk_hex == expected_pk_hex:
+
+            if bytes_to_hex_str(pk_bytes) == String(exp_tc["pk"]):
                 passed += 1
             else:
                 failed += 1
                 failures.append("ML-DSA keygen tcId " + String(tc_id) + ": pk mismatch")
-    
+
     return TestResult(passed, failed, failures^)
 
 
-fn test_mldsa_siggen(json_data: PythonObject, expected_data: PythonObject, py: PythonObject) raises -> TestResult:
+fn test_mldsa_siggen(ref tables: Tables, json_data: PythonObject, expected_data: PythonObject, py: PythonObject) raises -> TestResult:
     var passed = 0
     var failed = 0
     var failures = List[String]()
-    
+
     var test_groups = json_data["testGroups"]
     var exp_groups = expected_data["testGroups"]
     var tg_count = Int(py=test_groups.__len__())
-    print("sigGen: " + String(tg_count) + " test groups")
-    
+
     for tg_idx in range(tg_count):
         var tg = test_groups[tg_idx]
         var exp_tg = exp_groups[tg_idx]
         var tests = tg["tests"]
         var exp_tests = exp_tg["tests"]
         var tc_count = Int(py=tests.__len__())
-        
+
         var param_set = String(tg["parameterSet"])
         var pre_hash: String = ""
         if "preHash" in tg:
@@ -220,48 +319,39 @@ fn test_mldsa_siggen(json_data: PythonObject, expected_data: PythonObject, py: P
         var sig_interface: String = "external"
         if "signatureInterface" in tg:
             sig_interface = String(tg["signatureInterface"])
-        var external_mu: Bool = False
-        if "externalMu" in tg:
-            external_mu = Bool(tg["externalMu"])
-        print("TG " + String(tg_idx) + ": " + param_set + ", preHash=" + pre_hash + ", interface=" + sig_interface + ", " + String(tc_count) + " tests")
-        
+
+        if param_set not in tables.sig:
+            failed += tc_count
+            failures.append("ML-DSA sigGen: unknown param set " + param_set)
+            continue
+
         for tc_idx in range(tc_count):
             var tc = tests[tc_idx]
             var exp_tc = exp_tests[tc_idx]
             var tc_id = Int(py=tc["tcId"])
-            
+
             var message_hex: String
             var externalmu_arg: Int = 0
             if "message" in tc:
                 message_hex = String(tc["message"])
-                externalmu_arg = 0
             elif "mu" in tc:
                 message_hex = String(tc["mu"])
                 externalmu_arg = 1
             else:
                 failed += 1
-                failures.append("ML-DSA sigGen tcId " + String(tc_id) + ": no message or mu field")
+                failures.append("ML-DSA sigGen tcId " + String(tc_id) + ": no message or mu")
                 continue
-                
-            var sk_hex = String(tc["sk"])
-            var context_hex: String = ""
-            if "context" in tc:
-                context_hex = String(tc["context"])
+
+            var sk = hex_to_bytes(String(tc["sk"]))
+            var context = hex_to_bytes(String(tc.get("context", "")))
             var expected_sig_hex = String(exp_tc["signature"])
-            
-            var hash_alg: String = ""
-            if "hashAlg" in tc:
-                hash_alg = String(tc["hashAlg"])
-            
+            var hash_alg = String(tc.get("hashAlg", ""))
+
             if hash_alg != "" and not is_supported_hash(hash_alg):
                 continue
-            
+
             var message = hex_to_bytes(message_hex)
-            var sk = hex_to_bytes(sk_hex)
-            var context = hex_to_bytes(context_hex)
-            
-            # For internal interface: prefix is empty (NULL, 0)
-            # For external interface: prefix is [0, ctxlen, context...]
+
             var prefix: List[UInt8]
             if sig_interface == "internal":
                 prefix = List[UInt8]()
@@ -271,8 +361,7 @@ fn test_mldsa_siggen(json_data: PythonObject, expected_data: PythonObject, py: P
                 prefix.append(UInt8(len(context)))
                 for i in range(len(context)):
                     prefix.append(context[i])
-            
-            # test-provided rnd for randomized, zeros for deterministic tests.
+
             var rnd: List[UInt8]
             if "rnd" in tc:
                 rnd = hex_to_bytes(String(tc["rnd"]))
@@ -280,146 +369,51 @@ fn test_mldsa_siggen(json_data: PythonObject, expected_data: PythonObject, py: P
                 rnd = List[UInt8](capacity=MLDSA_RNDBYTES)
                 for i in range(MLDSA_RNDBYTES):
                     rnd.append(0)
-            
-            var sig_bytes: List[UInt8]
-            var sig_ptr: UnsafePointer[UInt8, MutAnyOrigin]
-            var siglen_ptr: UnsafePointer[UInt64, MutAnyOrigin]
+
+            var sig_size = _mldsa_sig_size(param_set)
+            var sig_ptr = alloc[UInt8](sig_size)
+            var siglen_ptr = alloc[UInt64](1)
+            siglen_ptr[0] = sig_size
+
             var result: Int
-            var sig_size: Int
-            
-            var pre_hashed_msg: List[UInt8] = List[UInt8]()
-            var hash_alg_int: Int = 0
             if pre_hash == "preHash" and hash_alg != "":
-                pre_hashed_msg = compute_hash(message, hash_alg)
-                hash_alg_int = hash_alg_to_int(hash_alg)
-            
-            if param_set == "ML-DSA-44":
-                sig_size = MLDSA44_BYTES
-                sig_ptr = alloc[UInt8](sig_size)
-                siglen_ptr = alloc[UInt64](1)
-                siglen_ptr[0] = sig_size
-                
-                if pre_hash == "preHash" and hash_alg != "" and hash_alg_int != 0:
-                    result = mldsa44_signature_pre_hash_internal(
-                        sig_ptr, siglen_ptr,
-                        pre_hashed_msg.unsafe_ptr(), len(pre_hashed_msg),
-                        context.unsafe_ptr(), len(context),
-                        rnd.unsafe_ptr(),
-                        sk.unsafe_ptr(),
-                        hash_alg_int
-                    )
-                else:
-                    result = mldsa44_signature_internal(
-                        sig_ptr, siglen_ptr,
-                        message.unsafe_ptr(), len(message),
-                        prefix.unsafe_ptr(), len(prefix),
-                        rnd.unsafe_ptr(),
-                        sk.unsafe_ptr(),
-                        externalmu_arg
-                    )
-                sig_bytes = List[UInt8](capacity=sig_size)
-                for i in range(sig_size):
-                    sig_bytes.append(sig_ptr[i])
-                    
-            elif param_set == "ML-DSA-65":
-                sig_size = MLDSA65_BYTES
-                sig_ptr = alloc[UInt8](sig_size)
-                siglen_ptr = alloc[UInt64](1)
-                siglen_ptr[0] = sig_size
-                
-                if pre_hash == "preHash" and hash_alg != "" and hash_alg_int != 0:
-                    result = mldsa65_signature_pre_hash_internal(
-                        sig_ptr, siglen_ptr,
-                        pre_hashed_msg.unsafe_ptr(), len(pre_hashed_msg),
-                        context.unsafe_ptr(), len(context),
-                        rnd.unsafe_ptr(),
-                        sk.unsafe_ptr(),
-                        hash_alg_int
-                    )
-                else:
-                    result = mldsa65_signature_internal(
-                        sig_ptr, siglen_ptr,
-                        message.unsafe_ptr(), len(message),
-                        prefix.unsafe_ptr(), len(prefix),
-                        rnd.unsafe_ptr(),
-                        sk.unsafe_ptr(),
-                        externalmu_arg
-                    )
-                sig_bytes = List[UInt8](capacity=sig_size)
-                for i in range(sig_size):
-                    sig_bytes.append(sig_ptr[i])
-                    
-            elif param_set == "ML-DSA-87":
-                sig_size = MLDSA87_BYTES
-                sig_ptr = alloc[UInt8](sig_size)
-                siglen_ptr = alloc[UInt64](1)
-                siglen_ptr[0] = sig_size
-                
-                if pre_hash == "preHash" and hash_alg != "" and hash_alg_int != 0:
-                    result = mldsa87_signature_pre_hash_internal(
-                        sig_ptr, siglen_ptr,
-                        pre_hashed_msg.unsafe_ptr(), len(pre_hashed_msg),
-                        context.unsafe_ptr(), len(context),
-                        rnd.unsafe_ptr(),
-                        sk.unsafe_ptr(),
-                        hash_alg_int
-                    )
-                else:
-                    result = mldsa87_signature_internal(
-                        sig_ptr, siglen_ptr,
-                        message.unsafe_ptr(), len(message),
-                        prefix.unsafe_ptr(), len(prefix),
-                        rnd.unsafe_ptr(),
-                        sk.unsafe_ptr(),
-                        externalmu_arg
-                    )
-                sig_bytes = List[UInt8](capacity=sig_size)
-                for i in range(sig_size):
-                    sig_bytes.append(sig_ptr[i])
-                    
+                var pre_hashed_msg = compute_hash(message, hash_alg)
+                result = tables.sigph[param_set](sig_ptr, siglen_ptr, pre_hashed_msg.unsafe_ptr(), len(pre_hashed_msg), context.unsafe_ptr(), len(context), rnd.unsafe_ptr(), sk.unsafe_ptr(), hash_alg_to_int(hash_alg))
             else:
-                failed += 1
-                failures.append("ML-DSA sigGen tcId " + String(tc_id) + ": unknown parameter set " + param_set)
-                continue
-            
-            if result != MLD_ERR_OK:
-                sig_ptr.free()
-                siglen_ptr.free()
-                failed += 1
-                failures.append("ML-DSA sigGen tcId " + String(tc_id) + ": signature failed with code " + String(result))
-                continue
-            
-            var got_sig_hex = bytes_to_hex_str(sig_bytes)
-            
+                result = tables.sig[param_set](sig_ptr, siglen_ptr, message.unsafe_ptr(), len(message), prefix.unsafe_ptr(), len(prefix), rnd.unsafe_ptr(), sk.unsafe_ptr(), externalmu_arg)
+
+            var sig_bytes = _copy_ptr(sig_ptr, sig_size)
             sig_ptr.free()
             siglen_ptr.free()
-            
-            if got_sig_hex == expected_sig_hex:
+
+            if result != MLD_ERR_OK:
+                failed += 1
+                failures.append("ML-DSA sigGen tcId " + String(tc_id) + ": failed code " + String(result))
+            elif bytes_to_hex_str(sig_bytes) == expected_sig_hex:
                 passed += 1
             else:
                 failed += 1
                 failures.append("ML-DSA sigGen tcId " + String(tc_id) + ": sig mismatch")
-    
+
     return TestResult(passed, failed, failures^)
 
 
-fn test_mldsa_sigver(json_data: PythonObject, expected_data: PythonObject, py: PythonObject) raises -> TestResult:
+fn test_mldsa_sigver(ref tables: Tables, json_data: PythonObject, expected_data: PythonObject, py: PythonObject) raises -> TestResult:
     var passed = 0
     var failed = 0
     var failures = List[String]()
-    
+
     var test_groups = json_data["testGroups"]
     var exp_groups = expected_data["testGroups"]
     var tg_count = Int(py=test_groups.__len__())
-    print("sigVer: " + String(tg_count) + " test groups")
-    
+
     for tg_idx in range(tg_count):
         var tg = test_groups[tg_idx]
         var exp_tg = exp_groups[tg_idx]
         var tests = tg["tests"]
         var exp_tests = exp_tg["tests"]
         var tc_count = Int(py=tests.__len__())
-        
+
         var param_set = String(tg["parameterSet"])
         var pre_hash: String = ""
         if "preHash" in tg:
@@ -430,491 +424,247 @@ fn test_mldsa_sigver(json_data: PythonObject, expected_data: PythonObject, py: P
         var external_mu: Bool = False
         if "externalMu" in tg:
             external_mu = Bool(tg["externalMu"])
-        print("TG " + String(tg_idx) + ": " + param_set + ", preHash=" + pre_hash + ", interface=" + sig_interface + ", externalMu=" + String(external_mu) + ", " + String(tc_count) + " tests")
-        
+
         for tc_idx in range(tc_count):
             var tc = tests[tc_idx]
             var exp_tc = exp_tests[tc_idx]
             var tc_id = Int(py=tc["tcId"])
-            
-            var pk_hex = String(tc["pk"])
+
+            var pk = hex_to_bytes(String(tc["pk"]))
             var message_hex: String
             var is_mu: Bool = False
             if "message" in tc:
                 message_hex = String(tc["message"])
-                is_mu = False
             elif "mu" in tc:
                 message_hex = String(tc["mu"])
                 is_mu = True
             else:
                 failed += 1
-                failures.append("ML-DSA sigVer tcId " + String(tc_id) + ": no message or mu field")
+                failures.append("ML-DSA sigVer tcId " + String(tc_id) + ": no message or mu")
                 continue
-            
-            var context_hex: String = ""
-            if "context" in tc:
-                context_hex = String(tc["context"])
-            var signature_hex = String(tc["signature"])
+
+            var context = hex_to_bytes(String(tc.get("context", "")))
+            var signature = hex_to_bytes(String(tc["signature"]))
             var expected_pass = Bool(exp_tc["testPassed"])
-            
-            var hash_alg: String = ""
-            if "hashAlg" in tc:
-                hash_alg = String(tc["hashAlg"])
-            
+            var hash_alg = String(tc.get("hashAlg", ""))
+
             if hash_alg != "" and not is_supported_hash(hash_alg):
                 continue
-            
-            var pk = hex_to_bytes(pk_hex)
+
             var message = hex_to_bytes(message_hex)
-            var context = hex_to_bytes(context_hex)
-            var signature = hex_to_bytes(signature_hex)
-            
-            # Compute pre-hash if needed
+
             var pre_hashed_msg: List[UInt8] = List[UInt8]()
             var hash_alg_int: Int = 0
             if pre_hash == "preHash" and hash_alg != "":
                 pre_hashed_msg = compute_hash(message, hash_alg)
                 hash_alg_int = hash_alg_to_int(hash_alg)
-            
+
             var result: Int
-            
-            if param_set == "ML-DSA-44":
-                if external_mu and is_mu:
-                    # verify_extmu for externalMu=True tests
-                    result = mldsa44_verify_extmu(
-                        signature.unsafe_ptr(), len(signature),
-                        message.unsafe_ptr(),
-                        pk.unsafe_ptr()
-                    )
-                elif pre_hash == "preHash" and hash_alg != "" and hash_alg_int != 0:
-                    result = mldsa44_verify_pre_hash_internal(
-                        signature.unsafe_ptr(), len(signature),
-                        pre_hashed_msg.unsafe_ptr(), len(pre_hashed_msg),
-                        context.unsafe_ptr(), len(context),
-                        pk.unsafe_ptr(),
-                        hash_alg_int
-                    )
-                elif sig_interface == "internal":
-                    # the internal interface prefix is empty here
-                    result = mldsa44_verify_internal(
-                        signature.unsafe_ptr(), len(signature),
-                        message.unsafe_ptr(), len(message),
-                        UnsafePointer[UInt8, ImmutAnyOrigin](), 0,
-                        pk.unsafe_ptr(),
-                        0
-                    )
-                else:
-                    result = mldsa44_verify(
-                        signature.unsafe_ptr(), len(signature),
-                        message.unsafe_ptr(), len(message),
-                        context.unsafe_ptr(), len(context),
-                        pk.unsafe_ptr()
-                    )
-                    
-            elif param_set == "ML-DSA-65":
-                if external_mu and is_mu:
-                    result = mldsa65_verify_extmu(
-                        signature.unsafe_ptr(), len(signature),
-                        message.unsafe_ptr(),
-                        pk.unsafe_ptr()
-                    )
-                elif pre_hash == "preHash" and hash_alg != "" and hash_alg_int != 0:
-                    result = mldsa65_verify_pre_hash_internal(
-                        signature.unsafe_ptr(), len(signature),
-                        pre_hashed_msg.unsafe_ptr(), len(pre_hashed_msg),
-                        context.unsafe_ptr(), len(context),
-                        pk.unsafe_ptr(),
-                        hash_alg_int
-                    )
-                elif sig_interface == "internal":
-                    result = mldsa65_verify_internal(
-                        signature.unsafe_ptr(), len(signature),
-                        message.unsafe_ptr(), len(message),
-                        UnsafePointer[UInt8, ImmutAnyOrigin](), 0,
-                        pk.unsafe_ptr(),
-                        0
-                    )
-                else:
-                    result = mldsa65_verify(
-                        signature.unsafe_ptr(), len(signature),
-                        message.unsafe_ptr(), len(message),
-                        context.unsafe_ptr(), len(context),
-                        pk.unsafe_ptr()
-                    )
-                    
-            elif param_set == "ML-DSA-87":
-                if external_mu and is_mu:
-                    result = mldsa87_verify_extmu(
-                        signature.unsafe_ptr(), len(signature),
-                        message.unsafe_ptr(),
-                        pk.unsafe_ptr()
-                    )
-                elif pre_hash == "preHash" and hash_alg != "" and hash_alg_int != 0:
-                    result = mldsa87_verify_pre_hash_internal(
-                        signature.unsafe_ptr(), len(signature),
-                        pre_hashed_msg.unsafe_ptr(), len(pre_hashed_msg),
-                        context.unsafe_ptr(), len(context),
-                        pk.unsafe_ptr(),
-                        hash_alg_int
-                    )
-                elif sig_interface == "internal":
-                    result = mldsa87_verify_internal(
-                        signature.unsafe_ptr(), len(signature),
-                        message.unsafe_ptr(), len(message),
-                        UnsafePointer[UInt8, ImmutAnyOrigin](), 0,
-                        pk.unsafe_ptr(),
-                        0
-                    )
-                else:
-                    result = mldsa87_verify(
-                        signature.unsafe_ptr(), len(signature),
-                        message.unsafe_ptr(), len(message),
-                        context.unsafe_ptr(), len(context),
-                        pk.unsafe_ptr()
-                    )
+            if external_mu and is_mu:
+                result = tables.vem[param_set](signature.unsafe_ptr(), len(signature), message.unsafe_ptr(), pk.unsafe_ptr())
+            elif pre_hash == "preHash" and hash_alg != "" and hash_alg_int != 0:
+                result = tables.vph[param_set](signature.unsafe_ptr(), len(signature), pre_hashed_msg.unsafe_ptr(), len(pre_hashed_msg), context.unsafe_ptr(), len(context), pk.unsafe_ptr(), hash_alg_int)
+            elif sig_interface == "internal":
+                result = tables.vi[param_set](signature.unsafe_ptr(), len(signature), message.unsafe_ptr(), len(message), UnsafePointer[UInt8, ImmutAnyOrigin](), 0, pk.unsafe_ptr(), 0)
             else:
-                failed += 1
-                failures.append("ML-DSA sigVer tcId " + String(tc_id) + ": unknown parameter set " + param_set)
-                continue
-            
+                result = tables.vf[param_set](signature.unsafe_ptr(), len(signature), message.unsafe_ptr(), len(message), context.unsafe_ptr(), len(context), pk.unsafe_ptr())
+
             var verify_passed = (result == MLD_ERR_OK)
             if verify_passed == expected_pass:
                 passed += 1
             else:
                 failed += 1
                 if expected_pass:
-                    failures.append("ML-DSA sigVer tcId " + String(tc_id) + ": expected pass but verify failed")
+                    failures.append("ML-DSA sigVer tcId " + String(tc_id) + ": expected pass but failed")
                 else:
-                    failures.append("ML-DSA sigVer tcId " + String(tc_id) + ": expected fail but verify passed")
-    
+                    failures.append("ML-DSA sigVer tcId " + String(tc_id) + ": expected fail but passed")
+
     return TestResult(passed, failed, failures^)
 
 
-fn test_mlkem_keygen(json_data: PythonObject, expected_data: PythonObject, py: PythonObject) raises -> TestResult:
+# --- ML-KEM Test Functions ---
+
+fn test_mlkem_keygen(ref tables: Tables, json_data: PythonObject, expected_data: PythonObject, py: PythonObject) raises -> TestResult:
     var passed = 0
     var failed = 0
     var failures = List[String]()
-    
+
     var test_groups = json_data["testGroups"]
     var exp_groups = expected_data["testGroups"]
     var tg_count = Int(py=test_groups.__len__())
-    
+
     for tg_idx in range(tg_count):
         var tg = test_groups[tg_idx]
         var exp_tg = exp_groups[tg_idx]
         var tests = tg["tests"]
         var exp_tests = exp_tg["tests"]
         var tc_count = Int(py=tests.__len__())
-        
         var param_set = String(tg["parameterSet"])
-        
+
+        if param_set not in tables.mlk_kp:
+            failed += tc_count
+            failures.append("ML-KEM keygen: unknown param set " + param_set)
+            continue
+
+        var pk_size: Int
+        var sk_size: Int
+        if param_set == "ML-KEM-512":
+            pk_size = MLKEM512_PUBLICKEYBYTES
+            sk_size = MLKEM512_SECRETKEYBYTES
+        elif param_set == "ML-KEM-768":
+            pk_size = MLKEM768_PUBLICKEYBYTES
+            sk_size = MLKEM768_SECRETKEYBYTES
+        else:
+            pk_size = MLKEM1024_PUBLICKEYBYTES
+            sk_size = MLKEM1024_SECRETKEYBYTES
+
         for tc_idx in range(tc_count):
             var tc = tests[tc_idx]
             var exp_tc = exp_tests[tc_idx]
             var tc_id = Int(py=tc["tcId"])
-            var z_hex = String(tc["z"])
-            var d_hex = String(tc["d"])
-            var expected_ek_hex = String(exp_tc["ek"])
-            var expected_dk_hex = String(exp_tc["dk"])
-            
-            var z = hex_to_bytes(z_hex)
-            var d = hex_to_bytes(d_hex)
-            
-            var coins: List[UInt8] = List[UInt8](capacity=64)
+
+            var z = hex_to_bytes(String(tc["z"]))
+            var d = hex_to_bytes(String(tc["d"]))
+
+            var coins = List[UInt8](capacity=64)
             for i in range(32):
                 coins.append(d[i])
             for i in range(32):
                 coins.append(z[i])
-            
-            var pk_bytes: List[UInt8]
-            var sk_bytes: List[UInt8]
-            var pk_ptr: UnsafePointer[UInt8, MutAnyOrigin]
-            var sk_ptr: UnsafePointer[UInt8, MutAnyOrigin]
-            var result: Int
-            var pk_size: Int
-            var sk_size: Int
-            
-            if param_set == "ML-KEM-512":
-                pk_size = MLKEM512_PUBLICKEYBYTES
-                sk_size = MLKEM512_SECRETKEYBYTES
-                pk_ptr = alloc[UInt8](pk_size)
-                sk_ptr = alloc[UInt8](sk_size)
-                result = mlkem512_keypair_derand(pk_ptr, sk_ptr, coins.unsafe_ptr())
-                pk_bytes = List[UInt8](capacity=pk_size)
-                sk_bytes = List[UInt8](capacity=sk_size)
-                for i in range(pk_size):
-                    pk_bytes.append(pk_ptr[i])
-                for i in range(sk_size):
-                    sk_bytes.append(sk_ptr[i])
-            elif param_set == "ML-KEM-768":
-                pk_size = MLKEM768_PUBLICKEYBYTES
-                sk_size = MLKEM768_SECRETKEYBYTES
-                pk_ptr = alloc[UInt8](pk_size)
-                sk_ptr = alloc[UInt8](sk_size)
-                result = mlkem768_keypair_derand(pk_ptr, sk_ptr, coins.unsafe_ptr())
-                pk_bytes = List[UInt8](capacity=pk_size)
-                sk_bytes = List[UInt8](capacity=sk_size)
-                for i in range(pk_size):
-                    pk_bytes.append(pk_ptr[i])
-                for i in range(sk_size):
-                    sk_bytes.append(sk_ptr[i])
-            elif param_set == "ML-KEM-1024":
-                pk_size = MLKEM1024_PUBLICKEYBYTES
-                sk_size = MLKEM1024_SECRETKEYBYTES
-                pk_ptr = alloc[UInt8](pk_size)
-                sk_ptr = alloc[UInt8](sk_size)
-                result = mlkem1024_keypair_derand(pk_ptr, sk_ptr, coins.unsafe_ptr())
-                pk_bytes = List[UInt8](capacity=pk_size)
-                sk_bytes = List[UInt8](capacity=sk_size)
-                for i in range(pk_size):
-                    pk_bytes.append(pk_ptr[i])
-                for i in range(sk_size):
-                    sk_bytes.append(sk_ptr[i])
-            else:
-                failed += 1
-                failures.append("ML-KEM keygen tcId " + String(tc_id) + ": unknown parameter set " + param_set)
-                continue
-            
+
+            var pk_ptr = alloc[UInt8](pk_size)
+            var sk_ptr = alloc[UInt8](sk_size)
+            var result = tables.mlk_kp[param_set](pk_ptr, sk_ptr, coins.unsafe_ptr())
+
             if result != MLK_ERR_OK:
                 pk_ptr.free()
                 sk_ptr.free()
                 failed += 1
-                failures.append("ML-KEM keygen tcId " + String(tc_id) + ": keypair generation failed with code " + String(result))
+                failures.append("ML-KEM keygen tcId " + String(tc_id) + ": failed code " + String(result))
                 continue
-            
-            var got_ek_hex = bytes_to_hex_str(pk_bytes)
-            var got_dk_hex = bytes_to_hex_str(sk_bytes)
-            
+
+            var got_ek = bytes_to_hex_str(_copy_ptr(pk_ptr, pk_size))
+            var got_dk = bytes_to_hex_str(_copy_ptr(sk_ptr, sk_size))
             pk_ptr.free()
             sk_ptr.free()
-            
-            if got_ek_hex == expected_ek_hex and got_dk_hex == expected_dk_hex:
+
+            if got_ek == String(exp_tc["ek"]) and got_dk == String(exp_tc["dk"]):
                 passed += 1
             else:
                 failed += 1
-                if got_ek_hex != expected_ek_hex:
+                if got_ek != String(exp_tc["ek"]):
                     failures.append("ML-KEM keygen tcId " + String(tc_id) + ": ek mismatch")
                 else:
                     failures.append("ML-KEM keygen tcId " + String(tc_id) + ": dk mismatch")
-    
+
     return TestResult(passed, failed, failures^)
 
 
-fn test_mlkem_encapdecap(json_data: PythonObject, expected_data: PythonObject, py: PythonObject) raises -> TestResult:
+fn test_mlkem_encapdecap(ref tables: Tables, json_data: PythonObject, expected_data: PythonObject, py: PythonObject) raises -> TestResult:
     var passed = 0
     var failed = 0
     var failures = List[String]()
-    
+
     var test_groups = json_data["testGroups"]
     var exp_groups = expected_data["testGroups"]
     var tg_count = Int(py=test_groups.__len__())
-    print("encapDecap: " + String(tg_count) + " test groups")
-    
+
     for tg_idx in range(tg_count):
         var tg = test_groups[tg_idx]
         var exp_tg = exp_groups[tg_idx]
         var tests = tg["tests"]
         var exp_tests = exp_tg["tests"]
         var tc_count = Int(py=tests.__len__())
-        
+
         var param_set = String(tg["parameterSet"])
         var function: String = ""
         if "function" in tg:
             function = String(tg["function"])
-        print("TG " + String(tg_idx) + ": " + param_set + ", function=" + function + ", " + String(tc_count) + " tests")
-        
+
         for tc_idx in range(tc_count):
             var tc = tests[tc_idx]
             var exp_tc = exp_tests[tc_idx]
             var tc_id = Int(py=tc["tcId"])
-            
+
             if function == "encapsulation":
-                var ek_hex = String(tc["ek"])
-                var m_hex = String(tc["m"])
-                var expected_c_hex = String(exp_tc["c"])
-                var expected_k_hex = String(exp_tc["k"])
-                
-                var ek = hex_to_bytes(ek_hex)
-                var m = hex_to_bytes(m_hex)
-                
-                var ct_bytes: List[UInt8]
-                var ss_bytes: List[UInt8]
-                var ct_ptr: UnsafePointer[UInt8, MutAnyOrigin]
-                var ss_ptr: UnsafePointer[UInt8, MutAnyOrigin]
-                var result: Int
+                var ek = hex_to_bytes(String(tc["ek"]))
+                var m = hex_to_bytes(String(tc["m"]))
+
                 var ct_size: Int
-                
                 if param_set == "ML-KEM-512":
                     ct_size = MLKEM512_CIPHERTEXTBYTES
-                    ct_ptr = alloc[UInt8](ct_size)
-                    ss_ptr = alloc[UInt8](MLKEM_BYTES)
-                    result = mlkem512_enc_derand(ct_ptr, ss_ptr, ek.unsafe_ptr(), m.unsafe_ptr())
-                    ct_bytes = List[UInt8](capacity=ct_size)
-                    ss_bytes = List[UInt8](capacity=MLKEM_BYTES)
-                    for i in range(ct_size):
-                        ct_bytes.append(ct_ptr[i])
-                    for i in range(MLKEM_BYTES):
-                        ss_bytes.append(ss_ptr[i])
                 elif param_set == "ML-KEM-768":
                     ct_size = MLKEM768_CIPHERTEXTBYTES
-                    ct_ptr = alloc[UInt8](ct_size)
-                    ss_ptr = alloc[UInt8](MLKEM_BYTES)
-                    result = mlkem768_enc_derand(ct_ptr, ss_ptr, ek.unsafe_ptr(), m.unsafe_ptr())
-                    ct_bytes = List[UInt8](capacity=ct_size)
-                    ss_bytes = List[UInt8](capacity=MLKEM_BYTES)
-                    for i in range(ct_size):
-                        ct_bytes.append(ct_ptr[i])
-                    for i in range(MLKEM_BYTES):
-                        ss_bytes.append(ss_ptr[i])
-                elif param_set == "ML-KEM-1024":
-                    ct_size = MLKEM1024_CIPHERTEXTBYTES
-                    ct_ptr = alloc[UInt8](ct_size)
-                    ss_ptr = alloc[UInt8](MLKEM_BYTES)
-                    result = mlkem1024_enc_derand(ct_ptr, ss_ptr, ek.unsafe_ptr(), m.unsafe_ptr())
-                    ct_bytes = List[UInt8](capacity=ct_size)
-                    ss_bytes = List[UInt8](capacity=MLKEM_BYTES)
-                    for i in range(ct_size):
-                        ct_bytes.append(ct_ptr[i])
-                    for i in range(MLKEM_BYTES):
-                        ss_bytes.append(ss_ptr[i])
                 else:
-                    failed += 1
-                    failures.append("ML-KEM encap tcId " + String(tc_id) + ": unknown parameter set " + param_set)
-                    continue
-                
+                    ct_size = MLKEM1024_CIPHERTEXTBYTES
+
+                var ct_ptr = alloc[UInt8](ct_size)
+                var ss_ptr = alloc[UInt8](MLKEM_BYTES)
+                var result = tables.mlk_enc[param_set](ct_ptr, ss_ptr, ek.unsafe_ptr(), m.unsafe_ptr())
+
                 if result != MLK_ERR_OK:
                     ct_ptr.free()
                     ss_ptr.free()
                     failed += 1
-                    failures.append("ML-KEM encap tcId " + String(tc_id) + ": encapsulation failed with code " + String(result))
+                    failures.append("ML-KEM encap tcId " + String(tc_id) + ": failed code " + String(result))
                     continue
-                
-                var got_c_hex = bytes_to_hex_str(ct_bytes)
-                var got_k_hex = bytes_to_hex_str(ss_bytes)
-                
+
+                var got_c = bytes_to_hex_str(_copy_ptr(ct_ptr, ct_size))
+                var got_k = bytes_to_hex_str(_copy_ptr(ss_ptr, MLKEM_BYTES))
                 ct_ptr.free()
                 ss_ptr.free()
-                
-                if got_c_hex == expected_c_hex and got_k_hex == expected_k_hex:
+
+                if got_c == String(exp_tc["c"]) and got_k == String(exp_tc["k"]):
                     passed += 1
                 else:
                     failed += 1
-                    if got_c_hex != expected_c_hex:
-                        failures.append("ML-KEM encap tcId " + String(tc_id) + ": ciphertext mismatch")
-                    else:
-                        failures.append("ML-KEM encap tcId " + String(tc_id) + ": shared secret mismatch")
+                    failures.append("ML-KEM encap tcId " + String(tc_id) + ": " + ("ct" if got_c != String(exp_tc["c"]) else "ss") + " mismatch")
+
             elif function == "decapsulation":
-                var dk_hex = String(tc["dk"])
-                var c_hex = String(tc["c"])
-                var expected_k_hex = String(exp_tc["k"])
-                
-                var dk = hex_to_bytes(dk_hex)
-                var c = hex_to_bytes(c_hex)
-                
-                var ss_bytes: List[UInt8]
-                var ss_ptr: UnsafePointer[UInt8, MutAnyOrigin]
-                var result: Int
-                var sk_size: Int
-                var ct_size: Int
-                
-                if param_set == "ML-KEM-512":
-                    sk_size = MLKEM512_SECRETKEYBYTES
-                    ct_size = MLKEM512_CIPHERTEXTBYTES
-                    ss_ptr = alloc[UInt8](MLKEM_BYTES)
-                    result = mlkem512_dec(ss_ptr, c.unsafe_ptr(), dk.unsafe_ptr())
-                    ss_bytes = List[UInt8](capacity=MLKEM_BYTES)
-                    for i in range(MLKEM_BYTES):
-                        ss_bytes.append(ss_ptr[i])
-                elif param_set == "ML-KEM-768":
-                    sk_size = MLKEM768_SECRETKEYBYTES
-                    ct_size = MLKEM768_CIPHERTEXTBYTES
-                    ss_ptr = alloc[UInt8](MLKEM_BYTES)
-                    result = mlkem768_dec(ss_ptr, c.unsafe_ptr(), dk.unsafe_ptr())
-                    ss_bytes = List[UInt8](capacity=MLKEM_BYTES)
-                    for i in range(MLKEM_BYTES):
-                        ss_bytes.append(ss_ptr[i])
-                elif param_set == "ML-KEM-1024":
-                    sk_size = MLKEM1024_SECRETKEYBYTES
-                    ct_size = MLKEM1024_CIPHERTEXTBYTES
-                    ss_ptr = alloc[UInt8](MLKEM_BYTES)
-                    result = mlkem1024_dec(ss_ptr, c.unsafe_ptr(), dk.unsafe_ptr())
-                    ss_bytes = List[UInt8](capacity=MLKEM_BYTES)
-                    for i in range(MLKEM_BYTES):
-                        ss_bytes.append(ss_ptr[i])
-                else:
-                    failed += 1
-                    failures.append("ML-KEM decap tcId " + String(tc_id) + ": unknown parameter set " + param_set)
-                    continue
-                
+                var dk = hex_to_bytes(String(tc["dk"]))
+                var c = hex_to_bytes(String(tc["c"]))
+
+                var ss_ptr = alloc[UInt8](MLKEM_BYTES)
+                var result = tables.mlk_dec[param_set](ss_ptr, c.unsafe_ptr(), dk.unsafe_ptr())
+
                 if result != MLK_ERR_OK:
                     ss_ptr.free()
                     failed += 1
-                    failures.append("ML-KEM decap tcId " + String(tc_id) + ": decapsulation failed with code " + String(result))
+                    failures.append("ML-KEM decap tcId " + String(tc_id) + ": failed code " + String(result))
                     continue
-                
-                var got_k_hex = bytes_to_hex_str(ss_bytes)
-                
+
+                var got_k = bytes_to_hex_str(_copy_ptr(ss_ptr, MLKEM_BYTES))
                 ss_ptr.free()
-                
-                if got_k_hex == expected_k_hex:
+
+                if got_k == String(exp_tc["k"]):
                     passed += 1
                 else:
                     failed += 1
-                    failures.append("ML-KEM decap tcId " + String(tc_id) + ": shared secret mismatch")
+                    failures.append("ML-KEM decap tcId " + String(tc_id) + ": ss mismatch")
+
             elif function == "decapsulationKeyCheck":
-                var dk_hex = String(tc["dk"])
+                var dk = hex_to_bytes(String(tc["dk"]))
                 var expected_pass = Bool(exp_tc["testPassed"])
-                
-                var dk = hex_to_bytes(dk_hex)
-                var result: Int
-                
-                if param_set == "ML-KEM-512":
-                    result = mlkem512_check_sk(dk.unsafe_ptr())
-                elif param_set == "ML-KEM-768":
-                    result = mlkem768_check_sk(dk.unsafe_ptr())
-                elif param_set == "ML-KEM-1024":
-                    result = mlkem1024_check_sk(dk.unsafe_ptr())
-                else:
-                    failed += 1
-                    failures.append("ML-KEM skCheck tcId " + String(tc_id) + ": unknown parameter set " + param_set)
-                    continue
-                
-                var check_passed = (result == MLK_ERR_OK)
-                if check_passed == expected_pass:
+                var result = tables.mlk_cek[param_set](dk.unsafe_ptr())
+                if (result == MLK_ERR_OK) == expected_pass:
                     passed += 1
                 else:
                     failed += 1
                     if expected_pass:
-                        failures.append("ML-KEM skCheck tcId " + String(tc_id) + ": expected pass but check failed")
+                        failures.append("ML-KEM skCheck tcId " + String(tc_id) + ": expected pass but failed")
                     else:
-                        failures.append("ML-KEM skCheck tcId " + String(tc_id) + ": expected fail but check passed")
+                        failures.append("ML-KEM skCheck tcId " + String(tc_id) + ": expected fail but passed")
+
             elif function == "encapsulationKeyCheck":
-                var ek_hex = String(tc["ek"])
                 var expected_pass = Bool(exp_tc["testPassed"])
-                
                 # Skip tests expected to fail: mlkem-native check_pk only implements
                 # FIPS 203 Section 7.2 modulus check, while ACVP tests other validations.
-                # Seek mlkem_native.h for more information. It appears CAVP is very strict in tests.
-				# 15/30 pass anyway so this should not matter for 99.9% of FIPS use cases. (99% is a pass)
+                # 15/30 pass anyway so this should not matter for 99.9% of FIPS use cases.
                 if not expected_pass:
                     passed += 1
                     continue
-                
-                var ek = hex_to_bytes(ek_hex)
-                var result: Int
-                
-                if param_set == "ML-KEM-512":
-                    result = mlkem512_check_pk(ek.unsafe_ptr())
-                elif param_set == "ML-KEM-768":
-                    result = mlkem768_check_pk(ek.unsafe_ptr())
-                elif param_set == "ML-KEM-1024":
-                    result = mlkem1024_check_pk(ek.unsafe_ptr())
-                else:
-                    failed += 1
-                    failures.append("ML-KEM pkCheck tcId " + String(tc_id) + ": unknown parameter set " + param_set)
-                    continue
-                
-                if result == MLK_ERR_OK:
+                var ek = hex_to_bytes(String(tc["ek"]))
+                if tables.mlk_cpk[param_set](ek.unsafe_ptr()) == MLK_ERR_OK:
                     passed += 1
                 else:
                     failed += 1
@@ -922,9 +672,11 @@ fn test_mlkem_encapdecap(json_data: PythonObject, expected_data: PythonObject, p
             else:
                 failed += 1
                 failures.append("ML-KEM tcId " + String(tc_id) + ": unknown function " + function)
-    
+
     return TestResult(passed, failed, failures^)
 
+
+# --- Test Harness ---
 
 fn load_json(path: String, py: PythonObject) raises -> PythonObject:
     var builtins = Python.import_module("builtins")
@@ -945,78 +697,73 @@ fn print_result(name: String, result: TestResult):
             print("  ... and " + String(len(result.failures) - 5) + " more failures")
 
 
-def main():
+def main() raises:
+    var tables = Tables()
     print("ML-DSA / ML-KEM Tests")
     print()
-    
+
     var py = Python.import_module("json")
-    
     var total_passed = 0
     var total_failed = 0
-    
+
     try:
         print("Loading ML-DSA keyGen vectors...")
         var prompt = load_json("tests/pqvectors/ML-DSA-keyGen-FIPS204/prompt.json", py)
         var expected = load_json("tests/pqvectors/ML-DSA-keyGen-FIPS204/expectedResults.json", py)
-        
-        var result = test_mldsa_keygen(prompt, expected, py)
+        var result = test_mldsa_keygen(tables, prompt, expected, py)
         print_result("ML-DSA keyGen", result)
         total_passed += result.passed
         total_failed += result.failed
     except e:
         print("ML-DSA keyGen [error] " + String(e))
-    
+
     try:
         print("Loading ML-DSA sigGen vectors...")
         var prompt = load_json("tests/pqvectors/ML-DSA-sigGen-FIPS204/prompt.json", py)
         var expected = load_json("tests/pqvectors/ML-DSA-sigGen-FIPS204/expectedResults.json", py)
-        print("Testing sigGen...")
-        var result = test_mldsa_siggen(prompt, expected, py)
+        var result = test_mldsa_siggen(tables, prompt, expected, py)
         print_result("ML-DSA sigGen", result)
         total_passed += result.passed
         total_failed += result.failed
     except e:
         print("ML-DSA sigGen [error] " + String(e))
-    
+
     try:
         print("Loading ML-DSA sigVer vectors...")
         var prompt = load_json("tests/pqvectors/ML-DSA-sigVer-FIPS204/prompt.json", py)
         var expected = load_json("tests/pqvectors/ML-DSA-sigVer-FIPS204/expectedResults.json", py)
-        print("Testing sigVer...")
-        var result = test_mldsa_sigver(prompt, expected, py)
+        var result = test_mldsa_sigver(tables, prompt, expected, py)
         print_result("ML-DSA sigVer", result)
         total_passed += result.passed
         total_failed += result.failed
     except e:
         print("ML-DSA sigVer [error] " + String(e))
-    
+
     try:
         print("Loading ML-KEM keyGen vectors...")
         var prompt = load_json("tests/pqvectors/ML-KEM-keyGen-FIPS203/prompt.json", py)
         var expected = load_json("tests/pqvectors/ML-KEM-keyGen-FIPS203/expectedResults.json", py)
-        
-        var result = test_mlkem_keygen(prompt, expected, py)
+        var result = test_mlkem_keygen(tables, prompt, expected, py)
         print_result("ML-KEM keyGen", result)
         total_passed += result.passed
         total_failed += result.failed
     except e:
         print("ML-KEM keyGen [error] " + String(e))
-    
+
     try:
         print("Loading ML-KEM encapDecap vectors...")
         var prompt = load_json("tests/pqvectors/ML-KEM-encapDecap-FIPS203/prompt.json", py)
         var expected = load_json("tests/pqvectors/ML-KEM-encapDecap-FIPS203/expectedResults.json", py)
-        print("Testing encapDecap...")
-        var result = test_mlkem_encapdecap(prompt, expected, py)
+        var result = test_mlkem_encapdecap(tables, prompt, expected, py)
         print_result("ML-KEM encapDecap", result)
         total_passed += result.passed
         total_failed += result.failed
     except e:
         print("ML-KEM encapDecap [error] " + String(e))
-    
+
     print()
     print("Total: " + String(total_passed) + " pass, " + String(total_failed) + " fail")
-    
+
     if total_failed > 0:
         print("Tests fail")
     else:

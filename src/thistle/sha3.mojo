@@ -1,24 +1,5 @@
 # SPDX-License-Identifier: MIT
-#
 # Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
 
 """
 SHA-3 (Keccak) + shake128/shake256 Implementation in Mojo
@@ -277,11 +258,11 @@ struct SHA3Context(Movable):
             self.buffer[i] = 0
         self.buffer_len = 0
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.state = other.state
-        self.rate_bytes = other.rate_bytes
-        self.buffer = other.buffer
-        self.buffer_len = other.buffer_len
+    fn __init__(out self, *, deinit take: Self):
+        self.state = take.state
+        self.rate_bytes = take.rate_bytes
+        self.buffer = take.buffer
+        self.buffer_len = take.buffer_len
 
     fn __del__(deinit self):
         zero_and_free_u64(self.state, 25)
@@ -297,7 +278,7 @@ fn sha3_absorb_block(mut state: UnsafePointer[UInt64, MutAnyOrigin], block: Unsa
     keccak_f1600(state)
 
 
-fn sha3_update(mut ctx: SHA3Context, data: Span[UInt8]):
+fn sha3_update(mut ctx: SHA3Context, data: Span[UInt8, ...]):
     var i = 0
     var total_len = len(data)
 
@@ -366,28 +347,28 @@ fn sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
 
     return output^
 
-fn sha3_224(data: Span[UInt8]) -> List[UInt8]:
+fn sha3_224(data: Span[UInt8, ...]) -> List[UInt8]:
     """SHA3-224 hash (28 bytes output)."""
     var ctx = SHA3Context(1152)
     sha3_update(ctx, data)
     return sha3_final(ctx, 28)
 
 
-fn sha3_256(data: Span[UInt8]) -> List[UInt8]:
+fn sha3_256(data: Span[UInt8, ...]) -> List[UInt8]:
     """SHA3-256 hash (32 bytes output)."""
     var ctx = SHA3Context(1088)
     sha3_update(ctx, data)
     return sha3_final(ctx, 32)
 
 
-fn sha3_384(data: Span[UInt8]) -> List[UInt8]:
+fn sha3_384(data: Span[UInt8, ...]) -> List[UInt8]:
     """SHA3-384 hash (48 bytes output)."""
     var ctx = SHA3Context(832)
     sha3_update(ctx, data)
     return sha3_final(ctx, 48)
 
 
-fn sha3_512(data: Span[UInt8]) -> List[UInt8]:
+fn sha3_512(data: Span[UInt8, ...]) -> List[UInt8]:
     """SHA3-512 hash (64 bytes output)."""
     var ctx = SHA3Context(576)
     sha3_update(ctx, data)
@@ -397,32 +378,32 @@ fn sha3_512(data: Span[UInt8]) -> List[UInt8]:
 fn sha3_224_hash_string(s: String) -> String:
     """SHA3-224 hash of string, returned as hex."""
     var data = string_to_bytes(s)
-    var hash = sha3_224(Span[UInt8](data))
+    var hash = sha3_224(Span[UInt8, ...](data))
     return bytes_to_hex(hash)
 
 
 fn sha3_256_hash_string(s: String) -> String:
     """SHA3-256 hash of string, returned as hex."""
     var data = string_to_bytes(s)
-    var hash = sha3_256(Span[UInt8](data))
+    var hash = sha3_256(Span[UInt8, ...](data))
     return bytes_to_hex(hash)
 
 
 fn sha3_384_hash_string(s: String) -> String:
     """SHA3-384 hash of string, returned as hex."""
     var data = string_to_bytes(s)
-    var hash = sha3_384(Span[UInt8](data))
+    var hash = sha3_384(Span[UInt8, ...](data))
     return bytes_to_hex(hash)
 
 
 fn sha3_512_hash_string(s: String) -> String:
     """SHA3-512 hash of string, returned as hex."""
     var data = string_to_bytes(s)
-    var hash = sha3_512(Span[UInt8](data))
+    var hash = sha3_512(Span[UInt8, ...](data))
     return bytes_to_hex(hash)
 
 
-fn shake128(data: Span[UInt8], output_len_bytes: Int) -> List[UInt8]:
+fn shake128(data: Span[UInt8, ...], output_len_bytes: Int) -> List[UInt8]:
     """SHAKE128 XOF (capacity=256 bits, rate=1344 bits)."""
     var ctx = SHA3Context(1344)
     sha3_update(ctx, data)
@@ -449,7 +430,7 @@ fn shake128(data: Span[UInt8], output_len_bytes: Int) -> List[UInt8]:
     return output^
 
 
-fn shake256(data: Span[UInt8], output_len_bytes: Int) -> List[UInt8]:
+fn shake256(data: Span[UInt8, ...], output_len_bytes: Int) -> List[UInt8]:
     """SHAKE256 XOF (capacity=512 bits, rate=1088 bits)."""
     var ctx = SHA3Context(1088)
     sha3_update(ctx, data)

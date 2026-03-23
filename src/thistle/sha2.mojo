@@ -1,24 +1,5 @@
 # SPDX-License-Identifier: MIT
-#
 # Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
 
 """
 SHA-2 (SHA-256/SHA-512) Implementation in Mojo
@@ -396,11 +377,11 @@ struct SHA256Context(Movable):
             self.buffer[i] = 0
         self.buffer_len = 0
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.state = other.state
-        self.count = other.count
-        self.buffer = other.buffer
-        self.buffer_len = other.buffer_len
+    fn __init__(out self, *, deinit take: Self):
+        self.state = take.state
+        self.count = take.count
+        self.buffer = take.buffer
+        self.buffer_len = take.buffer_len
 
     fn __del__(deinit self):
         zero_and_free(self.buffer, 64)
@@ -421,7 +402,7 @@ struct SHA256Context(Movable):
 
 @always_inline
 fn sha256_transform(
-    state: SIMD[DType.uint32, 8], block: Span[UInt8]
+    state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]
 ) -> SIMD[DType.uint32, 8]:
     var w = InlineArray[UInt32, 16](uninitialized=True)
 
@@ -478,7 +459,7 @@ fn sha256_transform(
     return state + SIMD[DType.uint32, 8](a, b, c, d, e, f, g, h)
 
 
-fn sha256_update(mut ctx: SHA256Context, data: Span[UInt8]):
+fn sha256_update(mut ctx: SHA256Context, data: Span[UInt8, ...]):
     var i = 0
     var total_len = len(data)
 
@@ -491,7 +472,7 @@ fn sha256_update(mut ctx: SHA256Context, data: Span[UInt8]):
                 count=available,
             )
             ctx.state = sha256_transform(
-                ctx.state, Span[UInt8](ptr=ctx.buffer, length=64)
+                ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=64)
             )
             ctx.count += 512
             i += available
@@ -531,7 +512,7 @@ fn sha256_final(mut ctx: SHA256Context) -> List[UInt8]:
             ctx.buffer[ctx.buffer_len] = 0
             ctx.buffer_len += 1
         ctx.state = sha256_transform(
-            ctx.state, Span[UInt8](ptr=ctx.buffer, length=64)
+            ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=64)
         )
         ctx.buffer_len = 0
 
@@ -543,7 +524,7 @@ fn sha256_final(mut ctx: SHA256Context) -> List[UInt8]:
         ctx.buffer[56 + i] = UInt8((bit_count >> (56 - i * 8)) & 0xFF)
 
     ctx.state = sha256_transform(
-        ctx.state, Span[UInt8](ptr=ctx.buffer, length=64)
+        ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=64)
     )
 
     var output = List[UInt8](capacity=32)
@@ -555,7 +536,7 @@ fn sha256_final(mut ctx: SHA256Context) -> List[UInt8]:
     return output^
 
 
-fn sha256_hash(data: Span[UInt8]) -> List[UInt8]:
+fn sha256_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     var ctx = SHA256Context()
     sha256_update(ctx, data)
     return sha256_final(ctx)
@@ -572,7 +553,7 @@ fn sha256_final_to_buffer(mut ctx: SHA256Context, output: UnsafePointer[UInt8, M
             ctx.buffer[ctx.buffer_len] = 0
             ctx.buffer_len += 1
         ctx.state = sha256_transform(
-            ctx.state, Span[UInt8](ptr=ctx.buffer, length=64)
+            ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=64)
         )
         ctx.buffer_len = 0
 
@@ -584,7 +565,7 @@ fn sha256_final_to_buffer(mut ctx: SHA256Context, output: UnsafePointer[UInt8, M
         ctx.buffer[56 + i] = UInt8((bit_count >> (56 - i * 8)) & 0xFF)
 
     ctx.state = sha256_transform(
-        ctx.state, Span[UInt8](ptr=ctx.buffer, length=64)
+        ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=64)
     )
 
     for i in range(8):
@@ -619,12 +600,12 @@ struct SHA512Context(Movable):
             self.buffer[i] = 0
         self.buffer_len = 0
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.state = other.state
-        self.count_high = other.count_high
-        self.count_low = other.count_low
-        self.buffer = other.buffer
-        self.buffer_len = other.buffer_len
+    fn __init__(out self, *, deinit take: Self):
+        self.state = take.state
+        self.count_high = take.count_high
+        self.count_low = take.count_low
+        self.buffer = take.buffer
+        self.buffer_len = take.buffer_len
 
     fn __del__(deinit self):
         zero_and_free(self.buffer, 128)
@@ -648,7 +629,7 @@ struct SHA512Context(Movable):
 
 @always_inline
 fn sha512_transform(
-    state: SIMD[DType.uint64, 8], block: Span[UInt8]
+    state: SIMD[DType.uint64, 8], block: Span[UInt8, ...]
 ) -> SIMD[DType.uint64, 8]:
     var w = InlineArray[UInt64, 16](uninitialized=True)
 
@@ -708,7 +689,7 @@ fn sha512_transform(
     return state + SIMD[DType.uint64, 8](a, b, c, d, e, f, g, h)
 
 
-fn sha512_update(mut ctx: SHA512Context, data: Span[UInt8]):
+fn sha512_update(mut ctx: SHA512Context, data: Span[UInt8, ...]):
     var i = 0
     var total_len = len(data)
 
@@ -721,7 +702,7 @@ fn sha512_update(mut ctx: SHA512Context, data: Span[UInt8]):
                 count=available,
             )
             ctx.state = sha512_transform(
-                ctx.state, Span[UInt8](ptr=ctx.buffer, length=128)
+                ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=128)
             )
 
             var old_low = ctx.count_low
@@ -774,7 +755,7 @@ fn sha512_final(mut ctx: SHA512Context) -> List[UInt8]:
             ctx.buffer[ctx.buffer_len] = 0
             ctx.buffer_len += 1
         ctx.state = sha512_transform(
-            ctx.state, Span[UInt8](ptr=ctx.buffer, length=128)
+            ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=128)
         )
         ctx.buffer_len = 0
 
@@ -788,7 +769,7 @@ fn sha512_final(mut ctx: SHA512Context) -> List[UInt8]:
         ctx.buffer[120 + i] = UInt8((final_low >> (56 - i * 8)) & 0xFF)
 
     ctx.state = sha512_transform(
-        ctx.state, Span[UInt8](ptr=ctx.buffer, length=128)
+        ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=128)
     )
 
     # Extract Big-Endian results
@@ -806,7 +787,7 @@ fn sha512_final(mut ctx: SHA512Context) -> List[UInt8]:
     return output^
 
 
-fn sha512_hash(data: Span[UInt8]) -> List[UInt8]:
+fn sha512_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     var ctx = SHA512Context()
     sha512_update(ctx, data)
     return sha512_final(ctx)
@@ -826,7 +807,7 @@ fn sha512_final_to_buffer(mut ctx: SHA512Context, output: UnsafePointer[UInt8, M
             ctx.buffer[ctx.buffer_len] = 0
             ctx.buffer_len += 1
         ctx.state = sha512_transform(
-            ctx.state, Span[UInt8](ptr=ctx.buffer, length=128)
+            ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=128)
         )
         ctx.buffer_len = 0
 
@@ -840,7 +821,7 @@ fn sha512_final_to_buffer(mut ctx: SHA512Context, output: UnsafePointer[UInt8, M
         ctx.buffer[120 + i] = UInt8((final_low >> (56 - i * 8)) & 0xFF)
 
     ctx.state = sha512_transform(
-        ctx.state, Span[UInt8](ptr=ctx.buffer, length=128)
+        ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=128)
     )
 
     for i in range(8):
@@ -865,7 +846,7 @@ fn sha256_final_with_len(mut ctx: SHA256Context, output_len: Int) -> List[UInt8]
             ctx.buffer[ctx.buffer_len] = 0
             ctx.buffer_len += 1
         ctx.state = sha256_transform(
-            ctx.state, Span[UInt8](ptr=ctx.buffer, length=64)
+            ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=64)
         )
         ctx.buffer_len = 0
 
@@ -877,7 +858,7 @@ fn sha256_final_with_len(mut ctx: SHA256Context, output_len: Int) -> List[UInt8]
         ctx.buffer[56 + i] = UInt8((bit_count >> (56 - i * 8)) & 0xFF)
 
     ctx.state = sha256_transform(
-        ctx.state, Span[UInt8](ptr=ctx.buffer, length=64)
+        ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=64)
     )
 
     var output = List[UInt8](capacity=output_len)
@@ -892,7 +873,7 @@ fn sha256_final_with_len(mut ctx: SHA256Context, output_len: Int) -> List[UInt8]
     return output^
 
 
-fn sha224_hash(data: Span[UInt8]) -> List[UInt8]:
+fn sha224_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     var ctx = SHA256Context(SHA224_IV)
     sha256_update(ctx, data)
     return sha256_final_with_len(ctx, 28)
@@ -912,7 +893,7 @@ fn sha512_final_with_len(mut ctx: SHA512Context, output_len: Int) -> List[UInt8]
             ctx.buffer[ctx.buffer_len] = 0
             ctx.buffer_len += 1
         ctx.state = sha512_transform(
-            ctx.state, Span[UInt8](ptr=ctx.buffer, length=128)
+            ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=128)
         )
         ctx.buffer_len = 0
 
@@ -926,7 +907,7 @@ fn sha512_final_with_len(mut ctx: SHA512Context, output_len: Int) -> List[UInt8]
         ctx.buffer[120 + i] = UInt8((final_low >> (56 - i * 8)) & 0xFF)
 
     ctx.state = sha512_transform(
-        ctx.state, Span[UInt8](ptr=ctx.buffer, length=128)
+        ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=128)
     )
 
     var output = List[UInt8](capacity=output_len)
@@ -941,7 +922,7 @@ fn sha512_final_with_len(mut ctx: SHA512Context, output_len: Int) -> List[UInt8]
     return output^
 
 
-fn sha384_hash(data: Span[UInt8]) -> List[UInt8]:
+fn sha384_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     var ctx = SHA512Context(SHA384_IV)
     sha512_update(ctx, data)
     return sha512_final_with_len(ctx, 48)
@@ -950,23 +931,23 @@ fn sha384_hash(data: Span[UInt8]) -> List[UInt8]:
 # String functions
 fn sha256_hash_string(s: String) -> String:
     var data = string_to_bytes(s)
-    var hash = sha256_hash(Span[UInt8](data))
+    var hash = sha256_hash(Span[UInt8, ...](data))
     return bytes_to_hex(hash)
 
 
 fn sha512_hash_string(s: String) -> String:
     var data = string_to_bytes(s)
-    var hash = sha512_hash(Span[UInt8](data))
+    var hash = sha512_hash(Span[UInt8, ...](data))
     return bytes_to_hex(hash)
 
 
 fn sha224_hash_string(s: String) -> String:
     var data = string_to_bytes(s)
-    var hash = sha224_hash(Span[UInt8](data))
+    var hash = sha224_hash(Span[UInt8, ...](data))
     return bytes_to_hex(hash)
 
 
 fn sha384_hash_string(s: String) -> String:
     var data = string_to_bytes(s)
-    var hash = sha384_hash(Span[UInt8](data))
+    var hash = sha384_hash(Span[UInt8, ...](data))
     return bytes_to_hex(hash)
