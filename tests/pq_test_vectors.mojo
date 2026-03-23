@@ -367,13 +367,13 @@ fn test_mldsa_siggen(ref tables: Tables, json_data: PythonObject, expected_data:
                 rnd = hex_to_bytes(String(tc["rnd"]))
             else:
                 rnd = List[UInt8](capacity=MLDSA_RNDBYTES)
-                for i in range(MLDSA_RNDBYTES):
+                for _ in range(MLDSA_RNDBYTES):
                     rnd.append(0)
 
             var sig_size = _mldsa_sig_size(param_set)
             var sig_ptr = alloc[UInt8](sig_size)
             var siglen_ptr = alloc[UInt64](1)
-            siglen_ptr[0] = sig_size
+            siglen_ptr[0] = UInt64(sig_size)
 
             var result: Int
             if pre_hash == "preHash" and hash_alg != "":

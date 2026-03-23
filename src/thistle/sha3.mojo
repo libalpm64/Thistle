@@ -7,9 +7,9 @@ FIPS 202
 By Libalpm64, Attribute not required.
 """
 
-from collections import List
-from memory import UnsafePointer, alloc, memcpy
-from bit import rotate_bits_left
+from std.collections import List
+from std.memory import UnsafePointer, alloc, memcpy
+from std.bit import rotate_bits_left
 
 comptime KECCAK_RC = SIMD[DType.uint64, 24](
     0x0000000000000001,

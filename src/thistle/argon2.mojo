@@ -7,10 +7,10 @@ RFC 9106
 By Libalpm64 no attribution required.
 """
 
-from collections import List
-from memory import alloc, UnsafePointer
-from algorithm import parallelize
-from bit import rotate_bits_left
+from std.collections import List
+from std.memory import alloc, UnsafePointer
+from std.algorithm import parallelize
+from std.bit import rotate_bits_left
 from .blake2b import Blake2b
 
 
@@ -509,7 +509,7 @@ struct Argon2id:
                 for k in range(128):
                     var word: UInt64 = 0
                     for b_i in range(8):
-                        word |= UInt64(b_bytes[k * 8 + b_i]) << (b_i * 8)
+                        word |= UInt64(b_bytes[k * 8 + b_i]) << UInt64(b_i * 8)
                     memory[i * q * 128 + block_idx * 128 + k] = word
                 zero_and_free(b_bytes, 1024)
 
@@ -552,7 +552,7 @@ struct Argon2id:
         for k in range(128):
             var w = c_block[k]
             for b_i in range(8):
-                c_bytes[k * 8 + b_i] = UInt8((w >> (b_i * 8)) & 0xFF)
+                c_bytes[k * 8 + b_i] = UInt8((w >> UInt64(b_i * 8)) & 0xFF)
 
         zero_and_free_u64(c_block, 128)
         zero_and_free_u64(memory, m_prime_blocks * 128)

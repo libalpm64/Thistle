@@ -43,7 +43,7 @@ fn hex_to_u32_list(hex_str: String) -> SIMD[DType.uint32, 4]:
 fn u64_to_hex(z: UInt64) -> String:
     var bytes = List[UInt8]()
     for shift in range(56, -1, -8):
-        bytes.append(UInt8((z >> shift) & 0xFF))
+        bytes.append(UInt8((z >> UInt64(shift)) & 0xFF))
     return bytes_to_hex(bytes)
 
 fn byte_to_hex(b: UInt8) -> String:

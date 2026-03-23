@@ -7,8 +7,8 @@ By Libalpm64 no attribution required.
 Experimental (Do not use in Prod).
 """
 
-from memory import alloc, memset
-from utils import StaticTuple
+from std.memory import alloc, memset
+from std.utils import StaticTuple
 
 
 comptime AESError = Error
@@ -30,7 +30,7 @@ comptime BLOCK_SIZE: Int = 16
 
 @always_inline
 fn gf_mul2(a: UInt8) -> UInt8:
-    return (a << 1) ^ (0x1b if (a & 0x80) != 0 else 0)
+    return (a << UInt8(1)) ^ (UInt8(0x1b) if (a & 0x80) != 0 else UInt8(0))
 
 @always_inline
 fn gf_mul3(a: UInt8) -> UInt8:
@@ -321,7 +321,7 @@ fn expand_key_128(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> Unsaf
     for i in range(4):
         var key_val: UInt32 = 0
         for j in range(4):
-            key_val |= UInt32(key_bytes.load(i * 4 + j)) << ((3 - j) * 8)
+            key_val |= UInt32(key_bytes.load(i * 4 + j)) << UInt32((3 - j) * 8)
         w.store(i, key_val)
     for i in range(4, 44):
         var temp = w.load(i - 1)
@@ -339,7 +339,7 @@ fn expand_key_192(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> Unsaf
     for i in range(6):
         var key_val: UInt32 = 0
         for j in range(4):
-            key_val |= UInt32(key_bytes.load(i * 4 + j)) << ((3 - j) * 8)
+            key_val |= UInt32(key_bytes.load(i * 4 + j)) << UInt32((3 - j) * 8)
         w.store(i, key_val)
     for i in range(6, 52):
         var temp = w.load(i - 1)
@@ -357,7 +357,7 @@ fn expand_key_256(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> Unsaf
     for i in range(8):
         var key_val: UInt32 = 0
         for j in range(4):
-            key_val |= UInt32(key_bytes.load(i * 4 + j)) << ((3 - j) * 8)
+            key_val |= UInt32(key_bytes.load(i * 4 + j)) << UInt32((3 - j) * 8)
         w.store(i, key_val)
     for i in range(8, 60):
         var temp = w.load(i - 1)

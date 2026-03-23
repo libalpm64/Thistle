@@ -6,10 +6,10 @@ KCipher-2 stream cipher implemented in Mojo.
 By Libalpm no attribution required
 """
 
-from memory import bitcast
-from memory.unsafe_pointer import UnsafePointer, alloc
-from builtin.type_aliases import MutExternalOrigin
-from utils import StaticTuple
+from std.memory import bitcast
+from std.memory.unsafe_pointer import UnsafePointer, alloc
+from std.builtin.type_aliases import MutExternalOrigin
+from std.utils import StaticTuple
 
 comptime INIT = 0
 comptime NORMAL = 1

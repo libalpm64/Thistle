@@ -6,10 +6,10 @@ BLAKE3 cryptographic hash function
 By Libalpm64, Martinvuyk no attribution required.
 """
 
-from algorithm import parallelize
-from bit._mask import splat
-from memory import UnsafePointer, alloc, bitcast, stack_allocation
-from bit import count_trailing_zeros
+from std.algorithm import parallelize
+from std.bit._mask import splat
+from std.memory import UnsafePointer, alloc, bitcast, stack_allocation
+from std.bit import count_trailing_zeros
 from std.utils import IndexList
 from thistle.utils import StackInlineArray
 
@@ -56,7 +56,8 @@ comptime _v_idxes_arr = [
 
 @always_inline
 fn bit_rotr[n: Int, w: Int](v: SIMD[DType.uint32, w]) -> SIMD[DType.uint32, w]:
-    return (v >> n) | (v << (32 - n))
+    var shift = SIMD[DType.uint32, w](n)
+    return (v >> shift) | (v << (SIMD[DType.uint32, w](32) - shift))
 
 
 @always_inline
@@ -151,8 +152,7 @@ fn compress_internal[
         ]
         # fmt: on
 
-    @parameter
-    for _ in range(7):
+    comptime for _ in range(7):
         round()
         transform()
 
@@ -163,7 +163,8 @@ fn compress_internal[
 
 @always_inline
 fn rot[n: Int](v: SIMD[DType.uint32, 8]) -> SIMD[DType.uint32, 8]:
-    return (v >> n) | (v << (32 - n))
+    var shift = SIMD[DType.uint32, 8](n)
+    return (v >> shift) | (v << (SIMD[DType.uint32, 8](32) - shift))
 
 
 @always_inline
@@ -207,8 +208,7 @@ fn compress_core(
     compress_internal[1](cv, m^, counter, blen, flags, res.unsafe_ptr())
     var final = SIMD[DType.uint32, 16]()
 
-    @parameter
-    for i in range(8):
+    comptime for i in range(8):
         final[i] = res[i][0] ^ res[i + 8][0]
         final[i + 8] = res[i + 8][0] ^ cv[i]
     return final
@@ -261,8 +261,7 @@ fn compress_internal_16way(
         ]
         # fmt: on
 
-    @parameter
-    for _ in range(7):
+    comptime for _ in range(7):
         round()
         transform()
 
@@ -300,10 +299,10 @@ fn compress_parallel_8(
     ]
     # fmt: on
 
-    @parameter
+    comptime
     for round_idxes in _round_idxes_arr:
 
-        @parameter
+        comptime
         for v_idx in range(len(_v_idxes_arr)):
             comptime v_i = _v_idxes_arr[v_idx]
             comptime m_i = round_idxes[v_idx]
@@ -381,10 +380,10 @@ fn compress_parallel_16_per_lane(
     var va = _from_slice(va_t)
     var vb = _from_slice(vb_t)
 
-    @parameter
+    comptime
     for round_idxes in _round_idxes_arr:
 
-        @parameter
+        comptime
         for v_idx in range(len(_v_idxes_arr)):
             comptime v = _v_idxes_arr[v_idx]
             comptime m_i = round_idxes[v_idx]
@@ -464,7 +463,7 @@ struct Hasher:
                             blk,
                             self.chunk_counter,
                             64,
-                            (CHUNK_START if self.blocks_compressed == 0 else 0)
+                            (CHUNK_START if self.blocks_compressed == 0 else UInt8(0))
                             | CHUNK_END,
                         )
                         var chunk_cv = res.slice[8]()
@@ -482,7 +481,7 @@ struct Hasher:
                         blk,
                         self.chunk_counter,
                         64,
-                        (CHUNK_START if self.blocks_compressed == 0 else 0),
+                        (CHUNK_START if self.blocks_compressed == 0 else UInt8(0)),
                     )
                     self.key = res.slice[8]()
                     self.blocks_compressed += 1
@@ -516,8 +515,8 @@ struct Hasher:
     @always_inline
     fn add_subtree_cv(mut self, cv_in: SIMD[DType.uint32, 8], height: Int):
         var new_cv = cv_in
-        self.chunk_counter += UInt64(1) << height
-        var total_at_level = self.chunk_counter >> height
+        self.chunk_counter += UInt64(1) << UInt64(height)
+        var total_at_level = self.chunk_counter >> UInt64(height)
 
         while (total_at_level & 1) == 0 and self.stack_len > 0:
             var left = self.cv_stack.unsafe_get((self.stack_len - 1))
@@ -537,9 +536,9 @@ struct Hasher:
         out_buf = {unsafe_uninit_length=out_len}
         var temp_buf = StackInlineArray[UInt8, 64](uninitialized=True)
 
-        @parameter
+        comptime
         for i in range(64):
-            temp_buf[i] = self.buf[i] & splat(i < self.buf_len)
+            temp_buf[i] = self.buf[i] & UInt8(splat(i < self.buf_len))
 
         var blk = temp_buf.unsafe_ptr().bitcast[UInt32]().load[width=16]()
 
@@ -630,7 +629,7 @@ fn blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) -> List[UInt
 
             for b in range(16):
                 var flags = (CHUNK_START if b == 0 else UInt8(0)) | (
-                    CHUNK_END if b == 15 else 0
+                    CHUNK_END if b == 15 else UInt8(0)
                 )
                 var ma = StackInlineArray[SIMD[DType.uint32, 8], 16](
                     uninitialized=True
@@ -726,7 +725,7 @@ fn blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) -> List[UInt
                 c[6] = res[6]
                 c[7] = res[7]
 
-            @parameter
+            comptime
             for k in range(16):
                 # fmt: off
                 local_cvs.unsafe_set(i + k, {

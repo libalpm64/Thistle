@@ -2,7 +2,7 @@
 # All credit and copyright goes to the authors @ https://github.com/pq-code-package/mlkem-native
 # FFI bindings by Libalpm64 | Lostlab Technologies, no attribution for the bindings side.
 
-from ffi import OwnedDLHandle
+from std.ffi import OwnedDLHandle
 from std.memory import UnsafePointer
 from std.collections import List
 from std.python import Python

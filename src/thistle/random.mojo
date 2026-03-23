@@ -1,4 +1,4 @@
-from ffi import OwnedDLHandle
+from std.ffi import OwnedDLHandle
 from std.memory import UnsafePointer, alloc
 from std.collections import List
 from std.python import Python

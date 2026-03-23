@@ -14,8 +14,8 @@ from thistle.kcipher2 import KCipher2
 from thistle.sha2 import sha256_hash, sha512_hash
 from thistle.sha3 import sha3_256
 from thistle.aes import AESKey, SBOX, cpu_aes_encrypt, ROUNDS_128, expand_key_128
-from memory import alloc
-from utils import StaticTuple
+from std.memory import alloc
+from std.utils import StaticTuple
 
 comptime TEST_KEY: StaticTuple[UInt8, 16] = StaticTuple[UInt8, 16](
     0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c
@@ -232,11 +232,11 @@ fn benchmark_aes_cpu(duration_secs: Float64) raises -> String:
 
 
 fn benchmark_aes_gpu_ecb() raises -> String:
-    @parameter
+    comptime
     if not has_accelerator():
         return "aes-128-gpu-ecb | (GPU not available)"
     
-    from gpu.host import DeviceContext
+    from std.gpu.host import DeviceContext
     from thistle.aes_gpu import aes_gpu_kernel_ecb
     
     var key_ptr = alloc[UInt8](16)
@@ -312,11 +312,11 @@ fn benchmark_aes_gpu_ecb() raises -> String:
 
 
 fn benchmark_aes_gpu_cbc() raises -> String:
-    @parameter
+    comptime
     if not has_accelerator():
         return "aes-128-gpu-cbc | (GPU not available)"
     
-    from gpu.host import DeviceContext
+    from std.gpu.host import DeviceContext
     from thistle.aes_gpu import aes_gpu_kernel_cbc
     
     var key_ptr = alloc[UInt8](16)
@@ -400,11 +400,11 @@ fn benchmark_aes_gpu_cbc() raises -> String:
 
 
 fn benchmark_aes_gpu_ctr() raises -> String:
-    @parameter
+    comptime
     if not has_accelerator():
         return "aes-128-gpu-ctr | (GPU not available)"
     
-    from gpu.host import DeviceContext
+    from std.gpu.host import DeviceContext
     from thistle.aes_gpu import aes_gpu_kernel_ctr
     
     var key_ptr = alloc[UInt8](16)

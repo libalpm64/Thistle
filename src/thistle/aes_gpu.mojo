@@ -6,11 +6,11 @@ AES-GPU implementation
 By Libalpm64 no attribution required.
 """
 
-from gpu import global_idx
-from memory import alloc, stack_allocation
-from memory import AddressSpace
-from memory.unsafe_pointer import UnsafePointer
-from utils import StaticTuple
+from std.gpu import global_idx
+from std.memory import alloc, stack_allocation
+from std.memory import AddressSpace
+from std.memory.unsafe_pointer import UnsafePointer
+from std.utils import StaticTuple
 
 
 @always_inline

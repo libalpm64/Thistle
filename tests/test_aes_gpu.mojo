@@ -1,16 +1,21 @@
-from python import Python
-from python import PythonObject
-from collections import List
-from sys import has_accelerator
+from std.python import Python
+from std.python import PythonObject
+from std.collections import List
+from std.sys import has_accelerator
 from thistle.sha2 import bytes_to_hex
 from thistle.aes import SBOX, expand_key_128, expand_key_192, expand_key_256
 from thistle.aes_gpu import aes_gpu_kernel_ecb, aes_gpu_kernel_ctr, aes_gpu_kernel_cbc, aes_gpu_kernel_gcm, aes_gpu_kernel_xts
-from memory import alloc
-from gpu.host import DeviceContext
-from memory.unsafe_pointer import UnsafePointer
+from std.memory import alloc
+from std.gpu.host import DeviceContext
+from std.memory.unsafe_pointer import UnsafePointer
 
 # This is a test file this is only for testing purposes.
 # This file will be removed later on.
+
+fn byte_to_hex(b: UInt8) -> String:
+    var hi = Int(b >> 4)
+    var lo = Int(b & 0xF)
+    return chr(48 + hi if hi < 10 else 87 + hi) + chr(48 + lo if lo < 10 else 87 + lo)
 
 @fieldwise_init
 struct TestResult(Copyable, Movable):
@@ -143,7 +148,7 @@ fn test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> TestR
                 failed += 1
                 var got_hex = String("")
                 for j in range(16):
-                    got_hex += hex(Int(output_host[j]))[2:].rjust(2, '0')
+                    got_hex += byte_to_hex(output_host[j])
                 failures.append("AES-GPU " + name + ": expected " + expected + ", got " + got_hex)
             
             key_ptr.free()
@@ -408,7 +413,7 @@ fn test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
             failed += 1
             var got_hex = String("")
             for j in range(16):
-                got_hex += hex(Int(ct_ptr.load(j)))[2:].rjust(2, '0')
+                got_hex += byte_to_hex(ct_ptr.load(j))
             failures.append(mode + " " + String(i) + ": expected " + expected_ct + ", got " + got_hex)
         
         key_ptr.free()
@@ -419,8 +424,8 @@ fn test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
     return TestResult(passed, failed, failures^)
 
 
-def main():
-    @parameter
+def main() raises:
+    comptime
     if not has_accelerator():
         print("GPU not available, skipping GPU tests")
         return

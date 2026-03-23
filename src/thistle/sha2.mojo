@@ -11,9 +11,9 @@ Todo:
 - Note: It's limited to SHA-1 and SHA-256
 """
 
-from collections import List
-from memory import UnsafePointer, alloc, memcpy
-from bit import rotate_bits_left, rotate_bits_right, byte_swap
+from std.collections import List
+from std.memory import UnsafePointer, alloc, memcpy
+from std.bit import rotate_bits_left, rotate_bits_right, byte_swap
 
 comptime SHA256_K = SIMD[DType.uint32, 64](
     0x428A2F98,
@@ -179,7 +179,7 @@ fn rotl32[n: Int](x: UInt32) -> UInt32:
 
 @always_inline
 fn shr32[n: Int](x: UInt32) -> UInt32:
-    return x >> n
+    return x >> UInt32(n)
 
 
 @always_inline
@@ -226,7 +226,7 @@ fn rotl64[n: Int](x: UInt64) -> UInt64:
 
 @always_inline
 fn shr64[n: Int](x: UInt64) -> UInt64:
-    return x >> n
+    return x >> UInt64(n)
 
 
 @always_inline
@@ -416,8 +416,7 @@ fn sha256_transform(
     var h = state[7]
 
     # First 16 rounds (load words and process)
-    @parameter
-    for i in range(16):
+    comptime for i in range(16):
         var byte_offset = i * 4
         var word = (UInt32(block[byte_offset]) << 24) | 
                    (UInt32(block[byte_offset + 1]) << 16) | 
@@ -437,8 +436,7 @@ fn sha256_transform(
         a = t1 + t2
 
     # Last 48 rounds with message schedule expansion
-    @parameter
-    for i in range(16, 64):
+    comptime for i in range(16, 64):
         var idx = i & 0xF
         var s0 = small_sigma0_32(w[(i - 15) & 0xF])
         var s1 = small_sigma1_32(w[(i - 2) & 0xF])
@@ -521,7 +519,7 @@ fn sha256_final(mut ctx: SHA256Context) -> List[UInt8]:
         ctx.buffer_len += 1
 
     for i in range(8):
-        ctx.buffer[56 + i] = UInt8((bit_count >> (56 - i * 8)) & 0xFF)
+        ctx.buffer[56 + i] = UInt8(UInt64(bit_count >> UInt64(56 - i * 8)) & 0xFF)
 
     ctx.state = sha256_transform(
         ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=64)
@@ -529,10 +527,10 @@ fn sha256_final(mut ctx: SHA256Context) -> List[UInt8]:
 
     var output = List[UInt8](capacity=32)
     for i in range(8):
-        output.append(UInt8((ctx.state[i] >> 24) & 0xFF))
-        output.append(UInt8((ctx.state[i] >> 16) & 0xFF))
-        output.append(UInt8((ctx.state[i] >> 8) & 0xFF))
-        output.append(UInt8(ctx.state[i] & 0xFF))
+        output.append(UInt8(UInt32(ctx.state[i] >> 24) & 0xFF))
+        output.append(UInt8(UInt32(ctx.state[i] >> 16) & 0xFF))
+        output.append(UInt8(UInt32(ctx.state[i] >> 8) & 0xFF))
+        output.append(UInt8(UInt32(ctx.state[i]) & 0xFF))
     return output^
 
 
@@ -562,17 +560,17 @@ fn sha256_final_to_buffer(mut ctx: SHA256Context, output: UnsafePointer[UInt8, M
         ctx.buffer_len += 1
 
     for i in range(8):
-        ctx.buffer[56 + i] = UInt8((bit_count >> (56 - i * 8)) & 0xFF)
+        ctx.buffer[56 + i] = UInt8(UInt64(bit_count >> UInt64(56 - i * 8)) & 0xFF)
 
     ctx.state = sha256_transform(
         ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=64)
     )
 
     for i in range(8):
-        output[i * 4 + 0] = UInt8((ctx.state[i] >> 24) & 0xFF)
-        output[i * 4 + 1] = UInt8((ctx.state[i] >> 16) & 0xFF)
-        output[i * 4 + 2] = UInt8((ctx.state[i] >> 8) & 0xFF)
-        output[i * 4 + 3] = UInt8(ctx.state[i] & 0xFF)
+        output[i * 4 + 0] = UInt8(UInt32(ctx.state[i] >> 24) & 0xFF)
+        output[i * 4 + 1] = UInt8(UInt32(ctx.state[i] >> 16) & 0xFF)
+        output[i * 4 + 2] = UInt8(UInt32(ctx.state[i] >> 8) & 0xFF)
+        output[i * 4 + 3] = UInt8(UInt32(ctx.state[i]) & 0xFF)
 
 
 struct SHA512Context(Movable):
@@ -643,8 +641,7 @@ fn sha512_transform(
     var h = state[7]
 
     # First 16 rounds
-    @parameter
-    for i in range(16):
+    comptime for i in range(16):
         var word: UInt64 = 0
         word |= UInt64(block[i * 8 + 0]) << 56
         word |= UInt64(block[i * 8 + 1]) << 48
@@ -668,8 +665,7 @@ fn sha512_transform(
         a = t1 + t2
 
     # Remaining 64 rounds
-    @parameter
-    for i in range(16, 80):
+    comptime for i in range(16, 80):
         var s0 = small_sigma0_64(w[(i - 15) & 0xF])
         var s1 = small_sigma1_64(w[(i - 2) & 0xF])
         var word = s1 + w[(i - 7) & 0xF] + s0 + w[(i - 16) & 0xF]
@@ -764,9 +760,9 @@ fn sha512_final(mut ctx: SHA512Context) -> List[UInt8]:
         ctx.buffer_len += 1
 
     for i in range(8):
-        ctx.buffer[112 + i] = UInt8((final_high >> (56 - i * 8)) & 0xFF)
+        ctx.buffer[112 + i] = UInt8(UInt64(final_high >> UInt64(56 - i * 8)) & 0xFF)
     for i in range(8):
-        ctx.buffer[120 + i] = UInt8((final_low >> (56 - i * 8)) & 0xFF)
+        ctx.buffer[120 + i] = UInt8(UInt64(final_low >> UInt64(56 - i * 8)) & 0xFF)
 
     ctx.state = sha512_transform(
         ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=128)
@@ -776,14 +772,14 @@ fn sha512_final(mut ctx: SHA512Context) -> List[UInt8]:
     var output = List[UInt8](capacity=64)
     for i in range(8):
         var s = ctx.state[i]
-        output.append(UInt8((s >> 56) & 0xFF))
-        output.append(UInt8((s >> 48) & 0xFF))
-        output.append(UInt8((s >> 40) & 0xFF))
-        output.append(UInt8((s >> 32) & 0xFF))
-        output.append(UInt8((s >> 24) & 0xFF))
-        output.append(UInt8((s >> 16) & 0xFF))
-        output.append(UInt8((s >> 8) & 0xFF))
-        output.append(UInt8(s & 0xFF))
+        output.append(UInt8(UInt64(s >> 56) & 0xFF))
+        output.append(UInt8(UInt64(s >> 48) & 0xFF))
+        output.append(UInt8(UInt64(s >> 40) & 0xFF))
+        output.append(UInt8(UInt64(s >> 32) & 0xFF))
+        output.append(UInt8(UInt64(s >> 24) & 0xFF))
+        output.append(UInt8(UInt64(s >> 16) & 0xFF))
+        output.append(UInt8(UInt64(s >> 8) & 0xFF))
+        output.append(UInt8(UInt64(s) & 0xFF))
     return output^
 
 
@@ -816,23 +812,23 @@ fn sha512_final_to_buffer(mut ctx: SHA512Context, output: UnsafePointer[UInt8, M
         ctx.buffer_len += 1
 
     for i in range(8):
-        ctx.buffer[112 + i] = UInt8((final_high >> (56 - i * 8)) & 0xFF)
+        ctx.buffer[112 + i] = UInt8(UInt64(final_high >> UInt64(56 - i * 8)) & 0xFF)
     for i in range(8):
-        ctx.buffer[120 + i] = UInt8((final_low >> (56 - i * 8)) & 0xFF)
+        ctx.buffer[120 + i] = UInt8(UInt64(final_low >> UInt64(56 - i * 8)) & 0xFF)
 
     ctx.state = sha512_transform(
         ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=128)
     )
 
     for i in range(8):
-        output[i * 8 + 0] = UInt8((ctx.state[i] >> 56) & 0xFF)
-        output[i * 8 + 1] = UInt8((ctx.state[i] >> 48) & 0xFF)
-        output[i * 8 + 2] = UInt8((ctx.state[i] >> 40) & 0xFF)
-        output[i * 8 + 3] = UInt8((ctx.state[i] >> 32) & 0xFF)
-        output[i * 8 + 4] = UInt8((ctx.state[i] >> 24) & 0xFF)
-        output[i * 8 + 5] = UInt8((ctx.state[i] >> 16) & 0xFF)
-        output[i * 8 + 6] = UInt8((ctx.state[i] >> 8) & 0xFF)
-        output[i * 8 + 7] = UInt8(ctx.state[i] & 0xFF)
+        output[i * 8 + 0] = UInt8(UInt64(ctx.state[i] >> 56) & 0xFF)
+        output[i * 8 + 1] = UInt8(UInt64(ctx.state[i] >> 48) & 0xFF)
+        output[i * 8 + 2] = UInt8(UInt64(ctx.state[i] >> 40) & 0xFF)
+        output[i * 8 + 3] = UInt8(UInt64(ctx.state[i] >> 32) & 0xFF)
+        output[i * 8 + 4] = UInt8(UInt64(ctx.state[i] >> 24) & 0xFF)
+        output[i * 8 + 5] = UInt8(UInt64(ctx.state[i] >> 16) & 0xFF)
+        output[i * 8 + 6] = UInt8(UInt64(ctx.state[i] >> 8) & 0xFF)
+        output[i * 8 + 7] = UInt8(UInt64(ctx.state[i]) & 0xFF)
 
 
 fn sha256_final_with_len(mut ctx: SHA256Context, output_len: Int) -> List[UInt8]:
@@ -855,7 +851,7 @@ fn sha256_final_with_len(mut ctx: SHA256Context, output_len: Int) -> List[UInt8]
         ctx.buffer_len += 1
 
     for i in range(8):
-        ctx.buffer[56 + i] = UInt8((bit_count >> (56 - i * 8)) & 0xFF)
+        ctx.buffer[56 + i] = UInt8(UInt64(bit_count >> UInt64(56 - i * 8)) & 0xFF)
 
     ctx.state = sha256_transform(
         ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=64)
@@ -869,7 +865,7 @@ fn sha256_final_with_len(mut ctx: SHA256Context, output_len: Int) -> List[UInt8]
         if i == words_needed - 1:
             bytes_in_word = output_len - i * 4
         for j in range(bytes_in_word):
-            output.append(UInt8((word >> (24 - j * 8)) & 0xFF))
+            output.append(UInt8(UInt32(word >> UInt32(24 - j * 8)) & 0xFF))
     return output^
 
 
@@ -902,9 +898,9 @@ fn sha512_final_with_len(mut ctx: SHA512Context, output_len: Int) -> List[UInt8]
         ctx.buffer_len += 1
 
     for i in range(8):
-        ctx.buffer[112 + i] = UInt8((final_high >> (56 - i * 8)) & 0xFF)
+        ctx.buffer[112 + i] = UInt8(UInt64(final_high >> UInt64(56 - i * 8)) & 0xFF)
     for i in range(8):
-        ctx.buffer[120 + i] = UInt8((final_low >> (56 - i * 8)) & 0xFF)
+        ctx.buffer[120 + i] = UInt8(UInt64(final_low >> UInt64(56 - i * 8)) & 0xFF)
 
     ctx.state = sha512_transform(
         ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=128)
@@ -918,7 +914,7 @@ fn sha512_final_with_len(mut ctx: SHA512Context, output_len: Int) -> List[UInt8]
         if i == words_needed - 1:
             bytes_in_word = output_len - i * 8
         for j in range(bytes_in_word):
-            output.append(UInt8((word >> (56 - j * 8)) & 0xFF))
+            output.append(UInt8(UInt64(word >> UInt64(56 - j * 8)) & 0xFF))
     return output^
 
 

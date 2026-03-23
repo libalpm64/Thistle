@@ -1,6 +1,6 @@
-from builtin.rebind import downcast
-from builtin.constrained import _constrained_conforms_to
-from memory import stack_allocation
+from std.builtin.rebind import downcast
+from std.builtin.constrained import _constrained_conforms_to
+from std.memory import stack_allocation
 
 struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
     var _ptr: UnsafePointer[Self.ElementType, MutExternalOrigin]
@@ -40,8 +40,7 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
         var ptr = self.unsafe_ptr()
 
         # Move each element into the array storage.
-        @parameter
-        for i in range(Self.size):
+        comptime for i in range(Self.size):
             # Safety: We own the elements in the variadic list.
             ptr.init_pointee_move_from(
                 UnsafePointer(to=storage[i]).unsafe_mut_cast[True]()
@@ -84,7 +83,7 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
         idx: Some[Indexer]
     ](ref self) -> ref[MutExternalOrigin] Self.ElementType:
         comptime i = index(idx)
-        constrained[0 <= i < Self.size, "Index must be within bounds."]()
+        comptime assert 0 <= i < Self.size, "Index must be within bounds."
         return self.unsafe_get(i)
 
 
@@ -94,7 +93,7 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
         idx: Int
     ](ref self) -> ref[MutExternalOrigin] Self.ElementType:
         comptime i = index(idx)
-        constrained[0 <= i < Self.size, "Index must be within bounds."]()
+        comptime assert 0 <= i < Self.size, "Index must be within bounds."
         return self.unsafe_get(i)
 
     @always_inline
@@ -132,10 +131,8 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
             Self.ElementType, ImplicitlyDestructible
         ]
 
-        @parameter
-        if not TDestructible.__del__is_trivial:
-            @parameter
-            for idx in range(Self.size):
+        comptime if not TDestructible.__del__is_trivial:
+            comptime for idx in range(Self.size):
                 var ptr = self.unsafe_ptr() + idx
                 ptr.bitcast[TDestructible]().destroy_pointee()
 

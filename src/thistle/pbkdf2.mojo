@@ -7,8 +7,8 @@ SP 800-132 / FIPS 140-2 / RFC 8018
 By Libalpm64, Attribute not required.
 """
 
-from collections import List
-from memory import UnsafePointer, alloc, memcpy
+from std.collections import List
+from std.memory import UnsafePointer, alloc, memcpy
 from .sha2 import (
     SHA256Context,
     SHA512Context,

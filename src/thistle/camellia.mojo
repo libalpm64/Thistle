@@ -6,8 +6,8 @@ Camellia block cipher implementation per RFC 3713
 By Libalpm no attribution required
 """
 
-from memory import bitcast
-from bit import byte_swap, rotate_bits_left
+from std.memory import bitcast
+from std.bit import byte_swap, rotate_bits_left
 
 comptime SBOX1 = SIMD[DType.uint8, 256](
     112, 130,  44, 236, 179,  39, 192, 229, 228, 133,  87,  53, 234,  12, 174,  65,
@@ -39,14 +39,15 @@ comptime SIGMA6 = 0xB05688C2B3E6C1FD
 @always_inline
 fn rotl128(high: UInt64, low: UInt64, n: Int) -> SIMD[DType.uint64, 2]:
     if n < 64:
+        var s = UInt64(n)
         return SIMD[DType.uint64, 2](
-            (high << n) | (low >> (64 - n)),
-            (low << n) | (high >> (64 - n))
+            (high << s) | (low >> (UInt64(64) - s)),
+            (low << s) | (high >> (UInt64(64) - s))
         )
-    var shift = n - 64
+    var s = UInt64(n - 64)
     return SIMD[DType.uint64, 2](
-        (low << shift) | (high >> (64 - shift)),
-        (high << shift) | (low >> (64 - shift))
+        (low << s) | (high >> (UInt64(64) - s)),
+        (high << s) | (low >> (UInt64(64) - s))
     )
 
 

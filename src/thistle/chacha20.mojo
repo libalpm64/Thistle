@@ -6,10 +6,10 @@ ChaCha20 stream cipher implementation per RFC 7539
 By Libalpm no attribution required
 """
 
-from memory import bitcast, memcpy
-from memory.unsafe_pointer import UnsafePointer, alloc
-from builtin.type_aliases import MutExternalOrigin
-from bit import rotate_bits_left
+from std.memory import bitcast, memcpy
+from std.memory.unsafe_pointer import UnsafePointer, alloc
+from std.builtin.type_aliases import MutExternalOrigin
+from std.bit import rotate_bits_left
 
 comptime CHACHA_CONSTANTS = SIMD[DType.uint32, 4](
     0x61707865, 0x3320646E, 0x79622D32, 0x6B206574,
