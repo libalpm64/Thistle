@@ -6,7 +6,7 @@ Thistle was written to avoid the **150x performance drops** when Mojo has to cal
 
 > [!IMPORTANT]
 > Currently, Thistle is an experimental library.
-
+> MacOS broken for Argon2, SHA, Blake3 (Compiler/Runtime Issue)
 ---
 
 ### Currently supported Algorithms:
@@ -22,7 +22,8 @@ Thistle was written to avoid the **150x performance drops** when Mojo has to cal
 * **KCipher-2** (Faster than Native C)
 * **ML-KEM / ML-DSA** (FFI Linked Post-Quantum Crypto)
 * **AES-GPU** (XTS/CBC/ECB/CTR/GCM/ECB/CTR)
----
+* **AES-NI** (XTS/CBC/ECB/CTR/GCM/ECB/CTR)
+* **AES-Software** (XTS/CBC/ECB/CTR/GCM/ECB/CTR)
 
 ### Build:
 
@@ -38,7 +39,7 @@ Platforms supported: Linux, macOS
 ---
 
 ### Current Roadmap:
-
+* **SHA-NI**
 * **ECDSA / ECDH** (NIST P-256, P-384)
 * **RSA** (PSS only)
 
@@ -46,7 +47,6 @@ Platforms supported: Linux, macOS
 
 ### Future Roadmap:
 
-* **AES-NI / SHA-NI** (~5x increase in speed, also CPU cache immune)
 * **Camellia** (Use AES-NI)
 ---
 
