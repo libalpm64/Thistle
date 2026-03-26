@@ -4,7 +4,7 @@
 """
 AES CPU implementation
 By Libalpm64 no attribution required.
-Experimental (Do not use in Prod).
+Work in progress.
 """
 
 from std.memory import alloc, memset
@@ -117,29 +117,77 @@ fn cpu_aes_encrypt(
         s7 = s3
         s3 = t15
 
-        var a0 = s0; var a1 = s1; var a2 = s2; var a3 = s3
-        s0 = gf_mul2(a0) ^ gf_mul3(a1) ^ a2 ^ a3
-        s1 = a0 ^ gf_mul2(a1) ^ gf_mul3(a2) ^ a3
-        s2 = a0 ^ a1 ^ gf_mul2(a2) ^ gf_mul3(a3)
-        s3 = gf_mul3(a0) ^ a1 ^ a2 ^ gf_mul2(a3)
+        var a00 = s0; var a01 = s1; var a02 = s2; var a03 = s3
+        var m200 = (a00 << 1) & UInt8(0xff)
+        if (a00 & 0x80) != 0:
+            m200 ^= 0x1b
+        var m201 = (a01 << 1) & UInt8(0xff)
+        if (a01 & 0x80) != 0:
+            m201 ^= 0x1b
+        var m202 = (a02 << 1) & UInt8(0xff)
+        if (a02 & 0x80) != 0:
+            m202 ^= 0x1b
+        var m203 = (a03 << 1) & UInt8(0xff)
+        if (a03 & 0x80) != 0:
+            m203 ^= 0x1b
+        s0 = m200 ^ (a01 ^ m201) ^ a02 ^ a03
+        s1 = a00 ^ m201 ^ (a02 ^ m202) ^ a03
+        s2 = a00 ^ a01 ^ m202 ^ (a03 ^ m203)
+        s3 = (a00 ^ m200) ^ a01 ^ a02 ^ m203
 
-        a0 = s4; a1 = s5; a2 = s6; a3 = s7
-        s4 = gf_mul2(a0) ^ gf_mul3(a1) ^ a2 ^ a3
-        s5 = a0 ^ gf_mul2(a1) ^ gf_mul3(a2) ^ a3
-        s6 = a0 ^ a1 ^ gf_mul2(a2) ^ gf_mul3(a3)
-        s7 = gf_mul3(a0) ^ a1 ^ a2 ^ gf_mul2(a3)
+        a00 = s4; a01 = s5; a02 = s6; a03 = s7
+        m200 = (a00 << 1) & UInt8(0xff)
+        if (a00 & 0x80) != 0:
+            m200 ^= 0x1b
+        m201 = (a01 << 1) & UInt8(0xff)
+        if (a01 & 0x80) != 0:
+            m201 ^= 0x1b
+        m202 = (a02 << 1) & UInt8(0xff)
+        if (a02 & 0x80) != 0:
+            m202 ^= 0x1b
+        m203 = (a03 << 1) & UInt8(0xff)
+        if (a03 & 0x80) != 0:
+            m203 ^= 0x1b
+        s4 = m200 ^ (a01 ^ m201) ^ a02 ^ a03
+        s5 = a00 ^ m201 ^ (a02 ^ m202) ^ a03
+        s6 = a00 ^ a01 ^ m202 ^ (a03 ^ m203)
+        s7 = (a00 ^ m200) ^ a01 ^ a02 ^ m203
 
-        a0 = s8; a1 = s9; a2 = s10; a3 = s11
-        s8 = gf_mul2(a0) ^ gf_mul3(a1) ^ a2 ^ a3
-        s9 = a0 ^ gf_mul2(a1) ^ gf_mul3(a2) ^ a3
-        s10 = a0 ^ a1 ^ gf_mul2(a2) ^ gf_mul3(a3)
-        s11 = gf_mul3(a0) ^ a1 ^ a2 ^ gf_mul2(a3)
+        a00 = s8; a01 = s9; a02 = s10; a03 = s11
+        m200 = (a00 << 1) & UInt8(0xff)
+        if (a00 & 0x80) != 0:
+            m200 ^= 0x1b
+        m201 = (a01 << 1) & UInt8(0xff)
+        if (a01 & 0x80) != 0:
+            m201 ^= 0x1b
+        m202 = (a02 << 1) & UInt8(0xff)
+        if (a02 & 0x80) != 0:
+            m202 ^= 0x1b
+        m203 = (a03 << 1) & UInt8(0xff)
+        if (a03 & 0x80) != 0:
+            m203 ^= 0x1b
+        s8 = m200 ^ (a01 ^ m201) ^ a02 ^ a03
+        s9 = a00 ^ m201 ^ (a02 ^ m202) ^ a03
+        s10 = a00 ^ a01 ^ m202 ^ (a03 ^ m203)
+        s11 = (a00 ^ m200) ^ a01 ^ a02 ^ m203
 
-        a0 = s12; a1 = s13; a2 = s14; a3 = s15
-        s12 = gf_mul2(a0) ^ gf_mul3(a1) ^ a2 ^ a3
-        s13 = a0 ^ gf_mul2(a1) ^ gf_mul3(a2) ^ a3
-        s14 = a0 ^ a1 ^ gf_mul2(a2) ^ gf_mul3(a3)
-        s15 = gf_mul3(a0) ^ a1 ^ a2 ^ gf_mul2(a3)
+        a00 = s12; a01 = s13; a02 = s14; a03 = s15
+        m200 = (a00 << 1) & UInt8(0xff)
+        if (a00 & 0x80) != 0:
+            m200 ^= 0x1b
+        m201 = (a01 << 1) & UInt8(0xff)
+        if (a01 & 0x80) != 0:
+            m201 ^= 0x1b
+        m202 = (a02 << 1) & UInt8(0xff)
+        if (a02 & 0x80) != 0:
+            m202 ^= 0x1b
+        m203 = (a03 << 1) & UInt8(0xff)
+        if (a03 & 0x80) != 0:
+            m203 ^= 0x1b
+        s12 = m200 ^ (a01 ^ m201) ^ a02 ^ a03
+        s13 = a00 ^ m201 ^ (a02 ^ m202) ^ a03
+        s14 = a00 ^ a01 ^ m202 ^ (a03 ^ m203)
+        s15 = (a00 ^ m200) ^ a01 ^ a02 ^ m203
 
         w0 = rk_ptr.load(0)
         s0 ^= UInt8((w0 >> 24) & 0xff)
@@ -234,6 +282,191 @@ fn cpu_aes_encrypt(
     pt_bytes.store(13, s13)
     pt_bytes.store(14, s14)
     pt_bytes.store(15, s15)
+
+
+@always_inline
+fn cpu_aes_ecb_kernel(
+    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    num_blocks: Int,
+    rounds: Int
+) -> None:
+    var i = 0
+    while i < num_blocks:
+        var block_ptr = input_ptr + i * 16
+        var out_ptr = output_ptr + i * 16
+        
+        if rounds == 10:
+            cpu_aes_encrypt(block_ptr, round_keys, 10)
+        elif rounds == 12:
+            cpu_aes_encrypt(block_ptr, round_keys, 12)
+        else:
+            cpu_aes_encrypt(block_ptr, round_keys, 14)
+        
+        for j in range(16):
+            out_ptr.store(j, block_ptr.load(j))
+        
+        i += 1
+
+
+@always_inline
+fn cpu_aes_cbc_kernel(
+    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    num_blocks: Int,
+    iv_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    rounds: Int
+) -> None:
+    var prev_block = StaticTuple[UInt8, 16](
+        iv_ptr[0], iv_ptr[1], iv_ptr[2], iv_ptr[3],
+        iv_ptr[4], iv_ptr[5], iv_ptr[6], iv_ptr[7],
+        iv_ptr[8], iv_ptr[9], iv_ptr[10], iv_ptr[11],
+        iv_ptr[12], iv_ptr[13], iv_ptr[14], iv_ptr[15]
+    )
+    
+    var i = 0
+    while i < num_blocks:
+        var block_ptr = input_ptr + i * 16
+        var out_ptr = output_ptr + i * 16
+        
+        var xored = StaticTuple[UInt8, 16](
+            block_ptr[0] ^ prev_block[0], block_ptr[1] ^ prev_block[1],
+            block_ptr[2] ^ prev_block[2], block_ptr[3] ^ prev_block[3],
+            block_ptr[4] ^ prev_block[4], block_ptr[5] ^ prev_block[5],
+            block_ptr[6] ^ prev_block[6], block_ptr[7] ^ prev_block[7],
+            block_ptr[8] ^ prev_block[8], block_ptr[9] ^ prev_block[9],
+            block_ptr[10] ^ prev_block[10], block_ptr[11] ^ prev_block[11],
+            block_ptr[12] ^ prev_block[12], block_ptr[13] ^ prev_block[13],
+            block_ptr[14] ^ prev_block[14], block_ptr[15] ^ prev_block[15]
+        )
+        
+        for j in range(16):
+            block_ptr.store(j, xored[j])
+        
+        if rounds == 10:
+            cpu_aes_encrypt(block_ptr, round_keys, 10)
+        elif rounds == 12:
+            cpu_aes_encrypt(block_ptr, round_keys, 12)
+        else:
+            cpu_aes_encrypt(block_ptr, round_keys, 14)
+        
+        for j in range(16):
+            out_ptr.store(j, block_ptr.load(j))
+            prev_block[j] = block_ptr.load(j)
+        
+        i += 1
+
+
+@always_inline
+fn cpu_aes_ctr_kernel(
+    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    num_blocks: Int,
+    nonce_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    rounds: Int
+) -> None:
+    var i = 0
+    while i < num_blocks:
+        var counter = StaticTuple[UInt8, 16](
+            nonce_ptr[0], nonce_ptr[1], nonce_ptr[2], nonce_ptr[3],
+            nonce_ptr[4], nonce_ptr[5], nonce_ptr[6], nonce_ptr[7],
+            nonce_ptr[8], nonce_ptr[9], nonce_ptr[10], nonce_ptr[11],
+            nonce_ptr[12], nonce_ptr[13], nonce_ptr[14], nonce_ptr[15]
+        )
+        
+        counter[12] = counter[12] ^ UInt8((i >> 24) & 0xff)
+        counter[13] = counter[13] ^ UInt8((i >> 16) & 0xff)
+        counter[14] = counter[14] ^ UInt8((i >> 8) & 0xff)
+        counter[15] = counter[15] ^ UInt8(i & 0xff)
+        
+        var temp_block = alloc[UInt8](16)
+        for j in range(16):
+            temp_block.store(j, counter[j])
+        
+        if rounds == 10:
+            cpu_aes_encrypt(temp_block, round_keys, 10)
+        elif rounds == 12:
+            cpu_aes_encrypt(temp_block, round_keys, 12)
+        else:
+            cpu_aes_encrypt(temp_block, round_keys, 14)
+        
+        var in_block = input_ptr + i * 16
+        var out_block = output_ptr + i * 16
+        for j in range(16):
+            out_block.store(j, in_block.load(j) ^ temp_block.load(j))
+        
+        temp_block.free()
+        i += 1
+
+
+fn cpu_gf_mul2_xts(val: UInt8) -> UInt8:
+    var result = val << 1
+    if (val & 0x80) != 0:
+        result = result ^ 0x87
+    return result
+
+
+fn cpu_compute_xts_tweak_list(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> List[UInt8]:
+    var result = List[UInt8](capacity=16)
+    for i in range(16):
+        result.append(tweak_ptr.load(i))
+    
+    var carry = False
+    for i in range(16):
+        var new_carry = (result[i] & 0x80) != 0
+        result[i] = cpu_gf_mul2_xts(result[i])
+        if carry:
+            result[i] = result[i] ^ 1
+        carry = new_carry
+    
+    return result^
+
+
+@always_inline
+fn cpu_aes_xts_kernel(
+    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    round_keys1: UnsafePointer[UInt32, MutAnyOrigin],
+    round_keys2: UnsafePointer[UInt32, MutAnyOrigin],
+    num_blocks: Int,
+    tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    rounds: Int
+) -> None:
+    var tweak = alloc[UInt8](16)
+    for j in range(16):
+        tweak.store(j, tweak_ptr[j])
+    
+    cpu_aes_encrypt(tweak, round_keys2, rounds)
+    
+    var i = 0
+    while i < num_blocks:
+        var in_block = input_ptr + i * 16
+        var out_block = output_ptr + i * 16
+        
+        var xored = alloc[UInt8](16)
+        for j in range(16):
+            xored.store(j, in_block.load(j) ^ tweak.load(j))
+        
+        if rounds == 10:
+            cpu_aes_encrypt(xored, round_keys1, 10)
+        else:
+            cpu_aes_encrypt(xored, round_keys1, 14)
+        
+        for j in range(16):
+            out_block.store(j, xored.load(j) ^ tweak.load(j))
+        
+        xored.free()
+        
+        var next_tweak = cpu_compute_xts_tweak_list(tweak)
+        for j in range(16):
+            tweak.store(j, next_tweak[j])
+        
+        i += 1
+    
+    tweak.free()
 
 
 
