@@ -50,12 +50,6 @@ Platforms supported: Linux, macOS
 * **Camellia** (Use AES-NI)
 ---
 
-### Detailed:
-
-Currently AES-NI/RSA PSS (The one that is immune to sidechannels)/Camellia (Using the Linux Kernels AES-NI optimizations) are difficult to implement in Mojo.
-
----
-
 ### What is not on the roadmap:
 
 * **Windows support.** Due to System V and Windows' poor architectural choices, we will not support them at the moment. It is technically infeasible for us to try, as Mojo doesn't even support Windows yet. Update: It does appear that Windows is now emulating instructions (System V for ARM in 26H1); however, it has high overhead ~ 30%).
