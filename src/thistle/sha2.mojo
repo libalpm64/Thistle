@@ -63,6 +63,16 @@ fn maj32(x: UInt32, y: UInt32, z: UInt32) -> UInt32:
 
 
 @always_inline
+fn ch64(x: UInt64, y: UInt64, z: UInt64) -> UInt64:
+    return (x & y) ^ ((~x) & z)
+
+
+@always_inline
+fn maj64(x: UInt64, y: UInt64, z: UInt64) -> UInt64:
+    return (x & y) ^ (x & z) ^ (y & z)
+
+
+@always_inline
 fn sigma0_32(x: UInt32) -> UInt32:
     return rotate_bits_right[2](x) ^ rotate_bits_right[13](x) ^ rotate_bits_right[22](x)
 
@@ -80,16 +90,6 @@ fn small_sigma0_32(x: UInt32) -> UInt32:
 @always_inline
 fn small_sigma1_32(x: UInt32) -> UInt32:
     return rotate_bits_right[17](x) ^ rotate_bits_right[19](x) ^ (x >> 10)
-
-
-@always_inline
-fn ch64(x: UInt64, y: UInt64, z: UInt64) -> UInt64:
-    return (x & y) ^ ((~x) & z)
-
-
-@always_inline
-fn maj64(x: UInt64, y: UInt64, z: UInt64) -> UInt64:
-    return (x & y) ^ (x & z) ^ (y & z)
 
 
 @always_inline
@@ -139,46 +139,6 @@ comptime SHA224Config = SHA2Config[
 comptime SHA384Config = SHA2Config[
     DType.uint64, 80, 128, 64, 8, SHA384_IV, SHA512_K
 ]
-
-
-@always_inline
-fn sigma0_32_generic(x: UInt32) -> UInt32:
-    return rotate_bits_right[2](x) ^ rotate_bits_right[13](x) ^ rotate_bits_right[22](x)
-
-
-@always_inline
-fn sigma1_32_generic(x: UInt32) -> UInt32:
-    return rotate_bits_right[6](x) ^ rotate_bits_right[11](x) ^ rotate_bits_right[25](x)
-
-
-@always_inline
-fn small_sigma0_32_generic(x: UInt32) -> UInt32:
-    return rotate_bits_right[7](x) ^ rotate_bits_right[18](x) ^ (x >> 3)
-
-
-@always_inline
-fn small_sigma1_32_generic(x: UInt32) -> UInt32:
-    return rotate_bits_right[17](x) ^ rotate_bits_right[19](x) ^ (x >> 10)
-
-
-@always_inline
-fn sigma0_64_generic(x: UInt64) -> UInt64:
-    return rotate_bits_right[28](x) ^ rotate_bits_right[34](x) ^ rotate_bits_right[39](x)
-
-
-@always_inline
-fn sigma1_64_generic(x: UInt64) -> UInt64:
-    return rotate_bits_right[14](x) ^ rotate_bits_right[18](x) ^ rotate_bits_right[41](x)
-
-
-@always_inline
-fn small_sigma0_64_generic(x: UInt64) -> UInt64:
-    return rotate_bits_right[1](x) ^ rotate_bits_right[8](x) ^ (x >> 7)
-
-
-@always_inline
-fn small_sigma1_64_generic(x: UInt64) -> UInt64:
-    return rotate_bits_right[19](x) ^ rotate_bits_right[61](x) ^ (x >> 6)
 
 
 @always_inline
