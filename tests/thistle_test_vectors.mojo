@@ -12,6 +12,7 @@ from thistle.chacha20 import ChaCha20
 from thistle.kcipher2 import KCipher2
 from thistle.pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
 from thistle.aes import cpu_aes_encrypt, expand_key_128
+from thistle.aes_ni import aes_encrypt, has_aes_ni, has_x86_aes_ni
 
 
 fn hex_char_to_val(c: Int) -> UInt8:
@@ -307,6 +308,39 @@ fn test_aes_cpu(data: PythonObject, py: PythonObject) raises -> TestResult:
     return TestResult(passed, failed, failures^)
 
 
+fn test_aes_ni(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var passed, failed = 0, 0
+    var failures = List[String]()
+    var has_ni = has_aes_ni()
+    var has_x86 = has_x86_aes_ni()
+    if not has_ni:
+        print("  (AES-NI not available, skipping)")
+        return TestResult(0, 0, failures^)
+    print("  (using AES-NI: x86=" + String(has_x86) + ")")
+    for i in range(Int(py=data.__len__())):
+        var v = data[i]
+        var key_bytes = hex_to_bytes(String(v["key"]))
+        var pt_bytes = hex_to_bytes(String(v["plaintext"]))
+        var expected_ct = String(v["ciphertext"])
+        var key_ptr = alloc[UInt8](16)
+        var pt_ptr = alloc[UInt8](16)
+        for j in range(16):
+            key_ptr.store(j, key_bytes[j])
+            pt_ptr.store(j, pt_bytes[j])
+        var round_keys = expand_key_128(key_ptr)
+        aes_encrypt(pt_ptr, round_keys, 10)
+        var got = ptr_to_hex(pt_ptr, 16)
+        if got == expected_ct:
+            passed += 1
+        else:
+            failed += 1
+            failures.append("AES-NI " + String(v["name"]) + ": expected " + expected_ct + ", got " + got)
+        key_ptr.free()
+        round_keys.free()
+        pt_ptr.free()
+    return TestResult(passed, failed, failures^)
+
+
 fn print_result(name: String, result: TestResult, mut tp: Int, mut tf: Int, mut af: Bool):
     if result.failed == 0:
         print("Testing " + name + " [pass] (" + String(result.passed) + " vectors)")
@@ -385,6 +419,13 @@ def main() raises:
         print_result("AES-128-CPU", test_aes_cpu(load_json("tests/vectors/aes.json", py), py), tp, tf, af)
     except e:
         print("AES-128-CPU [error] " + String(e)); af = True
+    print()
+
+    try:
+        print("Testing AES-NI...")
+        print_result("AES-128-NI", test_aes_ni(load_json("tests/vectors/aes.json", py), py), tp, tf, af)
+    except e:
+        print("AES-128-NI [error] " + String(e)); af = True
     print()
 
     print("Total: " + String(tp) + " pass, " + String(tf) + " fail")

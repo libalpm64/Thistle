@@ -12,175 +12,45 @@ Todo:
 """
 
 from std.collections import List
-from std.memory import UnsafePointer, alloc, memcpy
+from std.memory import UnsafePointer, alloc, memcpy, memset_zero
 from std.bit import rotate_bits_left, rotate_bits_right, byte_swap
+from std.builtin.simd import SIMD
+from std.builtin.dtype import DType
 
 comptime SHA256_K = SIMD[DType.uint32, 64](
-    0x428A2F98,
-    0x71374491,
-    0xB5C0FBCF,
-    0xE9B5DBA5,
-    0x3956C25B,
-    0x59F111F1,
-    0x923F82A4,
-    0xAB1C5ED5,
-    0xD807AA98,
-    0x12835B01,
-    0x243185BE,
-    0x550C7DC3,
-    0x72BE5D74,
-    0x80DEB1FE,
-    0x9BDC06A7,
-    0xC19BF174,
-    0xE49B69C1,
-    0xEFBE4786,
-    0x0FC19DC6,
-    0x240CA1CC,
-    0x2DE92C6F,
-    0x4A7484AA,
-    0x5CB0A9DC,
-    0x76F988DA,
-    0x983E5152,
-    0xA831C66D,
-    0xB00327C8,
-    0xBF597FC7,
-    0xC6E00BF3,
-    0xD5A79147,
-    0x06CA6351,
-    0x14292967,
-    0x27B70A85,
-    0x2E1B2138,
-    0x4D2C6DFC,
-    0x53380D13,
-    0x650A7354,
-    0x766A0ABB,
-    0x81C2C92E,
-    0x92722C85,
-    0xA2BFE8A1,
-    0xA81A664B,
-    0xC24B8B70,
-    0xC76C51A3,
-    0xD192E819,
-    0xD6990624,
-    0xF40E3585,
-    0x106AA070,
-    0x19A4C116,
-    0x1E376C08,
-    0x2748774C,
-    0x34B0BCB5,
-    0x391C0CB3,
-    0x4ED8AA4A,
-    0x5B9CCA4F,
-    0x682E6FF3,
-    0x748F82EE,
-    0x78A5636F,
-    0x84C87814,
-    0x8CC70208,
-    0x90BEFFFA,
-    0xA4506CEB,
-    0xBEF9A3F7,
-    0xC67178F2,
+    0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5, 0x3956C25B,
+    0x59F111F1, 0x923F82A4, 0xAB1C5ED5, 0xD807AA98, 0x12835B01,
+    0x243185BE, 0x550C7DC3, 0x72BE5D74, 0x80DEB1FE, 0x9BDC06A7,
+    0xC19BF174, 0xE49B69C1, 0xEFBE4786, 0x0FC19DC6, 0x240CA1CC,
+    0x2DE92C6F, 0x4A7484AA, 0x5CB0A9DC, 0x76F988DA, 0x983E5152,
+    0xA831C66D, 0xB00327C8, 0xBF597FC7, 0xC6E00BF3, 0xD5A79147,
+    0x06CA6351, 0x14292967, 0x27B70A85, 0x2E1B2138, 0x4D2C6DFC,
+    0x53380D13, 0x650A7354, 0x766A0ABB, 0x81C2C92E, 0x92722C85,
+    0xA2BFE8A1, 0xA81A664B, 0xC24B8B70, 0xC76C51A3, 0xD192E819,
+    0xD6990624, 0xF40E3585, 0x106AA070, 0x19A4C116, 0x1E376C08,
+    0x2748774C, 0x34B0BCB5, 0x391C0CB3, 0x4ED8AA4A, 0x5B9CCA4F,
+    0x682E6FF3, 0x748F82EE, 0x78A5636F, 0x84C87814, 0x8CC70208,
+    0x90BEFFFA, 0xA4506CEB, 0xBEF9A3F7, 0xC67178F2,
 )
 
 comptime SHA512_K = SIMD[DType.uint64, 80](
-    0x428A2F98D728AE22,
-    0x7137449123EF65CD,
-    0xB5C0FBCFEC4D3B2F,
-    0xE9B5DBA58189DBBC,
-    0x3956C25BF348B538,
-    0x59F111F1B605D019,
-    0x923F82A4AF194F9B,
-    0xAB1C5ED5DA6D8118,
-    0xD807AA98A3030242,
-    0x12835B0145706FBE,
-    0x243185BE4EE4B28C,
-    0x550C7DC3D5FFB4E2,
-    0x72BE5D74F27B896F,
-    0x80DEB1FE3B1696B1,
-    0x9BDC06A725C71235,
-    0xC19BF174CF692694,
-    0xE49B69C19EF14AD2,
-    0xEFBE4786384F25E3,
-    0x0FC19DC68B8CD5B5,
-    0x240CA1CC77AC9C65,
-    0x2DE92C6F592B0275,
-    0x4A7484AA6EA6E483,
-    0x5CB0A9DCBD41FBD4,
-    0x76F988DA831153B5,
-    0x983E5152EE66DFAB,
-    0xA831C66D2DB43210,
-    0xB00327C898FB213F,
-    0xBF597FC7BEEF0EE4,
-    0xC6E00BF33DA88FC2,
-    0xD5A79147930AA725,
-    0x06CA6351E003826F,
-    0x142929670A0E6E70,
-    0x27B70A8546D22FFC,
-    0x2E1B21385C26C926,
-    0x4D2C6DFC5AC42AED,
-    0x53380D139D95B3DF,
-    0x650A73548BAF63DE,
-    0x766A0ABB3C77B2A8,
-    0x81C2C92E47EDAEE6,
-    0x92722C851482353B,
-    0xA2BFE8A14CF10364,
-    0xA81A664BBC423001,
-    0xC24B8B70D0F89791,
-    0xC76C51A30654BE30,
-    0xD192E819D6EF5218,
-    0xD69906245565A910,
-    0xF40E35855771202A,
-    0x106AA07032BBD1B8,
-    0x19A4C116B8D2D0C8,
-    0x1E376C085141AB53,
-    0x2748774CDF8EEB99,
-    0x34B0BCB5E19B48A8,
-    0x391C0CB3C5C95A63,
-    0x4ED8AA4AE3418ACB,
-    0x5B9CCA4F7763E373,
-    0x682E6FF3D6B2B8A3,
-    0x748F82EE5DEFB2FC,
-    0x78A5636F43172F60,
-    0x84C87814A1F0AB72,
-    0x8CC702081A6439EC,
-    0x90BEFFFA23631E28,
-    0xA4506CEBDE82BDE9,
-    0xBEF9A3F7B2C67915,
-    0xC67178F2E372532B,
-    0xCA273ECEEA26619C,
-    0xD186B8C721C0C207,
-    0xEADA7DD6CDE0EB1E,
-    0xF57D4F7FEE6ED178,
-    0x06F067AA72176FBA,
-    0x0A637DC5A2C898A6,
-    0x113F9804BEF90DAE,
-    0x1B710B35131C471B,
-    0x28DB77F523047D84,
-    0x32CAAB7B40C72493,
-    0x3C9EBE0A15C9BEBC,
-    0x431D67C49C100D4C,
-    0x4CC5D4BECB3E42B6,
-    0x597F299CFC657E2A,
-    0x5FCB6FAB3AD6FAEC,
-    0x6C44198C4A475817,
+    0x428A2F98D728AE22, 0x7137449123EF65CD, 0xB5C0FBCFEC4D3B2F, 0xE9B5DBA58189DBBC, 0x3956C25BF348B538,
+    0x59F111F1B605D019, 0x923F82A4AF194F9B, 0xAB1C5ED5DA6D8118, 0xD807AA98A3030242, 0x12835B0145706FBE,
+    0x243185BE4EE4B28C, 0x550C7DC3D5FFB4E2, 0x72BE5D74F27B896F, 0x80DEB1FE3B1696B1, 0x9BDC06A725C71235,
+    0xC19BF174CF692694, 0xE49B69C19EF14AD2, 0xEFBE4786384F25E3, 0x0FC19DC68B8CD5B5, 0x240CA1CC77AC9C65,
+    0x2DE92C6F592B0275, 0x4A7484AA6EA6E483, 0x5CB0A9DCBD41FBD4, 0x76F988DA831153B5, 0x983E5152EE66DFAB,
+    0xA831C66D2DB43210, 0xB00327C898FB213F, 0xBF597FC7BEEF0EE4, 0xC6E00BF33DA88FC2, 0xD5A79147930AA725,
+    0x06CA6351E003826F, 0x142929670A0E6E70, 0x27B70A8546D22FFC, 0x2E1B21385C26C926, 0x4D2C6DFC5AC42AED,
+    0x53380D139D95B3DF, 0x650A73548BAF63DE, 0x766A0ABB3C77B2A8, 0x81C2C92E47EDAEE6, 0x92722C851482353B,
+    0xA2BFE8A14CF10364, 0xA81A664BBC423001, 0xC24B8B70D0F89791, 0xC76C51A30654BE30, 0xD192E819D6EF5218,
+    0xD69906245565A910, 0xF40E35855771202A, 0x106AA07032BBD1B8, 0x19A4C116B8D2D0C8, 0x1E376C085141AB53,
+    0x2748774CDF8EEB99, 0x34B0BCB5E19B48A8, 0x391C0CB3C5C95A63, 0x4ED8AA4AE3418ACB, 0x5B9CCA4F7763E373,
+    0x682E6FF3D6B2B8A3, 0x748F82EE5DEFB2FC, 0x78A5636F43172F60, 0x84C87814A1F0AB72, 0x8CC702081A6439EC,
+    0x90BEFFFA23631E28, 0xA4506CEBDE82BDE9, 0xBEF9A3F7B2C67915, 0xC67178F2E372532B, 0xCA273ECEEA26619C,
+    0xD186B8C721C0C207, 0xEADA7DD6CDE0EB1E, 0xF57D4F7FEE6ED178, 0x06F067AA72176FBA, 0x0A637DC5A2C898A6,
+    0x113F9804BEF90DAE, 0x1B710B35131C471B, 0x28DB77F523047D84, 0x32CAAB7B40C72493, 0x3C9EBE0A15C9BEBC,
+    0x431D67C49C100D4C, 0x4CC5D4BECB3E42B6, 0x597F299CFC657E2A, 0x5FCB6FAB3AD6FAEC, 0x6C44198C4A475817,
 )
-
-@always_inline
-fn rotr32[n: Int](x: UInt32) -> UInt32:
-    """Rotate right 32-bit using compile-time intrinsic."""
-    return rotate_bits_right[n](x)
-
-
-@always_inline
-fn rotl32[n: Int](x: UInt32) -> UInt32:
-    """Rotate left 32-bit using compile-time intrinsic."""
-    return rotate_bits_left[n](x)
-
-
-@always_inline
-fn shr32[n: Int](x: UInt32) -> UInt32:
-    return x >> UInt32(n)
-
 
 @always_inline
 fn ch32(x: UInt32, y: UInt32, z: UInt32) -> UInt32:
@@ -194,39 +64,22 @@ fn maj32(x: UInt32, y: UInt32, z: UInt32) -> UInt32:
 
 @always_inline
 fn sigma0_32(x: UInt32) -> UInt32:
-    return rotr32[2](x) ^ rotr32[13](x) ^ rotr32[22](x)
+    return rotate_bits_right[2](x) ^ rotate_bits_right[13](x) ^ rotate_bits_right[22](x)
 
 
 @always_inline
 fn sigma1_32(x: UInt32) -> UInt32:
-    return rotr32[6](x) ^ rotr32[11](x) ^ rotr32[25](x)
+    return rotate_bits_right[6](x) ^ rotate_bits_right[11](x) ^ rotate_bits_right[25](x)
 
 
 @always_inline
 fn small_sigma0_32(x: UInt32) -> UInt32:
-    return rotr32[7](x) ^ rotr32[18](x) ^ shr32[3](x)
+    return rotate_bits_right[7](x) ^ rotate_bits_right[18](x) ^ (x >> 3)
 
 
 @always_inline
 fn small_sigma1_32(x: UInt32) -> UInt32:
-    return rotr32[17](x) ^ rotr32[19](x) ^ shr32[10](x)
-
-
-@always_inline
-fn rotr64[n: Int](x: UInt64) -> UInt64:
-    """Rotate right 64-bit using compile-time intrinsic."""
-    return rotate_bits_right[n](x)
-
-
-@always_inline
-fn rotl64[n: Int](x: UInt64) -> UInt64:
-    """Rotate left 64-bit using compile-time intrinsic."""
-    return rotate_bits_left[n](x)
-
-
-@always_inline
-fn shr64[n: Int](x: UInt64) -> UInt64:
-    return x >> UInt64(n)
+    return rotate_bits_right[17](x) ^ rotate_bits_right[19](x) ^ (x >> 10)
 
 
 @always_inline
@@ -241,22 +94,133 @@ fn maj64(x: UInt64, y: UInt64, z: UInt64) -> UInt64:
 
 @always_inline
 fn sigma0_64(x: UInt64) -> UInt64:
-    return rotr64[28](x) ^ rotr64[34](x) ^ rotr64[39](x)
+    return rotate_bits_right[28](x) ^ rotate_bits_right[34](x) ^ rotate_bits_right[39](x)
 
 
 @always_inline
 fn sigma1_64(x: UInt64) -> UInt64:
-    return rotr64[14](x) ^ rotr64[18](x) ^ rotr64[41](x)
+    return rotate_bits_right[14](x) ^ rotate_bits_right[18](x) ^ rotate_bits_right[41](x)
 
 
 @always_inline
 fn small_sigma0_64(x: UInt64) -> UInt64:
-    return rotr64[1](x) ^ rotr64[8](x) ^ shr64[7](x)
+    return rotate_bits_right[1](x) ^ rotate_bits_right[8](x) ^ (x >> 7)
 
 
 @always_inline
 fn small_sigma1_64(x: UInt64) -> UInt64:
-    return rotr64[19](x) ^ rotr64[61](x) ^ shr64[6](x)
+    return rotate_bits_right[19](x) ^ rotate_bits_right[61](x) ^ (x >> 6)
+
+
+struct SHA2Config[
+    WordType: DType.integral,
+    Rounds: Int,
+    BlockSize: Int,
+    DigestSize: Int,
+    WordByteSize: Int,
+    IV: SIMD[WordType, 8],
+    K: SIMD[WordType, Rounds],
+]:
+    alias word_size = WordByteSize
+    alias rounds = Rounds
+    alias block_size = BlockSize
+    alias digest_size = DigestSize
+
+
+comptime SHA256Config = SHA2Config[
+    DType.uint32, 64, 64, 32, 4, SHA256_IV, SHA256_K
+]
+comptime SHA512Config = SHA2Config[
+    DType.uint64, 80, 128, 64, 8, SHA512_IV, SHA512_K
+]
+comptime SHA224Config = SHA2Config[
+    DType.uint32, 64, 64, 32, 4, SHA224_IV, SHA256_K
+]
+comptime SHA384Config = SHA2Config[
+    DType.uint64, 80, 128, 64, 8, SHA384_IV, SHA512_K
+]
+
+
+@always_inline
+fn sigma0_32_generic(x: UInt32) -> UInt32:
+    return rotate_bits_right[2](x) ^ rotate_bits_right[13](x) ^ rotate_bits_right[22](x)
+
+
+@always_inline
+fn sigma1_32_generic(x: UInt32) -> UInt32:
+    return rotate_bits_right[6](x) ^ rotate_bits_right[11](x) ^ rotate_bits_right[25](x)
+
+
+@always_inline
+fn small_sigma0_32_generic(x: UInt32) -> UInt32:
+    return rotate_bits_right[7](x) ^ rotate_bits_right[18](x) ^ (x >> 3)
+
+
+@always_inline
+fn small_sigma1_32_generic(x: UInt32) -> UInt32:
+    return rotate_bits_right[17](x) ^ rotate_bits_right[19](x) ^ (x >> 10)
+
+
+@always_inline
+fn sigma0_64_generic(x: UInt64) -> UInt64:
+    return rotate_bits_right[28](x) ^ rotate_bits_right[34](x) ^ rotate_bits_right[39](x)
+
+
+@always_inline
+fn sigma1_64_generic(x: UInt64) -> UInt64:
+    return rotate_bits_right[14](x) ^ rotate_bits_right[18](x) ^ rotate_bits_right[41](x)
+
+
+@always_inline
+fn small_sigma0_64_generic(x: UInt64) -> UInt64:
+    return rotate_bits_right[1](x) ^ rotate_bits_right[8](x) ^ (x >> 7)
+
+
+@always_inline
+fn small_sigma1_64_generic(x: UInt64) -> UInt64:
+    return rotate_bits_right[19](x) ^ rotate_bits_right[61](x) ^ (x >> 6)
+
+
+@always_inline
+fn ch_generic[WordType: DType.integral](x: SIMD[WordType, 1], y: SIMD[WordType, 1], z: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
+    return (x & y) ^ ((~x) & z)
+
+
+@always_inline
+fn maj_generic[WordType: DType.integral](x: SIMD[WordType, 1], y: SIMD[WordType, 1], z: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
+    return (x & y) ^ (x & z) ^ (y & z)
+
+
+@always_inline
+fn sigma0_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
+    comptime if WordType == DType.uint32:
+        return SIMD[WordType, 1](rotate_bits_right[2](x[0]) ^ rotate_bits_right[13](x[0]) ^ rotate_bits_right[22](x[0]))
+    else:
+        return SIMD[WordType, 1](rotate_bits_right[28](x[0]) ^ rotate_bits_right[34](x[0]) ^ rotate_bits_right[39](x[0]))
+
+
+@always_inline
+fn sigma1_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
+    comptime if WordType == DType.uint32:
+        return SIMD[WordType, 1](rotate_bits_right[6](x[0]) ^ rotate_bits_right[11](x[0]) ^ rotate_bits_right[25](x[0]))
+    else:
+        return SIMD[WordType, 1](rotate_bits_right[14](x[0]) ^ rotate_bits_right[18](x[0]) ^ rotate_bits_right[41](x[0]))
+
+
+@always_inline
+fn small_sigma0_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
+    comptime if WordType == DType.uint32:
+        return SIMD[WordType, 1](rotate_bits_right[7](x[0]) ^ rotate_bits_right[18](x[0]) ^ (x[0] >> 3))
+    else:
+        return SIMD[WordType, 1](rotate_bits_right[1](x[0]) ^ rotate_bits_right[8](x[0]) ^ (x[0] >> 7))
+
+
+@always_inline
+fn small_sigma1_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
+    comptime if WordType == DType.uint32:
+        return SIMD[WordType, 1](rotate_bits_right[17](x[0]) ^ rotate_bits_right[19](x[0]) ^ (x[0] >> 10))
+    else:
+        return SIMD[WordType, 1](rotate_bits_right[19](x[0]) ^ rotate_bits_right[61](x[0]) ^ (x[0] >> 6))
 
 
 # hex conversions
@@ -271,7 +235,7 @@ fn nibble_to_hex_char(nibble: UInt8) -> UInt8:
 
 fn bytes_to_hex(data: List[UInt8]) -> String:
     """Convert a byte list to a hexadecimal string."""
-    var result = String()
+    var result = String(capacity=len(data) * 2)
     for i in range(len(data)):
         var b = data[i]
         var high = (b >> 4) & 0x0F
@@ -283,8 +247,20 @@ fn bytes_to_hex(data: List[UInt8]) -> String:
 
 fn bytes_to_hex(data: SIMD[DType.uint8, 16]) -> String:
     """Convert a 16-byte SIMD vector to a hexadecimal string."""
-    var result = String()
+    var result = String(capacity=32)
     for i in range(16):
+        var b = data[i]
+        var high = (b >> 4) & 0x0F
+        var low = b & 0x0F
+        result += chr(Int(nibble_to_hex_char(high)))
+        result += chr(Int(nibble_to_hex_char(low)))
+    return result
+
+
+fn bytes_to_hex(data: Span[UInt8, ...]) -> String:
+    """Convert a byte span to a hexadecimal string."""
+    var result = String(capacity=len(data) * 2)
+    for i in range(len(data)):
         var b = data[i]
         var high = (b >> 4) & 0x0F
         var low = b & 0x0F
@@ -347,8 +323,18 @@ comptime SHA384_IV = SIMD[DType.uint64, 8](
 
 @always_inline
 fn zero_buffer(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
-    for i in range(len):
-        ptr[i] = 0
+    memset_zero(ptr, len)
+
+
+@always_inline
+fn load_32be(ptr: UnsafePointer[UInt8, ImmutAnyOrigin], offset: Int) -> UInt32:
+    var word = UInt32(ptr[offset]) << 24 | UInt32(ptr[offset + 1]) << 16 | UInt32(ptr[offset + 2]) << 8 | UInt32(ptr[offset + 3])
+    return word
+
+
+@always_inline
+fn load_64be(ptr: UnsafePointer[UInt8, ImmutAnyOrigin], offset: Int) -> UInt64:
+    return UInt64(ptr[offset]) << 56 | UInt64(ptr[offset + 1]) << 48 | UInt64(ptr[offset + 2]) << 40 | UInt64(ptr[offset + 3]) << 32 | UInt64(ptr[offset + 4]) << 24 | UInt64(ptr[offset + 5]) << 16 | UInt64(ptr[offset + 6]) << 8 | UInt64(ptr[offset + 7])
 
 @always_inline
 fn zero_and_free(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
@@ -365,16 +351,14 @@ struct SHA256Context(Movable):
         self.state = SHA256_IV
         self.count = 0
         self.buffer = alloc[UInt8](64)
-        for i in range(64):
-            self.buffer[i] = 0
+        memset_zero(self.buffer, 64)
         self.buffer_len = 0
 
     fn __init__(out self, iv: SIMD[DType.uint32, 8]):
         self.state = iv
         self.count = 0
         self.buffer = alloc[UInt8](64)
-        for i in range(64):
-            self.buffer[i] = 0
+        memset_zero(self.buffer, 64)
         self.buffer_len = 0
 
     fn __init__(out self, *, deinit take: Self):
@@ -389,15 +373,13 @@ struct SHA256Context(Movable):
     fn reset(mut self):
         self.state = SHA256_IV
         self.count = 0
-        for i in range(64):
-            self.buffer[i] = 0
+        memset_zero(self.buffer, 64)
         self.buffer_len = 0
 
     fn reset(mut self, iv: SIMD[DType.uint32, 8]):
         self.state = iv
         self.count = 0
-        for i in range(64):
-            self.buffer[i] = 0
+        memset_zero(self.buffer, 64)
         self.buffer_len = 0
 
 @always_inline
@@ -585,8 +567,7 @@ struct SHA512Context(Movable):
         self.count_high = 0
         self.count_low = 0
         self.buffer = alloc[UInt8](128)
-        for i in range(128):
-            self.buffer[i] = 0
+        memset_zero(self.buffer, 128)
         self.buffer_len = 0
 
     fn __init__(out self, iv: SIMD[DType.uint64, 8]):
@@ -594,8 +575,7 @@ struct SHA512Context(Movable):
         self.count_high = 0
         self.count_low = 0
         self.buffer = alloc[UInt8](128)
-        for i in range(128):
-            self.buffer[i] = 0
+        memset_zero(self.buffer, 128)
         self.buffer_len = 0
 
     fn __init__(out self, *, deinit take: Self):
@@ -612,16 +592,14 @@ struct SHA512Context(Movable):
         self.state = SHA512_IV
         self.count_high = 0
         self.count_low = 0
-        for i in range(128):
-            self.buffer[i] = 0
+        memset_zero(self.buffer, 128)
         self.buffer_len = 0
 
     fn reset(mut self, iv: SIMD[DType.uint64, 8]):
         self.state = iv
         self.count_high = 0
         self.count_low = 0
-        for i in range(128):
-            self.buffer[i] = 0
+        memset_zero(self.buffer, 128)
         self.buffer_len = 0
 
 
@@ -683,6 +661,63 @@ fn sha512_transform(
         a = t1 + t2
 
     return state + SIMD[DType.uint64, 8](a, b, c, d, e, f, g, h)
+
+
+@always_inline
+fn sha2_transform[Config: SHA2Config](
+    state: SIMD[Config.WordType, 8], block: Span[UInt8, ...]
+) -> SIMD[Config.WordType, 8]:
+    comptime WordType = Config.WordType
+    comptime WordSize = Config.WordByteSize
+    comptime Rounds = Config.Rounds
+    comptime K = Config.K
+
+    var w = InlineArray[SIMD[WordType, 1], 16](uninitialized=True)
+
+    var a = state[0]
+    var b = state[1]
+    var c = state[2]
+    var d = state[3]
+    var e = state[4]
+    var f = state[5]
+    var g = state[6]
+    var h = state[7]
+
+    comptime for i in range(16):
+        var word: SIMD[WordType, 1] = SIMD[WordType, 1](0)
+        comptime for j in range(WordSize):
+            word = word | (SIMD[WordType, 1](block[i * WordSize + j]) << SIMD[WordType, 1]((WordSize - 1 - j) * 8))
+        w[i] = word
+
+        var t1 = h + sigma1_generic[WordType](e) + ch_generic[WordType](e, f, g) + SIMD[WordType, 1](K[i]) + word
+        var t2 = sigma0_generic[WordType](a) + maj_generic[WordType](a, b, c)
+        h = g
+        g = f
+        f = e
+        e = d + t1
+        d = c
+        c = b
+        b = a
+        a = t1 + t2
+
+    comptime for i in range(16, Rounds):
+        var s0 = small_sigma0_generic[WordType](w[(i - 15) & 0xF])
+        var s1 = small_sigma1_generic[WordType](w[(i - 2) & 0xF])
+        var word = s1 + w[(i - 7) & 0xF] + s0 + w[(i - 16) & 0xF]
+        w[i & 0xF] = word
+
+        var t1 = h + sigma1_generic[WordType](e) + ch_generic[WordType](e, f, g) + SIMD[WordType, 1](K[i]) + word
+        var t2 = sigma0_generic[WordType](a) + maj_generic[WordType](a, b, c)
+        h = g
+        g = f
+        f = e
+        e = d + t1
+        d = c
+        c = b
+        b = a
+        a = t1 + t2
+
+    return state + SIMD[Config.WordType, 8](a, b, c, d, e, f, g, h)
 
 
 fn sha512_update(mut ctx: SHA512Context, data: Span[UInt8, ...]):

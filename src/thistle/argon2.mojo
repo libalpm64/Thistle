@@ -11,10 +11,34 @@ from std.collections import List
 from std.memory import alloc, UnsafePointer
 from std.algorithm import parallelize
 from std.bit import rotate_bits_left
+from std.builtin.simd import SIMD
+from std.builtin.dtype import DType
 from .blake2b import Blake2b
+
+comptime SIMD64x4 = SIMD[DType.uint64, 4]
+comptime SIMD128 = SIMD[DType.uint64, 2]
 
 
 comptime MASK32 = 0xFFFFFFFF
+
+comptime SIMD128_MASK32 = SIMD128(MASK32)
+comptime SIMD64x4_MASK32 = SIMD64x4(MASK32)
+
+
+@always_inline
+fn rotate_left_simd128(v: SIMD128, shift: Int) -> SIMD128:
+    return (v << shift) | (v >> (64 - shift))
+
+
+@always_inline
+fn load_128bit_simd(ptr: UnsafePointer[UInt64, ImmutAnyOrigin], offset: Int) -> SIMD128:
+    return SIMD128(ptr[offset], ptr[offset + 1])
+
+
+@always_inline
+fn store_128bit_simd(ptr: UnsafePointer[UInt64, MutAnyOrigin], offset: Int, val: SIMD128):
+    ptr[offset] = val[0]
+    ptr[offset + 1] = val[1]
 
 @always_inline
 fn zero_buffer(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
@@ -51,6 +75,45 @@ fn gb(a: UInt64, b: UInt64, c: UInt64, d: UInt64) -> Tuple[UInt64, UInt64, UInt6
     d_new = rotate_bits_left[shift=48](d_new ^ a_new)
     c_new = f_bla_mka(c_new, d_new)
     b_new = rotate_bits_left[shift=1](b_new ^ c_new)
+    return (a_new, b_new, c_new, d_new)
+
+
+@always_inline
+fn f_bla_mka_simd128(x: SIMD128, y: SIMD128) -> SIMD128:
+    return x + y + (x & SIMD128_MASK32) * (y & SIMD128_MASK32) * SIMD128(2)
+
+
+@always_inline
+fn f_bla_mka_simd(x: SIMD64x4, y: SIMD64x4) -> SIMD64x4:
+    return x + y + (x & SIMD64x4_MASK32) * (y & SIMD64x4_MASK32) * SIMD64x4(2)
+
+@always_inline
+fn rotate_left_simd(v: SIMD64x4, shift: Int) -> SIMD64x4:
+    return (v << shift) | (v >> (64 - shift))
+
+@always_inline
+fn gb_simd128(a: SIMD128, b: SIMD128, c: SIMD128, d: SIMD128) -> Tuple[SIMD128, SIMD128, SIMD128, SIMD128]:
+    var a_new = f_bla_mka_simd128(a, b)
+    var d_new = rotate_left_simd128(d ^ a_new, 32)
+    var c_new = f_bla_mka_simd128(c, d_new)
+    var b_new = rotate_left_simd128(b ^ c_new, 40)
+    a_new = f_bla_mka_simd128(a_new, b_new)
+    d_new = rotate_left_simd128(d_new ^ a_new, 48)
+    c_new = f_bla_mka_simd128(c_new, d_new)
+    b_new = rotate_left_simd128(b_new ^ c_new, 1)
+    return (a_new, b_new, c_new, d_new)
+
+
+@always_inline
+fn gb_simd(a: SIMD64x4, b: SIMD64x4, c: SIMD64x4, d: SIMD64x4) -> Tuple[SIMD64x4, SIMD64x4, SIMD64x4, SIMD64x4]:
+    var a_new = f_bla_mka_simd(a, b)
+    var d_new = rotate_left_simd(d ^ a_new, 32)
+    var c_new = f_bla_mka_simd(c, d_new)
+    var b_new = rotate_left_simd(b ^ c_new, 40)
+    a_new = f_bla_mka_simd(a_new, b_new)
+    d_new = rotate_left_simd(d_new ^ a_new, 48)
+    c_new = f_bla_mka_simd(c_new, d_new)
+    b_new = rotate_left_simd(b_new ^ c_new, 1)
     return (a_new, b_new, c_new, d_new)
 
 @always_inline
@@ -99,6 +162,357 @@ fn _p_diagonal(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
     v[base + 9] = v9
     v[base + 14] = v14
 
+
+@always_inline
+fn _p_column_simd(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
+    var v0 = load_128bit_simd(v, base + 0)
+    var v1 = load_128bit_simd(v, base + 2)
+    var v2 = load_128bit_simd(v, base + 4)
+    var v3 = load_128bit_simd(v, base + 6)
+    var v4 = load_128bit_simd(v, base + 8)
+    var v5 = load_128bit_simd(v, base + 10)
+    var v6 = load_128bit_simd(v, base + 12)
+    var v7 = load_128bit_simd(v, base + 14)
+    var v8 = load_128bit_simd(v, base + 16)
+    var v9 = load_128bit_simd(v, base + 18)
+    var v10 = load_128bit_simd(v, base + 20)
+    var v11 = load_128bit_simd(v, base + 22)
+    var v12 = load_128bit_simd(v, base + 24)
+    var v13 = load_128bit_simd(v, base + 26)
+    var v14 = load_128bit_simd(v, base + 28)
+    var v15 = load_128bit_simd(v, base + 30)
+    var v0_new: SIMD128
+    var v4_new: SIMD128
+    var v8_new: SIMD128
+    var v12_new: SIMD128
+    var v1_new: SIMD128
+    var v5_new: SIMD128
+    var v9_new: SIMD128
+    var v13_new: SIMD128
+    var v2_new: SIMD128
+    var v6_new: SIMD128
+    var v10_new: SIMD128
+    var v14_new: SIMD128
+    var v3_new: SIMD128
+    var v7_new: SIMD128
+    var v11_new: SIMD128
+    var v15_new: SIMD128
+    v0_new, v4_new, v8_new, v12_new = gb_simd128(v0, v4, v8, v12)
+    v1_new, v5_new, v9_new, v13_new = gb_simd128(v1, v5, v9, v13)
+    v2_new, v6_new, v10_new, v14_new = gb_simd128(v2, v6, v10, v14)
+    v3_new, v7_new, v11_new, v15_new = gb_simd128(v3, v7, v11, v15)
+    store_128bit_simd(v, base + 0, v0_new)
+    store_128bit_simd(v, base + 4, v4_new)
+    store_128bit_simd(v, base + 8, v8_new)
+    store_128bit_simd(v, base + 12, v12_new)
+    store_128bit_simd(v, base + 2, v1_new)
+    store_128bit_simd(v, base + 6, v5_new)
+    store_128bit_simd(v, base + 10, v9_new)
+    store_128bit_simd(v, base + 14, v13_new)
+    store_128bit_simd(v, base + 4, v2_new)
+    store_128bit_simd(v, base + 8, v6_new)
+    store_128bit_simd(v, base + 12, v10_new)
+    store_128bit_simd(v, base + 16, v14_new)
+    store_128bit_simd(v, base + 6, v3_new)
+    store_128bit_simd(v, base + 10, v7_new)
+    store_128bit_simd(v, base + 14, v11_new)
+    store_128bit_simd(v, base + 18, v15_new)
+
+
+@always_inline
+fn _p_diagonal_simd(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
+    var v0 = load_128bit_simd(v, base + 0)
+    var v1 = load_128bit_simd(v, base + 2)
+    var v2 = load_128bit_simd(v, base + 4)
+    var v3 = load_128bit_simd(v, base + 6)
+    var v4 = load_128bit_simd(v, base + 8)
+    var v5 = load_128bit_simd(v, base + 10)
+    var v6 = load_128bit_simd(v, base + 12)
+    var v7 = load_128bit_simd(v, base + 14)
+    var v8 = load_128bit_simd(v, base + 16)
+    var v9 = load_128bit_simd(v, base + 18)
+    var v10 = load_128bit_simd(v, base + 20)
+    var v11 = load_128bit_simd(v, base + 22)
+    var v12 = load_128bit_simd(v, base + 24)
+    var v13 = load_128bit_simd(v, base + 26)
+    var v14 = load_128bit_simd(v, base + 28)
+    var v15 = load_128bit_simd(v, base + 30)
+    var v0_new: SIMD128
+    var v5_new: SIMD128
+    var v10_new: SIMD128
+    var v15_new: SIMD128
+    var v1_new: SIMD128
+    var v6_new: SIMD128
+    var v11_new: SIMD128
+    var v12_new: SIMD128
+    var v2_new: SIMD128
+    var v7_new: SIMD128
+    var v8_new: SIMD128
+    var v13_new: SIMD128
+    var v3_new: SIMD128
+    var v4_new: SIMD128
+    var v9_new: SIMD128
+    var v14_new: SIMD128
+    v0_new, v5_new, v10_new, v15_new = gb_simd128(v0, v5, v10, v15)
+    v1_new, v6_new, v11_new, v12_new = gb_simd128(v1, v6, v11, v12)
+    v2_new, v7_new, v8_new, v13_new = gb_simd128(v2, v7, v8, v13)
+    v3_new, v4_new, v9_new, v14_new = gb_simd128(v3, v4, v9, v14)
+    store_128bit_simd(v, base + 0, v0_new)
+    store_128bit_simd(v, base + 5, v5_new)
+    store_128bit_simd(v, base + 10, v10_new)
+    store_128bit_simd(v, base + 15, v15_new)
+    store_128bit_simd(v, base + 2, v1_new)
+    store_128bit_simd(v, base + 7, v6_new)
+    store_128bit_simd(v, base + 12, v11_new)
+    store_128bit_simd(v, base + 16, v12_new)
+    store_128bit_simd(v, base + 4, v2_new)
+    store_128bit_simd(v, base + 9, v7_new)
+    store_128bit_simd(v, base + 14, v8_new)
+    store_128bit_simd(v, base + 18, v13_new)
+    store_128bit_simd(v, base + 6, v3_new)
+    store_128bit_simd(v, base + 10, v4_new)
+    store_128bit_simd(v, base + 14, v9_new)
+    store_128bit_simd(v, base + 18, v14_new)
+
+struct MemoryPool:
+    var block_buffer: UnsafePointer[UInt64, MutAnyOrigin]
+    var temp_buffer: UnsafePointer[UInt64, MutAnyOrigin]
+    var buffer_size: Int
+
+    fn __init__(out self, size: Int):
+        self.buffer_size = size
+        self.block_buffer = alloc[UInt64](size)
+        self.temp_buffer = alloc[UInt64](size)
+
+    fn __delinit__(deinit self):
+        zero_and_free_u64(self.block_buffer, self.buffer_size)
+        zero_and_free_u64(self.temp_buffer, self.buffer_size)
+
+    @always_inline
+    fn get_block(self) -> UnsafePointer[UInt64, MutAnyOrigin]:
+        return self.block_buffer
+
+    @always_inline
+    fn get_temp(self) -> UnsafePointer[UInt64, MutAnyOrigin]:
+        return self.temp_buffer
+
+
+@always_inline
+fn compression_g_with_pool(
+    out_ptr: UnsafePointer[UInt64, MutAnyOrigin],
+    x_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
+    y_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
+    with_xor: Bool,
+    pool: MemoryPool,
+):
+    var block = pool.get_block()
+    var block_xy = pool.get_temp()
+
+    for i in range(64):
+        var x_simd = load_128bit_simd(x_ptr, i * 2)
+        var y_simd = load_128bit_simd(y_ptr, i * 2)
+        var block_simd = x_simd ^ y_simd
+        store_128bit_simd(block, i * 2, block_simd)
+        if with_xor:
+            var out_simd = load_128bit_simd(out_ptr, i * 2)
+            store_128bit_simd(block_xy, i * 2, block_simd ^ out_simd)
+        else:
+            store_128bit_simd(block_xy, i * 2, block_simd)
+
+    for i in range(8):
+        var base = i * 16
+        _p_column_simd(base, block)
+        _p_diagonal_simd(base, block)
+
+    for col in range(8):
+        var v0 = load_128bit_simd(block, col * 2 + 0)
+        var v1 = load_128bit_simd(block, col * 2 + 2)
+        var v2 = load_128bit_simd(block, col * 2 + 16)
+        var v3 = load_128bit_simd(block, col * 2 + 18)
+        var v4 = load_128bit_simd(block, col * 2 + 32)
+        var v5 = load_128bit_simd(block, col * 2 + 34)
+        var v6 = load_128bit_simd(block, col * 2 + 48)
+        var v7 = load_128bit_simd(block, col * 2 + 50)
+        var v8 = load_128bit_simd(block, col * 2 + 64)
+        var v9 = load_128bit_simd(block, col * 2 + 66)
+        var v10 = load_128bit_simd(block, col * 2 + 80)
+        var v11 = load_128bit_simd(block, col * 2 + 82)
+        var v12 = load_128bit_simd(block, col * 2 + 96)
+        var v13 = load_128bit_simd(block, col * 2 + 98)
+        var v14 = load_128bit_simd(block, col * 2 + 112)
+        var v15 = load_128bit_simd(block, col * 2 + 114)
+        var v0_new: SIMD128
+        var v4_new: SIMD128
+        var v8_new: SIMD128
+        var v12_new: SIMD128
+        var v1_new: SIMD128
+        var v5_new: SIMD128
+        var v9_new: SIMD128
+        var v13_new: SIMD128
+        var v2_new: SIMD128
+        var v6_new: SIMD128
+        var v10_new: SIMD128
+        var v14_new: SIMD128
+        var v3_new: SIMD128
+        var v7_new: SIMD128
+        var v11_new: SIMD128
+        var v15_new: SIMD128
+        v0_new, v4_new, v8_new, v12_new = gb_simd128(v0, v4, v8, v12)
+        v1_new, v5_new, v9_new, v13_new = gb_simd128(v1, v5, v9, v13)
+        v2_new, v6_new, v10_new, v14_new = gb_simd128(v2, v6, v10, v14)
+        v3_new, v7_new, v11_new, v15_new = gb_simd128(v3, v7, v11, v15)
+        var v0_d: SIMD128
+        var v5_d: SIMD128
+        var v10_d: SIMD128
+        var v15_d: SIMD128
+        var v1_d: SIMD128
+        var v6_d: SIMD128
+        var v11_d: SIMD128
+        var v12_d: SIMD128
+        var v2_d: SIMD128
+        var v7_d: SIMD128
+        var v8_d: SIMD128
+        var v13_d: SIMD128
+        var v3_d: SIMD128
+        var v4_d: SIMD128
+        var v9_d: SIMD128
+        var v14_d: SIMD128
+        v0_d, v5_d, v10_d, v15_d = gb_simd128(v0_new, v5_new, v10_new, v15_new)
+        v1_d, v6_d, v11_d, v12_d = gb_simd128(v1_new, v6_new, v11_new, v12_new)
+        v2_d, v7_d, v8_d, v13_d = gb_simd128(v2_new, v7_new, v8_new, v13_new)
+        v3_d, v4_d, v9_d, v14_d = gb_simd128(v3_new, v4_new, v9_new, v14_new)
+        store_128bit_simd(block, col * 2 + 0, v0_d)
+        store_128bit_simd(block, col * 2 + 2, v1_d)
+        store_128bit_simd(block, col * 2 + 16, v2_d)
+        store_128bit_simd(block, col * 2 + 18, v3_d)
+        store_128bit_simd(block, col * 2 + 32, v4_d)
+        store_128bit_simd(block, col * 2 + 34, v5_d)
+        store_128bit_simd(block, col * 2 + 48, v6_d)
+        store_128bit_simd(block, col * 2 + 50, v7_d)
+        store_128bit_simd(block, col * 2 + 64, v8_d)
+        store_128bit_simd(block, col * 2 + 66, v9_d)
+        store_128bit_simd(block, col * 2 + 80, v10_d)
+        store_128bit_simd(block, col * 2 + 82, v11_d)
+        store_128bit_simd(block, col * 2 + 96, v12_d)
+        store_128bit_simd(block, col * 2 + 98, v13_d)
+        store_128bit_simd(block, col * 2 + 112, v14_d)
+        store_128bit_simd(block, col * 2 + 114, v15_d)
+
+    for i in range(64):
+        var block_simd = load_128bit_simd(block, i * 2)
+        var block_xy_simd = load_128bit_simd(block_xy, i * 2)
+        store_128bit_simd(out_ptr, i * 2, block_simd ^ block_xy_simd)
+
+
+@always_inline
+fn compression_g_simd(
+    out_ptr: UnsafePointer[UInt64, MutAnyOrigin],
+    x_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
+    y_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
+    with_xor: Bool,
+):
+    var block = alloc[UInt64](128)
+    var block_xy = alloc[UInt64](128)
+
+    for i in range(64):
+        var x_simd = load_128bit_simd(x_ptr, i * 2)
+        var y_simd = load_128bit_simd(y_ptr, i * 2)
+        var block_simd = x_simd ^ y_simd
+        store_128bit_simd(block, i * 2, block_simd)
+        if with_xor:
+            var out_simd = load_128bit_simd(out_ptr, i * 2)
+            store_128bit_simd(block_xy, i * 2, block_simd ^ out_simd)
+        else:
+            store_128bit_simd(block_xy, i * 2, block_simd)
+
+    for i in range(8):
+        var base = i * 16
+        _p_column_simd(base, block)
+        _p_diagonal_simd(base, block)
+
+    for col in range(8):
+        var v0 = load_128bit_simd(block, col * 2 + 0)
+        var v1 = load_128bit_simd(block, col * 2 + 2)
+        var v2 = load_128bit_simd(block, col * 2 + 16)
+        var v3 = load_128bit_simd(block, col * 2 + 18)
+        var v4 = load_128bit_simd(block, col * 2 + 32)
+        var v5 = load_128bit_simd(block, col * 2 + 34)
+        var v6 = load_128bit_simd(block, col * 2 + 48)
+        var v7 = load_128bit_simd(block, col * 2 + 50)
+        var v8 = load_128bit_simd(block, col * 2 + 64)
+        var v9 = load_128bit_simd(block, col * 2 + 66)
+        var v10 = load_128bit_simd(block, col * 2 + 80)
+        var v11 = load_128bit_simd(block, col * 2 + 82)
+        var v12 = load_128bit_simd(block, col * 2 + 96)
+        var v13 = load_128bit_simd(block, col * 2 + 98)
+        var v14 = load_128bit_simd(block, col * 2 + 112)
+        var v15 = load_128bit_simd(block, col * 2 + 114)
+        var v0_new: SIMD128
+        var v4_new: SIMD128
+        var v8_new: SIMD128
+        var v12_new: SIMD128
+        var v1_new: SIMD128
+        var v5_new: SIMD128
+        var v9_new: SIMD128
+        var v13_new: SIMD128
+        var v2_new: SIMD128
+        var v6_new: SIMD128
+        var v10_new: SIMD128
+        var v14_new: SIMD128
+        var v3_new: SIMD128
+        var v7_new: SIMD128
+        var v11_new: SIMD128
+        var v15_new: SIMD128
+        v0_new, v4_new, v8_new, v12_new = gb_simd128(v0, v4, v8, v12)
+        v1_new, v5_new, v9_new, v13_new = gb_simd128(v1, v5, v9, v13)
+        v2_new, v6_new, v10_new, v14_new = gb_simd128(v2, v6, v10, v14)
+        v3_new, v7_new, v11_new, v15_new = gb_simd128(v3, v7, v11, v15)
+        var v0_d: SIMD128
+        var v5_d: SIMD128
+        var v10_d: SIMD128
+        var v15_d: SIMD128
+        var v1_d: SIMD128
+        var v6_d: SIMD128
+        var v11_d: SIMD128
+        var v12_d: SIMD128
+        var v2_d: SIMD128
+        var v7_d: SIMD128
+        var v8_d: SIMD128
+        var v13_d: SIMD128
+        var v3_d: SIMD128
+        var v4_d: SIMD128
+        var v9_d: SIMD128
+        var v14_d: SIMD128
+        v0_d, v5_d, v10_d, v15_d = gb_simd128(v0_new, v5_new, v10_new, v15_new)
+        v1_d, v6_d, v11_d, v12_d = gb_simd128(v1_new, v6_new, v11_new, v12_new)
+        v2_d, v7_d, v8_d, v13_d = gb_simd128(v2_new, v7_new, v8_new, v13_new)
+        v3_d, v4_d, v9_d, v14_d = gb_simd128(v3_new, v4_new, v9_new, v14_new)
+        store_128bit_simd(block, col * 2 + 0, v0_d)
+        store_128bit_simd(block, col * 2 + 2, v1_d)
+        store_128bit_simd(block, col * 2 + 16, v2_d)
+        store_128bit_simd(block, col * 2 + 18, v3_d)
+        store_128bit_simd(block, col * 2 + 32, v4_d)
+        store_128bit_simd(block, col * 2 + 34, v5_d)
+        store_128bit_simd(block, col * 2 + 48, v6_d)
+        store_128bit_simd(block, col * 2 + 50, v7_d)
+        store_128bit_simd(block, col * 2 + 64, v8_d)
+        store_128bit_simd(block, col * 2 + 66, v9_d)
+        store_128bit_simd(block, col * 2 + 80, v10_d)
+        store_128bit_simd(block, col * 2 + 82, v11_d)
+        store_128bit_simd(block, col * 2 + 96, v12_d)
+        store_128bit_simd(block, col * 2 + 98, v13_d)
+        store_128bit_simd(block, col * 2 + 112, v14_d)
+        store_128bit_simd(block, col * 2 + 114, v15_d)
+
+    for i in range(64):
+        var block_simd = load_128bit_simd(block, i * 2)
+        var block_xy_simd = load_128bit_simd(block_xy, i * 2)
+        store_128bit_simd(out_ptr, i * 2, block_simd ^ block_xy_simd)
+
+    zero_and_free_u64(block, 128)
+    zero_and_free_u64(block_xy, 128)
+
+
 @always_inline
 fn compression_g(
     out_ptr: UnsafePointer[UInt64, MutAnyOrigin],
@@ -108,7 +522,7 @@ fn compression_g(
 ):
     var block = alloc[UInt64](128)
     var block_xy = alloc[UInt64](128)
-    
+
     for i in range(128):
         var val = x_ptr[i] ^ y_ptr[i]
         block[i] = val
@@ -116,12 +530,12 @@ fn compression_g(
             block_xy[i] = val ^ out_ptr[i]
         else:
             block_xy[i] = val
-    
+
     for i in range(8):
         var base = i * 16
         _p_column(base, block)
         _p_diagonal(base, block)
-    
+
     for col in range(8):
         var v0 = block[col * 2 + 0]
         var v1 = block[col * 2 + 1]

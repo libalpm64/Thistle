@@ -8,7 +8,9 @@ from .aes import AESKey, expand_key_128, expand_key_192, expand_key_256, SBOX, R
 from .aes import gf_mul2, gf_mul3, sbox_lookup, sub_word
 from .aes import ttable0, ttable1, ttable2, ttable3
 from .aes_gpu import aes_kernel
-from .aes_ni import has_aes_ni, arm_aes_encrypt_128, arm_aes_encrypt_192, arm_aes_encrypt_256
+from .aes_ni import has_aes_ni, has_x86_aes_ni, has_arm_crypto
+from .aes_ni import arm_aes_encrypt_128, arm_aes_encrypt_192, arm_aes_encrypt_256
+from .aes_ni import x86_aes_encrypt_128, x86_aes_encrypt_256
 from .blake2b import blake2b_hash, Blake2b
 from .blake3 import blake3_hash, blake3_parallel_hash, Hasher
 from .argon2 import Argon2id, argon2id_hash_string
