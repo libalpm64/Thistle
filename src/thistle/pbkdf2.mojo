@@ -8,7 +8,9 @@ By Libalpm64, Attribute not required.
 """
 
 from std.collections import List
-from std.memory import UnsafePointer, alloc, memcpy
+from std.memory import UnsafePointer, alloc, memcpy, memset_zero
+from std.builtin.simd import SIMD
+from std.builtin.dtype import DType
 from .sha2 import (
     SHA256Context,
     SHA512Context,
@@ -17,6 +19,16 @@ from .sha2 import (
     sha512_update,
     sha512_final_to_buffer,
 )
+
+
+@always_inline
+fn encode_counter_be(counter: UInt32) -> SIMD[DType.uint8, 4]:
+    return SIMD[DType.uint8, 4](
+        UInt8((counter >> 24) & 0xFF),
+        UInt8((counter >> 16) & 0xFF),
+        UInt8((counter >> 8) & 0xFF),
+        UInt8(counter & 0xFF),
+    )
 
 
 struct PBKDF2SHA256:
@@ -40,8 +52,7 @@ struct PBKDF2SHA256:
         self.outer_ctx = SHA256Context()
 
         var k = alloc[UInt8](64)
-        for i in range(64):
-            k[i] = 0
+        memset_zero(k, 64)
 
         if len(password) > 64:
             var ctx = SHA256Context()
@@ -51,12 +62,14 @@ struct PBKDF2SHA256:
             for i in range(len(password)):
                 k[i] = password[i]
 
-        for i in range(64):
-            self.ipad[i] = k[i] ^ 0x36
-            self.opad[i] = k[i] ^ 0x5C
+        var k_simd = k.bitcast[UInt64]()
+        var ipad_simd = self.ipad.bitcast[UInt64]()
+        var opad_simd = self.opad.bitcast[UInt64]()
+        for i in range(8):
+            ipad_simd[i] = k_simd[i] ^ 0x3636363636363636
+            opad_simd[i] = k_simd[i] ^ 0x5C5C5C5C5C5C5C5C
 
-        for i in range(64):
-            k[i] = 0
+        memset_zero(k, 64)
         k.free()
 
     fn __del__(deinit self):
@@ -97,6 +110,7 @@ struct PBKDF2SHA256:
         sha256_update(self.outer_ctx, Span[UInt8, ...](ptr=self.inner_hash, length=32))
         sha256_final_to_buffer(self.outer_ctx, self.u_block)
 
+    @always_inline
     fn derive(mut self, salt: Span[UInt8, ...], iterations: Int, dklen: Int) -> List[UInt8]:
         var hLen = 32
         var num_blocks = (dklen + hLen - 1) // hLen
@@ -112,8 +126,10 @@ struct PBKDF2SHA256:
 
             for _ in range(1, iterations):
                 self.hmac(Span[UInt8, ...](ptr=self.u_block, length=32))
+                var u_ptr = self.u_block.bitcast[UInt64]()
+                var f_ptr = self.f_block.bitcast[UInt64]()
                 for b in range(4):
-                    f_u64[b] ^= u_u64[b]
+                    f_ptr[b] ^= u_ptr[b]
 
             var remaining = dklen - len(derived_key)
             var to_copy = 32 if remaining > 32 else remaining
@@ -151,8 +167,7 @@ struct PBKDF2SHA512:
         self.outer_ctx = SHA512Context()
 
         var k = alloc[UInt8](128)
-        for i in range(128):
-            k[i] = 0
+        memset_zero(k, 128)
 
         if len(password) > 128:
             var ctx = SHA512Context()
@@ -162,12 +177,14 @@ struct PBKDF2SHA512:
             for i in range(len(password)):
                 k[i] = password[i]
 
-        for i in range(128):
-            self.ipad[i] = k[i] ^ 0x36
-            self.opad[i] = k[i] ^ 0x5C
+        var k_simd = k.bitcast[UInt64]()
+        var ipad_simd = self.ipad.bitcast[UInt64]()
+        var opad_simd = self.opad.bitcast[UInt64]()
+        for i in range(16):
+            ipad_simd[i] = k_simd[i] ^ 0x3636363636363636
+            opad_simd[i] = k_simd[i] ^ 0x5C5C5C5C5C5C5C5C
 
-        for i in range(128):
-            k[i] = 0
+        memset_zero(k, 128)
         k.free()
 
     fn __del__(deinit self):
@@ -208,6 +225,7 @@ struct PBKDF2SHA512:
         sha512_update(self.outer_ctx, Span[UInt8, ...](ptr=self.inner_hash, length=64))
         sha512_final_to_buffer(self.outer_ctx, self.u_block)
 
+    @always_inline
     fn derive(mut self, salt: Span[UInt8, ...], iterations: Int, dklen: Int) -> List[UInt8]:
         var hLen = 64
         var num_blocks = (dklen + hLen - 1) // hLen
@@ -223,8 +241,10 @@ struct PBKDF2SHA512:
 
             for _ in range(1, iterations):
                 self.hmac(Span[UInt8, ...](ptr=self.u_block, length=64))
+                var u_ptr = self.u_block.bitcast[UInt64]()
+                var f_ptr = self.f_block.bitcast[UInt64]()
                 for b in range(8):
-                    f_u64[b] ^= u_u64[b]
+                    f_ptr[b] ^= u_ptr[b]
 
             var remaining = dklen - len(derived_key)
             var to_copy = 64 if remaining > 64 else remaining
@@ -241,6 +261,7 @@ fn pbkdf2_hmac_sha512(
     return pbkdf2.derive(salt, iterations, dkLen)
 
 
+@always_inline
 fn hmac_sha256(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
     var pbkdf2 = PBKDF2SHA256(key)
     pbkdf2.hmac(data)
@@ -250,6 +271,7 @@ fn hmac_sha256(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
     return result^
 
 
+@always_inline
 fn hmac_sha512(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
     var pbkdf2 = PBKDF2SHA512(key)
     pbkdf2.hmac(data)
