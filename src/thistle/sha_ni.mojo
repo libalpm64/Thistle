@@ -79,7 +79,6 @@ fn Load_aligned(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]) -> SIMD128:
 
 @always_inline("nodebug")
 fn prefetch_next_block(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]):
-    # Prefetch next 64-byte cache line for read with high locality
     prefetch[PrefetchOptions().for_read().high_locality().to_data_cache()](ptr + 64)
 
 
