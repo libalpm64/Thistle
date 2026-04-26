@@ -13,6 +13,7 @@ from thistle.kcipher2 import KCipher2
 from thistle.pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
 from thistle.aes import cpu_aes_encrypt, expand_key_128
 from thistle.aes_ni import aes_encrypt, has_aes_ni, has_x86_aes_ni
+from thistle.sha_ni import sha256ni_hash, has_sha_ni
 
 
 fn hex_char_to_val(c: Int) -> UInt8:
@@ -341,6 +342,30 @@ fn test_aes_ni(data: PythonObject, py: PythonObject) raises -> TestResult:
     return TestResult(passed, failed, failures^)
 
 
+fn test_sha_ni(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var passed, failed = 0, 0
+    var failures = List[String]()
+    var has_ni = has_sha_ni()
+    if not has_ni:
+        print("  (SHA-NI not available, skipping)")
+        return TestResult(0, 0, failures^)
+    print("  (using SHA-NI)")
+    
+    var sha256_data = data["sha256"]
+    for i in range(Int(py=sha256_data.__len__())):
+        var v = sha256_data[i]
+        var bit_len = Int(py=v["len"])
+        var msg = hex_to_bytes(String(v["msg"])) if bit_len > 0 else List[UInt8]()
+        var got = bytes_to_hex(sha256ni_hash(Span[UInt8, ...](msg)))
+        var expected = String(v["md"])
+        if got == expected:
+            passed += 1
+        else:
+            failed += 1
+            failures.append("SHA256-NI len=" + String(bit_len) + ": expected " + expected + ", got " + got)
+    return TestResult(passed, failed, failures^)
+
+
 fn print_result(name: String, result: TestResult, mut tp: Int, mut tf: Int, mut af: Bool):
     if result.failed == 0:
         print("Testing " + name + " [pass] (" + String(result.passed) + " vectors)")
@@ -426,6 +451,13 @@ def main() raises:
         print_result("AES-128-NI", test_aes_ni(load_json("tests/vectors/aes.json", py), py), tp, tf, af)
     except e:
         print("AES-128-NI [error] " + String(e)); af = True
+    print()
+
+    try:
+        print("Testing SHA-NI...")
+        print_result("SHA256-NI", test_sha_ni(load_json("tests/vectors/sha.json", py), py), tp, tf, af)
+    except e:
+        print("SHA256-NI [error] " + String(e)); af = True
     print()
 
     print("Total: " + String(tp) + " pass, " + String(tf) + " fail")

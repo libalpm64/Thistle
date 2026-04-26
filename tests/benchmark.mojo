@@ -12,6 +12,7 @@ from thistle.camellia import CamelliaCipher
 from thistle.chacha20 import ChaCha20
 from thistle.kcipher2 import KCipher2
 from thistle.sha2 import sha256_hash, sha512_hash
+from thistle.sha_ni import sha256ni_hash, has_sha_ni
 from thistle.sha3 import sha3_256
 from thistle.aes import AESKey, SBOX, cpu_aes_encrypt, ROUNDS_128, expand_key_128
 from std.memory import alloc
@@ -47,6 +48,23 @@ fn benchmark_sha256(data: List[UInt8], duration_secs: Float64) -> String:
     var mb = Float64(len(data) * count) / (1024 * 1024)
     var mbps = mb / duration
     return "sha256 | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+
+
+fn benchmark_sha256ni(data: List[UInt8], duration_secs: Float64) -> String:
+    if not has_sha_ni():
+        return "sha256-ni | (NI not available)"
+    var span = Span[UInt8, ...](data)
+    _ = sha256ni_hash(span)
+    var count = 0
+    var start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        _ = sha256ni_hash(span)
+        count += 1
+    var end = perf_counter()
+    var duration = end - start
+    var mb = Float64(len(data) * count) / (1024 * 1024)
+    var mbps = mb / duration
+    return "sha256-ni | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
 fn benchmark_sha512(data: List[UInt8], duration_secs: Float64) -> String:
@@ -497,6 +515,8 @@ def main() raises:
     var duration = 2.0
     
     print(benchmark_sha256(data, duration))
+    if has_sha_ni():
+        print(benchmark_sha256ni(data, duration))
     print(benchmark_sha512(data, duration))
     print(benchmark_sha3_256(data, duration))
     print(benchmark_blake2b(data, duration))
