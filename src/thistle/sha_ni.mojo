@@ -42,22 +42,31 @@ comptime SHA256_K = SIMD[DType.uint32, 64](
 
 @always_inline
 fn has_x86_sha_ni() -> Bool:
-    return CompilationTarget._has_feature["sha"]()
+    return CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]()
 
 
 @always_inline("nodebug")
 fn _rnds2(cdgh: SIMD128, abef: SIMD128, wk: SIMD128) -> SIMD128:
-    return llvm_intrinsic["llvm.x86.sha256rnds2", SIMD128, has_side_effect=False](cdgh, abef, wk)
+    comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]():
+        return llvm_intrinsic["llvm.x86.sha256rnds2", SIMD128, has_side_effect=False](cdgh, abef, wk)
+    else:
+        return SIMD128(0)
 
 
 @always_inline("nodebug")
 fn _msg1(a: SIMD128, b: SIMD128) -> SIMD128:
-    return llvm_intrinsic["llvm.x86.sha256msg1", SIMD128, has_side_effect=False](a, b)
+    comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]():
+        return llvm_intrinsic["llvm.x86.sha256msg1", SIMD128, has_side_effect=False](a, b)
+    else:
+        return SIMD128(0)
 
 
 @always_inline("nodebug")
 fn _msg2(a: SIMD128, b: SIMD128) -> SIMD128:
-    return llvm_intrinsic["llvm.x86.sha256msg2", SIMD128, has_side_effect=False](a, b)
+    comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]():
+        return llvm_intrinsic["llvm.x86.sha256msg2", SIMD128, has_side_effect=False](a, b)
+    else:
+        return SIMD128(0)
 
 
 @always_inline("nodebug")

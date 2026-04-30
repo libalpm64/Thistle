@@ -18,16 +18,22 @@ comptime SIMD128 = SIMD[DType.uint64, 2]
 
 @always_inline
 fn _aese(lhs: SIMD16, rhs: SIMD16) -> SIMD16:
-    return llvm_intrinsic["llvm.aarch64.crypto.aese", SIMD16, has_side_effect=False](
-        lhs, rhs
-    )
+    comptime if CompilationTarget.has_neon():
+        return llvm_intrinsic["llvm.aarch64.crypto.aese", SIMD16, has_side_effect=False](
+            lhs, rhs
+        )
+    else:
+        return SIMD16(0)
 
 
 @always_inline
 fn _aesmc(state: SIMD16) -> SIMD16:
-    return llvm_intrinsic["llvm.aarch64.crypto.aesmc", SIMD16, has_side_effect=False](
-        state
-    )
+    comptime if CompilationTarget.has_neon():
+        return llvm_intrinsic["llvm.aarch64.crypto.aesmc", SIMD16, has_side_effect=False](
+            state
+        )
+    else:
+        return SIMD16(0)
 
 
 @always_inline
@@ -37,30 +43,39 @@ fn has_arm_crypto() -> Bool:
 
 @always_inline
 fn _mm_aesenc_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
-    return llvm_intrinsic["llvm.x86.aesni.aesenc", SIMD128, has_side_effect=False](
-        lhs, rhs
-    )
+    comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
+        return llvm_intrinsic["llvm.x86.aesni.aesenc", SIMD128, has_side_effect=False](
+            lhs, rhs
+        )
+    else:
+        return SIMD128(0)
 
 
 @always_inline
 fn _mm_aesenclast_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
-    return llvm_intrinsic["llvm.x86.aesni.aesenclast", SIMD128, has_side_effect=False](
-        lhs, rhs
-    )
+    comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
+        return llvm_intrinsic["llvm.x86.aesni.aesenclast", SIMD128, has_side_effect=False](
+            lhs, rhs
+        )
+    else:
+        return SIMD128(0)
 
 
 @always_inline
 fn _mm_aeskeygenassist_si128(v: SIMD128, imm8: Int) -> SIMD128:
-    return llvm_intrinsic[
-        "llvm.x86.aesni.aeskeygenassist",
-        SIMD128,
-        has_side_effect=False,
-    ](v, imm8)
+    comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
+        return llvm_intrinsic[
+            "llvm.x86.aesni.aeskeygenassist",
+            SIMD128,
+            has_side_effect=False,
+        ](v, imm8)
+    else:
+        return SIMD128(0)
 
 
 @always_inline
 fn has_x86_aes_ni() -> Bool:
-    return CompilationTarget._has_feature["aes"]()
+    return CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]()
 
 
 @always_inline
