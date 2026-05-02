@@ -38,14 +38,12 @@ fn main() raises:
     var s_scalar = Scalar.from_bytes(s_span)
     _ = s
 
-    # Call generate_public_key BEFORE computing r_bytes
     var priv_span2 = Span[UInt8, ...](priv)
     var A_enc = ed25519_generate_public_key(priv_span2)
     _ = priv_span2
     print("A_enc:", bytes_to_hex(A_enc))
     print("A_exp: d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
 
-    # Now compute r_bytes AFTER generate_public_key
     var r_bytes = r_scalar.to_bytes()
     print("r_bytes:", bytes_to_hex(r_bytes))
     print("r_exp:   f38907308c893deaf244787db4af53682249107418afc2edc58f75ac58a07404")
