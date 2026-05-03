@@ -7,7 +7,7 @@ Thistle was written to avoid the **150x performance drops** when Mojo has to cal
 > [!IMPORTANT]
 > Currently, Thistle is an experimental library.
 > 
-> MacOS broken for Argon2, SHA, Blake3 (Compiler/Runtime Issue)
+> MacOS broken for Argon2, SHA, Blake3 (Compiler/ Cascading Runtime Issue), ED25519 (Stack aliasing bug)
 ---
 
 ### Currently supported Algorithms:
@@ -26,7 +26,7 @@ Thistle was written to avoid the **150x performance drops** when Mojo has to cal
 * **AES-GPU** (XTS/CBC/ECB/CTR/GCM/ECB/CTR)
 * **AES-NI** (XTS/CBC/ECB/CTR/GCM/ECB/CTR)
 * **AES-Software** (XTS/CBC/ECB/CTR/GCM/ECB/CTR)
-* **ED25519** (Broken Stack Aliasing bug in Mojo Compiler)
+* **ED25519** (Semi-working, experimental)
 * **X25519** (Working, experimental)
 
 ### Build:

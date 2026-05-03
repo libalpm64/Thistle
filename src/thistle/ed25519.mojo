@@ -4,14 +4,14 @@
 """
 By Libalpm64
 Non-Production code
-This file has bugs DO NOT USE. NO PASSES WILL PASS BECAUSE OF A STACK ALIASING BUG.
-R ACCUMALATOR VALUE IS REUSED CAUSING STACK CORRUPTION.
+Do note use on ARM because of a stack aliasing bug.
 """
 from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
 from std.collections import List
 from .curve25519 import FieldElement51
 from .sha2 import sha512_hash
+from .utils import StackInlineArray
 
 comptime L_LIMBS = SIMD[DType.uint64, 5](
     0x0002631a5cf5d3ed,
@@ -198,13 +198,13 @@ struct Scalar(Movable, Copyable, ImplicitlyCopyable):
 
     @staticmethod
     fn _montgomery_mul_raw(a: SIMD[DType.uint64, 5], b: SIMD[DType.uint64, 5]) -> SIMD[DType.uint64, 5]:
-        var z = InlineArray[UInt128, 9](uninitialized=True)
+        var z = StackInlineArray[UInt128, 9](uninitialized=True)
         for i in range(9): z[i] = 0
         for i in range(5):
             for j in range(5):
                 z[i + j] += UInt128(a[i]) * UInt128(b[j])
         var carry: UInt128 = 0
-        var n = InlineArray[UInt64, 5](uninitialized=True)
+        var n = StackInlineArray[UInt64, 5](uninitialized=True)
         for i in range(5):
             var sum = carry + z[i]
             for j in range(i):
@@ -273,9 +273,10 @@ struct EdwardsPoint(Movable, Copyable, ImplicitlyCopyable):
 
 
 fn edwards_add(p: EdwardsPoint, q: EdwardsPoint) -> EdwardsPoint:
+    var d2 = FieldElement51(ED25519_D2_LIMBS)
     var A = (p.Y - p.X) * (q.Y - q.X)
     var B = (p.Y + p.X) * (q.Y + q.X)
-    var C = p.T * q.T * ed25519_d2()
+    var C = p.T * q.T * d2
     var D = p.Z * q.Z * FieldElement51(2, 0, 0, 0, 0)
     var E = B - A
     var F = D - C
@@ -299,6 +300,7 @@ fn edwards_negate(p: EdwardsPoint) -> EdwardsPoint:
 # stack aliasing bug on ARM64 that occurs when ed25519_d2()
 # is called inside a loop that also modifies EdwardsPoint values.
 # COMPILER-BUG (will never sort)
+@no_inline
 fn _edwards_add_d2(p: EdwardsPoint, q: EdwardsPoint, d2: FieldElement51) -> EdwardsPoint:
     var A = (p.Y - p.X) * (q.Y - q.X)
     var B = (p.Y + p.X) * (q.Y + q.X)
@@ -310,6 +312,7 @@ fn _edwards_add_d2(p: EdwardsPoint, q: EdwardsPoint, d2: FieldElement51) -> Edwa
     var H = B + A
     return EdwardsPoint(E * F, G * H, F * G, E * H)
 
+@no_inline
 fn _edwards_double_standalone(p: EdwardsPoint) -> EdwardsPoint:
     var A = p.X.square()
     var B = p.Y.square()
@@ -367,6 +370,7 @@ fn fe_to_bytes(fe: FieldElement51) -> List[UInt8]:
     bytes.append(UInt8((l[4] >> 44) & 0xFF))
     return bytes^
 
+@no_inline
 fn fe_from_bytes(bytes: Span[UInt8, ...]) -> FieldElement51:
     fn load8(ptr: UnsafePointer[UInt8, _]) -> UInt64:
         return ptr.bitcast[UInt64]().load()
@@ -379,6 +383,7 @@ fn fe_from_bytes(bytes: Span[UInt8, ...]) -> FieldElement51:
     var l4 = (load8(ptr + 24) >> UInt64(12)) & MASK
     return FieldElement51(l0, l1, l2, l3, l4)
 
+@no_inline
 fn edwards_encode(p: EdwardsPoint) -> List[UInt8]:
     var z_inv = p.Z.invert()
     var x = p.X * z_inv
@@ -389,6 +394,7 @@ fn edwards_encode(p: EdwardsPoint) -> List[UInt8]:
     out[31] = out[31] | (x_parity << 7)
     return out^
 
+@no_inline
 fn edwards_decode(data: Span[UInt8, ...]) -> EdwardsPoint:
     var y_bytes = List[UInt8](capacity=32)
     for i in range(32):
@@ -408,6 +414,7 @@ fn edwards_decode(data: Span[UInt8, ...]) -> EdwardsPoint:
     var t = x * y
     return EdwardsPoint(x, y, FieldElement51.ONE(), t)
 
+@no_inline
 fn sqrt_ratio(u: FieldElement51, v: FieldElement51) -> FieldElement51:
     var v_sq = v.square()
     var v3 = v_sq * v
@@ -458,8 +465,9 @@ fn sqrt_ratio(u: FieldElement51, v: FieldElement51) -> FieldElement51:
     return x
 
 
+@no_inline
 fn _scalar_mult(k: Span[UInt8, ...], p: EdwardsPoint) -> EdwardsPoint:
-	# COMPILER-BUG
+	# ARM COMPILER-BUG
     # ed25519_d2() inside the loop corrupts the accumulator r.
 	# two _scalar_mult_base calls corrupt each other.
     var d2 = ed25519_d() * FieldElement51(2, 0, 0, 0, 0)
@@ -568,7 +576,6 @@ fn ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], signa
     var R_enc = List[UInt8](capacity=32)
     for i in range(32): R_enc.append(signature[i])
     var R_enc_span = Span[UInt8, ...](R_enc)
-    _ = edwards_decode(R_enc_span)
     _ = R_enc_span
 
     var S_bytes = List[UInt8](capacity=32)
