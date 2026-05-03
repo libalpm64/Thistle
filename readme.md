@@ -22,12 +22,12 @@ Thistle was written to avoid the **150x performance drops** when Mojo has to cal
 * **SHA3** (Parity/Close)
 * **ChaCha20** (Parity)
 * **KCipher-2** (Faster than C)
-* **ML-KEM / ML-DSA** (FFI PQC, too complex to implement 80k line C/ASM codebase)
+* **ML-KEM / ML-DSA** (FFI PQC for now)
 * **AES-GPU** (XTS/CBC/ECB/CTR/GCM/ECB/CTR)
 * **AES-NI** (XTS/CBC/ECB/CTR/GCM/ECB/CTR)
 * **AES-Software** (XTS/CBC/ECB/CTR/GCM/ECB/CTR)
 * **ED25519** (Broken Stack Aliasing bug in Mojo Compiler)
-* **X25519** (Experimental)
+* **X25519** (Working, experimental)
 
 ### Build:
 
@@ -45,3 +45,7 @@ Platforms supported: Linux, macOS
 ### Current Roadmap:
 * **ECDSA / ECDH** (NIST P-256, P-384)
 * **RSA** (PSS only)
+* Full Modern Asymmetric suite (even if there are issues).
+* Replace External SSL libraries and use Thistle for TLS 1.3 Crypto operations.
+* ML-KEM / ML-DSA implementation in Mojo.
+* Embeded like ascon, mpi, etc will be added as more hardware targets are added to Mojo compiler.
