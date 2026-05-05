@@ -40,7 +40,7 @@ fn rotl64[n: Int](x: UInt64) -> UInt64:
     return rotate_bits_left[n](x)
 
 
-fn keccak_f1600(mut state: UnsafePointer[UInt64, MutAnyOrigin]):
+fn keccak_f1600(state: UnsafePointer[UInt64, MutAnyOrigin]):
     var a0 = state[0]
     var a1 = state[1]
     var a2 = state[2]
@@ -240,15 +240,15 @@ struct SHA3Context(Movable):
     var buffer_len: Int
 
     fn __init__(out self, rate_bits: Int):
-        self.state = StackBuffer[UInt64, 25]()
+        self.state = StackBuffer[UInt64, 25](fill=0)
         self.rate_bytes = rate_bits // 8
-        self.buffer = StackBuffer[UInt8, 168]()
+        self.buffer = StackBuffer[UInt8, 168](fill=0)
         self.buffer_len = 0
 
     fn __init__(out self, *, deinit take: Self):
-        self.state = take.state
+        self.state = take.state^
         self.rate_bytes = take.rate_bytes
-        self.buffer = take.buffer
+        self.buffer = take.buffer^
         self.buffer_len = take.buffer_len
 
     fn __del__(deinit self):
@@ -256,7 +256,7 @@ struct SHA3Context(Movable):
 
 
 @always_inline
-fn sha3_absorb_block(mut state: UnsafePointer[UInt64, MutAnyOrigin], block: UnsafePointer[UInt8, ImmutAnyOrigin], rate_bytes: Int):
+fn sha3_absorb_block(state: UnsafePointer[UInt64, MutAnyOrigin], block: UnsafePointer[UInt8, ImmutAnyOrigin], rate_bytes: Int):
     var block_u64 = block.bitcast[UInt64]()
     var full_lanes = rate_bytes // 8
     for i in range(full_lanes):

@@ -182,8 +182,8 @@ struct StackBuffer[T: Copyable & ImplicitlyDestructible, N: Int](Movable):
         debug_assert(0 <= i < Self.N, "StackBuffer index out of bounds")
         self._data[i] = val^
 
-    fn ptr(mut self) -> UnsafePointer[Self.T, MutExternalOrigin]:
-        return self._data.unsafe_ptr().unsafe_origin_cast[MutExternalOrigin]()
+    fn ptr(mut self) -> UnsafePointer[Self.T, MutAnyOrigin]:
+        return self._data.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
 
     fn const_ptr(ref self) -> UnsafePointer[Self.T, ImmutExternalOrigin]:
         return self._data.unsafe_ptr().unsafe_origin_cast[ImmutExternalOrigin]()
