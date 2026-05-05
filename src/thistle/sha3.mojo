@@ -8,7 +8,8 @@ By Libalpm64, Attribute not required.
 """
 
 from std.collections import List
-from std.memory import UnsafePointer, alloc, memcpy, memset_zero
+from std.memory import UnsafePointer, memcpy, memset_zero
+from .utils import StackBuffer
 from std.bit import rotate_bits_left
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
@@ -233,17 +234,15 @@ fn string_to_bytes(s: String) -> List[UInt8]:
 
 
 struct SHA3Context(Movable):
-    var state: UnsafePointer[UInt64, MutAnyOrigin]
+    var state: StackBuffer[UInt64, 25]
     var rate_bytes: Int
-    var buffer: UnsafePointer[UInt8, MutAnyOrigin]
+    var buffer: StackBuffer[UInt8, 168]
     var buffer_len: Int
 
     fn __init__(out self, rate_bits: Int):
-        self.state = alloc[UInt64](25)
-        memset_zero(self.state, 25)
+        self.state = StackBuffer[UInt64, 25]()
         self.rate_bytes = rate_bits // 8
-        self.buffer = alloc[UInt8](168)
-        memset_zero(self.buffer, 168)
+        self.buffer = StackBuffer[UInt8, 168]()
         self.buffer_len = 0
 
     fn __init__(out self, *, deinit take: Self):
@@ -253,10 +252,7 @@ struct SHA3Context(Movable):
         self.buffer_len = take.buffer_len
 
     fn __del__(deinit self):
-        memset_zero(self.state, 25)
-        self.state.free()
-        memset_zero(self.buffer, 168)
-        self.buffer.free()
+        pass
 
 
 @always_inline
@@ -276,16 +272,16 @@ fn sha3_update(mut ctx: SHA3Context, data: Span[UInt8, ...]):
         var available = ctx.rate_bytes - ctx.buffer_len
         if total_len >= available:
             memcpy(
-                dest=ctx.buffer + ctx.buffer_len,
+                dest=ctx.buffer.ptr() + ctx.buffer_len,
                 src=data.unsafe_ptr(),
                 count=available,
             )
-            sha3_absorb_block(ctx.state, ctx.buffer, ctx.rate_bytes)
+            sha3_absorb_block(ctx.state.ptr(), ctx.buffer.ptr(), ctx.rate_bytes)
             ctx.buffer_len = 0
             i += available
         else:
             memcpy(
-                dest=ctx.buffer + ctx.buffer_len,
+                dest=ctx.buffer.ptr() + ctx.buffer_len,
                 src=data.unsafe_ptr(),
                 count=total_len,
             )
@@ -293,13 +289,13 @@ fn sha3_update(mut ctx: SHA3Context, data: Span[UInt8, ...]):
             return
 
     while i + ctx.rate_bytes <= total_len:
-        sha3_absorb_block(ctx.state, data.unsafe_ptr() + i, ctx.rate_bytes)
+        sha3_absorb_block(ctx.state.ptr(), data.unsafe_ptr() + i, ctx.rate_bytes)
         i += ctx.rate_bytes
 
     if i < total_len:
         var remaining = total_len - i
         memcpy(
-            dest=ctx.buffer,
+            dest=ctx.buffer.ptr(),
             src=data.unsafe_ptr() + i,
             count=remaining,
         )
@@ -316,7 +312,7 @@ fn sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
 
     ctx.buffer[ctx.rate_bytes - 1] |= 0x80
 
-    sha3_absorb_block(ctx.state, ctx.buffer, ctx.rate_bytes)
+    sha3_absorb_block(ctx.state.ptr(), ctx.buffer.ptr(), ctx.rate_bytes)
 
     var output = List[UInt8](capacity=output_len_bytes)
     var offset = 0
@@ -326,14 +322,14 @@ fn sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
         if output_len_bytes - offset < limit:
             limit = output_len_bytes - offset
 
-        var state_bytes = ctx.state.bitcast[UInt8]()
+        var state_bytes = ctx.state.ptr().bitcast[UInt8]()
         for i in range(limit):
             output.append(state_bytes[i])
 
         offset += limit
 
         if offset < output_len_bytes:
-            keccak_f1600(ctx.state)
+            keccak_f1600(ctx.state.ptr())
 
     return output^
 
@@ -395,7 +391,7 @@ fn shake_hash(rate_bits: Int, data: Span[UInt8, ...], output_len: Int) -> List[U
         ctx.buffer[ctx.buffer_len] = 0
         ctx.buffer_len += 1
     ctx.buffer[ctx.rate_bytes - 1] |= 0x80
-    sha3_absorb_block(ctx.state, ctx.buffer, ctx.rate_bytes)
+    sha3_absorb_block(ctx.state.ptr(), ctx.buffer.ptr(), ctx.rate_bytes)
     
     var output = List[UInt8](capacity=output_len)
     var offset = 0
@@ -403,12 +399,12 @@ fn shake_hash(rate_bits: Int, data: Span[UInt8, ...], output_len: Int) -> List[U
         var limit = ctx.rate_bytes
         if output_len - offset < limit:
             limit = output_len - offset
-        var state_bytes = ctx.state.bitcast[UInt8]()
+        var state_bytes = ctx.state.ptr().bitcast[UInt8]()
         for i in range(limit):
             output.append(state_bytes[i])
         offset += limit
         if offset < output_len:
-            keccak_f1600(ctx.state)
+            keccak_f1600(ctx.state.ptr())
     return output^
 
 

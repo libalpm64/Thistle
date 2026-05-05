@@ -11,6 +11,7 @@ from std.sys import llvm_intrinsic, CompilationTarget
 from std.memory import alloc, bitcast
 from std.utils import StaticTuple
 from .aes import cpu_aes_encrypt, expand_key_128, expand_key_192, expand_key_256, SBOX
+from .utils import StackBuffer
 
 comptime SIMD16 = SIMD[DType.uint8, 16]
 comptime SIMD128 = SIMD[DType.uint64, 2]
@@ -550,23 +551,23 @@ fn arm_aes_ctr_kernel(
         counter[14] = counter[14] ^ UInt8((i >> 8) & 0xff)
         counter[15] = counter[15] ^ UInt8(i & 0xff)
         
-        var temp_block = alloc[UInt8](16)
+        var temp_block = StackBuffer[UInt8, 16]()
+        var tp = temp_block.ptr()
         for j in range(16):
-            temp_block.store(j, counter[j])
+            tp.store(j, counter[j])
         
         if rounds == 10:
-            arm_aes_encrypt_128(temp_block, round_keys)
+            arm_aes_encrypt_128(tp, round_keys)
         elif rounds == 12:
-            arm_aes_encrypt_192(temp_block, round_keys)
+            arm_aes_encrypt_192(tp, round_keys)
         else:
-            arm_aes_encrypt_256(temp_block, round_keys)
+            arm_aes_encrypt_256(tp, round_keys)
         
         var in_block = input_ptr + i * 16
         var out_block = output_ptr + i * 16
         for j in range(16):
-            out_block.store(j, in_block.load(j) ^ temp_block.load(j))
+            out_block.store(j, in_block.load(j) ^ tp.load(j))
         
-        temp_block.free()
         i += 1
 
 
@@ -599,23 +600,23 @@ fn arm_aes_gcm_kernel(
         counter[15] = UInt8((2 + i) & 0xff)
         counter[14] = UInt8(((2 + i) >> 8) & 0xff)
         
-        var counter_block = alloc[UInt8](16)
+        var counter_block = StackBuffer[UInt8, 16]()
+        var cp = counter_block.ptr()
         for j in range(16):
-            counter_block.store(j, counter[j])
+            cp.store(j, counter[j])
         
         if rounds == 10:
-            arm_aes_encrypt_128(counter_block, round_keys)
+            arm_aes_encrypt_128(cp, round_keys)
         elif rounds == 12:
-            arm_aes_encrypt_192(counter_block, round_keys)
+            arm_aes_encrypt_192(cp, round_keys)
         else:
-            arm_aes_encrypt_256(counter_block, round_keys)
+            arm_aes_encrypt_256(cp, round_keys)
         
         var in_block = input_ptr + i * 16
         var out_block = output_ptr + i * 16
         for j in range(16):
-            out_block.store(j, in_block.load(j) ^ counter_block.load(j))
+            out_block.store(j, in_block.load(j) ^ cp.load(j))
         
-        counter_block.free()
         i += 1
 
 
@@ -642,10 +643,10 @@ fn compute_xts_tweak(tweak_bytes: List[UInt8]) -> List[UInt8]:
     return result^
 
 
-fn compute_xts_tweak_list(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> List[UInt8]:
-    var result = List[UInt8](capacity=16)
+fn compute_xts_tweak_list(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> StackBuffer[UInt8, 16]:
+    var result = StackBuffer[UInt8, 16]()
     for i in range(16):
-        result.append(tweak_ptr.load(i))
+        result[i] = tweak_ptr.load(i)
     
     var carry = False
     for i in range(16):
@@ -655,7 +656,7 @@ fn compute_xts_tweak_list(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> List
             result[i] = result[i] ^ 1
         carry = new_carry
     
-    return result^
+    return result
 
 
 @always_inline
@@ -668,41 +669,39 @@ fn arm_aes_xts_kernel(
     tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int
 ) -> None:
-    var tweak = alloc[UInt8](16)
+    var tweak = StackBuffer[UInt8, 16]()
+    var tp = tweak.ptr()
     for j in range(16):
-        tweak.store(j, tweak_ptr[j])
+        tp.store(j, tweak_ptr[j])
     
     if rounds == 10:
-        arm_aes_encrypt_128(tweak, round_keys2)
+        arm_aes_encrypt_128(tp, round_keys2)
     else:
-        arm_aes_encrypt_256(tweak, round_keys2)
+        arm_aes_encrypt_256(tp, round_keys2)
     
     var i = 0
     while i < num_blocks:
         var in_block = input_ptr + i * 16
         var out_block = output_ptr + i * 16
         
-        var xored = alloc[UInt8](16)
+        var xored = StackBuffer[UInt8, 16]()
+        var xp = xored.ptr()
         for j in range(16):
-            xored.store(j, in_block.load(j) ^ tweak.load(j))
+            xp.store(j, in_block.load(j) ^ tp.load(j))
         
         if rounds == 10:
-            arm_aes_encrypt_128(xored, round_keys1)
+            arm_aes_encrypt_128(xp, round_keys1)
         else:
-            arm_aes_encrypt_256(xored, round_keys1)
+            arm_aes_encrypt_256(xp, round_keys1)
         
         for j in range(16):
-            out_block.store(j, xored.load(j) ^ tweak.load(j))
+            out_block.store(j, xp.load(j) ^ tp.load(j))
         
-        xored.free()
-        
-        var next_tweak = compute_xts_tweak_list(tweak)
+        var next_tweak = compute_xts_tweak_list(tp)
         for j in range(16):
-            tweak.store(j, next_tweak[j])
+            tp.store(j, next_tweak[j])
         
         i += 1
-    
-    tweak.free()
 
 
 @always_inline

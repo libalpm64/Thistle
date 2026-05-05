@@ -19,7 +19,6 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
     @always_inline
     fn __init__[
         origin: MutOrigin,
-        //,
     ](
         out self,
         *,
@@ -27,7 +26,6 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
             elt_is_mutable=True, origin=origin, Self.ElementType, is_owned=True
         ],
     ):
-
         debug_assert(
             len(storage) == Self.size,
             "Expected variadic list of length ",
@@ -39,16 +37,12 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
 
         var ptr = self.unsafe_ptr()
 
-        # Move each element into the array storage.
         comptime for i in range(Self.size):
-            # Safety: We own the elements in the variadic list.
             ptr.init_pointee_move_from(
                 UnsafePointer(to=storage[i]).unsafe_mut_cast[True]()
             )
             ptr += 1
 
-        # Do not destroy the elements when their backing storage goes away.
-        # FIXME: Why doesn't consume_elements work here?
         storage^._anihilate()
 
     @always_inline
@@ -86,8 +80,6 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
         comptime assert 0 <= i < Self.size, "Index must be within bounds."
         return self.unsafe_get(i)
 
-
-    # FIXME: temporary workaround
     @always_inline
     fn __getitem_param__[
         idx: Int
@@ -110,17 +102,12 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
     ](mut self: StackInlineArray[_T, ...], idx: Int, var value: _T):
         debug_assert(
             0 <= idx < Self.size,
-            (
-                "The index provided must be within the range [0, len(List) -1]"
-                " when using List.unsafe_set()"
-            ),
+            "The index provided must be within the range [0, len(List) -1] when using List.unsafe_set()",
         )
         (self._ptr + idx).destroy_pointee()
         (self._ptr + idx).init_pointee_move(value^)
 
     fn __del__(deinit self):
-        """Deallocates the array and destroys its elements."""
-
         _constrained_conforms_to[
             conforms_to(Self.ElementType, ImplicitlyDestructible),
             Parent=Self,
@@ -137,3 +124,66 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
                 ptr.bitcast[TDestructible]().destroy_pointee()
 
 
+struct StackBuffer[T: Copyable & ImplicitlyDestructible, N: Int](Movable):
+    var _data: InlineArray[Self.T, Self.N]
+    var _len: Int
+
+    fn __init__(out self):
+        comptime assert Self.T.__del__is_trivial, "StackBuffer requires trivially destructible types (UInt8, UInt32, UInt64, etc)"
+        self._data = InlineArray[Self.T, Self.N](uninitialized=True)
+        self._len = 0
+
+    fn __init__(out self, *, var fill: Self.T):
+        self._data = InlineArray[Self.T, Self.N](fill=fill^)
+        self._len = 0
+
+    fn __init__(out self, *, deinit take: Self):
+        self._data = take._data^
+        self._len = take._len
+
+    fn len(self) -> Int:
+        return self._len
+
+    fn capacity(self) -> Int:
+        return Self.N
+
+    fn remaining(self) -> Int:
+        return Self.N - self._len
+
+    fn push(mut self, var val: Self.T):
+        debug_assert(self._len < Self.N, "StackBuffer overflow")
+        self._data[self._len] = val^
+        self._len += 1
+
+    fn push_unchecked(mut self, var val: Self.T):
+        self._data[self._len] = val^
+        self._len += 1
+
+    fn pop(mut self) -> Self.T:
+        debug_assert(self._len > 0, "StackBuffer underflow")
+        self._len -= 1
+        return self._data[self._len].copy()
+
+    fn top(ref self) -> ref[self._data] Self.T:
+        debug_assert(self._len > 0, "StackBuffer empty")
+        return self._data[self._len - 1]
+
+    fn clear(mut self):
+        self._len = 0
+
+    fn reset(mut self):
+        self.clear()
+
+    fn __getitem__(ref self, i: Int) -> ref[self._data] Self.T:
+        debug_assert(0 <= i < self._len, "StackBuffer index out of bounds")
+        return self._data[i]
+
+    fn __setitem__(mut self, i: Int, var val: Self.T):
+        debug_assert(0 <= i < self._len, "StackBuffer index out of bounds")
+        self._data[i] = val^
+
+    fn ptr(mut self) -> UnsafePointer[Self.T, MutExternalOrigin]:
+        return self._data.unsafe_ptr().unsafe_origin_cast[MutExternalOrigin]()
+
+    fn const_ptr(ref self) -> UnsafePointer[Self.T, ImmutExternalOrigin]:
+        return self._data.unsafe_ptr().unsafe_origin_cast[ImmutExternalOrigin]()

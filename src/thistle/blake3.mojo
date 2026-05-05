@@ -8,7 +8,8 @@ By Libalpm64, Martinvuyk no attribution required.
 
 from std.algorithm import parallelize
 from std.bit._mask import splat
-from std.memory import UnsafePointer, alloc, bitcast, stack_allocation
+from std.collections import List
+from std.memory import UnsafePointer, bitcast, stack_allocation
 from std.bit import count_trailing_zeros
 from std.utils import IndexList
 from thistle.utils import StackInlineArray
@@ -608,8 +609,10 @@ fn blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) -> List[UInt
     var chunks_to_parallelize = total_chunks - 1
     var num_full_batches = chunks_to_parallelize // BSIZE
 
-    var batch_roots = alloc[SIMD[DType.uint32, 8]](num_full_batches)
-    var batch_roots_ptr = batch_roots
+    var batch_roots = List[SIMD[DType.uint32, 8]](capacity=num_full_batches)
+    for _ in range(num_full_batches):
+        batch_roots.append(SIMD[DType.uint32, 8](0))
+    var batch_roots_ptr = batch_roots.unsafe_ptr()
 
     @parameter
     fn process_batch(tid: Int):
@@ -749,7 +752,6 @@ fn blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) -> List[UInt
     var h = Hasher()
     for i in range(num_full_batches):
         h.add_subtree_cv(batch_roots[i], height=6)
-    batch_roots.free()
 
     h.update(d[num_full_batches * 64 * 1024 :])
     return h.finalize(out_len)

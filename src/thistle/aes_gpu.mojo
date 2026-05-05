@@ -7,7 +7,7 @@ By Libalpm64 no attribution required.
 """
 
 from std.gpu import global_idx
-from std.memory import alloc, stack_allocation
+from std.memory import stack_allocation
 from std.memory import AddressSpace
 from std.memory.unsafe_pointer import UnsafePointer
 from std.utils import StaticTuple

@@ -7,7 +7,7 @@ By Libalpm no attribution required
 """
 
 from std.memory import bitcast
-from std.memory.unsafe_pointer import UnsafePointer, alloc
+from std.memory.unsafe_pointer import UnsafePointer
 from std.builtin.type_aliases import MutExternalOrigin
 from std.utils import StaticTuple
 

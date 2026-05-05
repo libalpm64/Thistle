@@ -9,6 +9,7 @@ Work in progress.
 
 from std.memory import alloc, memset
 from std.utils import StaticTuple
+from .utils import StackBuffer
 
 
 comptime AESError = Error
@@ -382,23 +383,21 @@ fn cpu_aes_ctr_kernel(
         counter[14] = counter[14] ^ UInt8((i >> 8) & 0xff)
         counter[15] = counter[15] ^ UInt8(i & 0xff)
         
-        var temp_block = alloc[UInt8](16)
+        var temp_block = StackBuffer[UInt8, 16]()
         for j in range(16):
-            temp_block.store(j, counter[j])
+            temp_block.ptr().store(j, counter[j])
         
         if rounds == 10:
-            cpu_aes_encrypt(temp_block, round_keys, 10)
+            cpu_aes_encrypt(temp_block.ptr(), round_keys, 10)
         elif rounds == 12:
-            cpu_aes_encrypt(temp_block, round_keys, 12)
+            cpu_aes_encrypt(temp_block.ptr(), round_keys, 12)
         else:
-            cpu_aes_encrypt(temp_block, round_keys, 14)
+            cpu_aes_encrypt(temp_block.ptr(), round_keys, 14)
         
         var in_block = input_ptr + i * 16
         var out_block = output_ptr + i * 16
         for j in range(16):
-            out_block.store(j, in_block.load(j) ^ temp_block.load(j))
-        
-        temp_block.free()
+            out_block.store(j, in_block.load(j) ^ temp_block.ptr().load(j))
         i += 1
 
 
@@ -435,38 +434,37 @@ fn cpu_aes_xts_kernel(
     tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int
 ) -> None:
-    var tweak = alloc[UInt8](16)
+    var tweak = StackBuffer[UInt8, 16]()
+    var wp = tweak.ptr()
     for j in range(16):
-        tweak.store(j, tweak_ptr[j])
+        wp.store(j, tweak_ptr[j])
     
-    cpu_aes_encrypt(tweak, round_keys2, rounds)
+    cpu_aes_encrypt(wp, round_keys2, rounds)
     
     var i = 0
     while i < num_blocks:
         var in_block = input_ptr + i * 16
         var out_block = output_ptr + i * 16
         
-        var xored = alloc[UInt8](16)
+        var xored = StackBuffer[UInt8, 16]()
+        var xp = xored.ptr()
         for j in range(16):
-            xored.store(j, in_block.load(j) ^ tweak.load(j))
+            xp.store(j, in_block.load(j) ^ wp.load(j))
         
         if rounds == 10:
-            cpu_aes_encrypt(xored, round_keys1, 10)
+            cpu_aes_encrypt(xp, round_keys1, 10)
         else:
-            cpu_aes_encrypt(xored, round_keys1, 14)
+            cpu_aes_encrypt(xp, round_keys1, 14)
         
         for j in range(16):
-            out_block.store(j, xored.load(j) ^ tweak.load(j))
+            out_block.store(j, xp.load(j) ^ wp.load(j))
         
-        xored.free()
         
-        var next_tweak = cpu_compute_xts_tweak_list(tweak)
+        var next_tweak = cpu_compute_xts_tweak_list(wp)
         for j in range(16):
-            tweak.store(j, next_tweak[j])
+            wp.store(j, next_tweak[j])
         
         i += 1
-    
-    tweak.free()
 
 
 
@@ -605,20 +603,21 @@ fn expand_key_256(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> Unsaf
 
 
 struct AESKey:
-    var _data: UnsafePointer[UInt8, MutAnyOrigin]
-    var _round_keys: UnsafePointer[UInt32, MutAnyOrigin]
+    var _data: StackBuffer[UInt8, 16]
+    var _round_keys: StackBuffer[UInt32, 44]
     
     fn __init__(out self, key: StaticTuple[UInt8, 16]) raises:
-        self._data = alloc[UInt8](16)
+        self._data = StackBuffer[UInt8, 16]()
         for i in range(16):
-            self._data.store(i, key[i])
-        self._round_keys = expand_key_128(self._data)
+            self._data.ptr().store(i, key[i])
+        var rk_ptr = expand_key_128(self._data.ptr())
+        self._round_keys = StackBuffer[UInt32, 44]()
+        for i in range(44):
+            self._round_keys[i] = rk_ptr[i]
+        rk_ptr.free()
     
     fn __del__(deinit self):
-        memset(self._data, 0, 16)
-        self._data.free()
-        memset(self._round_keys, 0, 44 * 4)
-        self._round_keys.free()
+        pass
     
     fn round_keys(self) -> UnsafePointer[UInt32, MutAnyOrigin]:
-        return self._round_keys
+        return self._round_keys.ptr()

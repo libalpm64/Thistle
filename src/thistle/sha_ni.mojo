@@ -7,7 +7,8 @@ By Libalpm64, attribution not required.
 """
 
 from std.sys import llvm_intrinsic, CompilationTarget, prefetch, PrefetchOptions
-from std.memory import UnsafePointer, alloc, bitcast
+from std.memory import UnsafePointer, bitcast
+from .utils import StackBuffer
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
 from .sha2 import SHA256_IV
@@ -135,19 +136,14 @@ fn sha256ni_transform(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]) -> 
 struct SHA256NIContext(Movable):
     var state: SIMD[DType.uint32, 8]
     var count: UInt64
-    var buffer: UnsafePointer[UInt8, MutAnyOrigin]
+    var buffer: StackBuffer[UInt8, 64]
     var buffer_len: Int
 
     fn __init__(out self):
         self.state = SHA256_IV
         self.count = 0
-        self.buffer = alloc[UInt8](64)
-        for i in range(64):
-            self.buffer[i] = 0
+        self.buffer = StackBuffer[UInt8, 64]()
         self.buffer_len = 0
-
-    fn __del__(deinit self):
-        self.buffer.free()
 
 
 fn sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]:
@@ -175,7 +171,7 @@ fn sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     ctx.buffer_len += 1
 
     if ctx.buffer_len > 56:
-        ctx.state = sha256ni_transform(ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=64))
+        ctx.state = sha256ni_transform(ctx.state, Span[UInt8, ...](ptr=ctx.buffer.ptr(), length=64))
         ctx.buffer_len = 0
 
     while ctx.buffer_len < 56:
@@ -185,7 +181,7 @@ fn sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     for k in range(8):
         ctx.buffer[56 + k] = UInt8(UInt64(bit_count >> UInt64(56 - k * 8)) & 0xFF)
 
-    ctx.state = sha256ni_transform(ctx.state, Span[UInt8, ...](ptr=ctx.buffer, length=64))
+    ctx.state = sha256ni_transform(ctx.state, Span[UInt8, ...](ptr=ctx.buffer.ptr(), length=64))
 
     var output = List[UInt8](capacity=32)
     for k in range(8):

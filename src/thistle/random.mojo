@@ -1,5 +1,5 @@
 from std.ffi import OwnedDLHandle
-from std.memory import UnsafePointer, alloc
+from std.memory import UnsafePointer
 from std.collections import List
 from std.python import Python
 
@@ -31,10 +31,8 @@ fn random_fill(buf: UnsafePointer[UInt8, MutAnyOrigin], len: Int) raises:
 
 
 fn random_bytes(n: Int) raises -> List[UInt8]:
-    var buf = alloc[UInt8](n)
-    random_fill(buf, n)
     var result = List[UInt8](capacity=n)
     for i in range(n):
-        result.append(buf[i])
-    buf.free()
+        result.append(0)
+    random_fill(result.unsafe_ptr(), n)
     return result^
