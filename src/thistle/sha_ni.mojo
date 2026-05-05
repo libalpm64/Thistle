@@ -142,7 +142,7 @@ struct SHA256NIContext(Movable):
     fn __init__(out self):
         self.state = SHA256_IV
         self.count = 0
-        self.buffer = StackBuffer[UInt8, 64]()
+        self.buffer = StackBuffer[UInt8, 64](fill=0)
         self.buffer_len = 0
 
 
