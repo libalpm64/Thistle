@@ -175,11 +175,11 @@ struct StackBuffer[T: Copyable & ImplicitlyDestructible, N: Int](Movable):
         self.clear()
 
     fn __getitem__(ref self, i: Int) -> ref[self._data] Self.T:
-        debug_assert(0 <= i < self._len, "StackBuffer index out of bounds")
+        debug_assert(0 <= i < Self.N, "StackBuffer index out of bounds")
         return self._data[i]
 
     fn __setitem__(mut self, i: Int, var val: Self.T):
-        debug_assert(0 <= i < self._len, "StackBuffer index out of bounds")
+        debug_assert(0 <= i < Self.N, "StackBuffer index out of bounds")
         self._data[i] = val^
 
     fn ptr(mut self) -> UnsafePointer[Self.T, MutExternalOrigin]:
