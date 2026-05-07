@@ -8,7 +8,7 @@ from std.collections import List
 from std.python import Python
 
 
-fn _get_lib_path(lib_name: String) raises -> String:
+def _get_lib_path(lib_name: String) raises -> String:
     var os_mod = Python.import_module("os")
     var sys_mod = Python.import_module("sys")
     
@@ -48,199 +48,199 @@ comptime MLK_ERR_OK: Int = 0
 comptime MLK_ERR_FAIL: Int = -1
 
 
-fn mlkem512_keypair(
+def mlkem512_keypair(
     pk: UnsafePointer[UInt8, MutAnyOrigin],
     sk: UnsafePointer[UInt8, MutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem512"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM512_keypair")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM512_keypair")
     return func(pk, sk)
 
 
-fn mlkem512_keypair_derand(
+def mlkem512_keypair_derand(
     pk: UnsafePointer[UInt8, MutAnyOrigin],
     sk: UnsafePointer[UInt8, MutAnyOrigin],
     coins: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem512"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM512_keypair_derand")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM512_keypair_derand")
     return func(pk, sk, coins)
 
 
-fn mlkem512_enc(
+def mlkem512_enc(
     ct: UnsafePointer[UInt8, MutAnyOrigin],
     ss: UnsafePointer[UInt8, MutAnyOrigin],
     pk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem512"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM512_enc")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM512_enc")
     return func(ct, ss, pk)
 
 
-fn mlkem512_enc_derand(
+def mlkem512_enc_derand(
     ct: UnsafePointer[UInt8, MutAnyOrigin],
     ss: UnsafePointer[UInt8, MutAnyOrigin],
     pk: UnsafePointer[UInt8, ImmutAnyOrigin],
     coins: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem512"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM512_enc_derand")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM512_enc_derand")
     return func(ct, ss, pk, coins)
 
 
-fn mlkem512_dec(
+def mlkem512_dec(
     ss: UnsafePointer[UInt8, MutAnyOrigin],
     ct: UnsafePointer[UInt8, ImmutAnyOrigin],
     sk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem512"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM512_dec")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM512_dec")
     return func(ss, ct, sk)
 
 
-fn mlkem512_check_pk(
+def mlkem512_check_pk(
     pk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem512"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM512_check_pk")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM512_check_pk")
     return func(pk)
 
 
-fn mlkem512_check_sk(
+def mlkem512_check_sk(
     sk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem512"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM512_check_sk")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM512_check_sk")
     return func(sk)
 
 
-fn mlkem768_keypair(
+def mlkem768_keypair(
     pk: UnsafePointer[UInt8, MutAnyOrigin],
     sk: UnsafePointer[UInt8, MutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem768"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM768_keypair")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM768_keypair")
     return func(pk, sk)
 
 
-fn mlkem768_keypair_derand(
+def mlkem768_keypair_derand(
     pk: UnsafePointer[UInt8, MutAnyOrigin],
     sk: UnsafePointer[UInt8, MutAnyOrigin],
     coins: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem768"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM768_keypair_derand")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM768_keypair_derand")
     return func(pk, sk, coins)
 
 
-fn mlkem768_enc(
+def mlkem768_enc(
     ct: UnsafePointer[UInt8, MutAnyOrigin],
     ss: UnsafePointer[UInt8, MutAnyOrigin],
     pk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem768"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM768_enc")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM768_enc")
     return func(ct, ss, pk)
 
 
-fn mlkem768_enc_derand(
+def mlkem768_enc_derand(
     ct: UnsafePointer[UInt8, MutAnyOrigin],
     ss: UnsafePointer[UInt8, MutAnyOrigin],
     pk: UnsafePointer[UInt8, ImmutAnyOrigin],
     coins: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem768"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM768_enc_derand")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM768_enc_derand")
     return func(ct, ss, pk, coins)
 
 
-fn mlkem768_dec(
+def mlkem768_dec(
     ss: UnsafePointer[UInt8, MutAnyOrigin],
     ct: UnsafePointer[UInt8, ImmutAnyOrigin],
     sk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem768"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM768_dec")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM768_dec")
     return func(ss, ct, sk)
 
 
-fn mlkem768_check_pk(
+def mlkem768_check_pk(
     pk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem768"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM768_check_pk")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM768_check_pk")
     return func(pk)
 
 
-fn mlkem768_check_sk(
+def mlkem768_check_sk(
     sk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem768"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM768_check_sk")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM768_check_sk")
     return func(sk)
 
 
-fn mlkem1024_keypair(
+def mlkem1024_keypair(
     pk: UnsafePointer[UInt8, MutAnyOrigin],
     sk: UnsafePointer[UInt8, MutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem1024"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM1024_keypair")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM1024_keypair")
     return func(pk, sk)
 
 
-fn mlkem1024_keypair_derand(
+def mlkem1024_keypair_derand(
     pk: UnsafePointer[UInt8, MutAnyOrigin],
     sk: UnsafePointer[UInt8, MutAnyOrigin],
     coins: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem1024"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM1024_keypair_derand")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM1024_keypair_derand")
     return func(pk, sk, coins)
 
 
-fn mlkem1024_enc(
+def mlkem1024_enc(
     ct: UnsafePointer[UInt8, MutAnyOrigin],
     ss: UnsafePointer[UInt8, MutAnyOrigin],
     pk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem1024"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM1024_enc")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM1024_enc")
     return func(ct, ss, pk)
 
 
-fn mlkem1024_enc_derand(
+def mlkem1024_enc_derand(
     ct: UnsafePointer[UInt8, MutAnyOrigin],
     ss: UnsafePointer[UInt8, MutAnyOrigin],
     pk: UnsafePointer[UInt8, ImmutAnyOrigin],
     coins: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem1024"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM1024_enc_derand")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM1024_enc_derand")
     return func(ct, ss, pk, coins)
 
 
-fn mlkem1024_dec(
+def mlkem1024_dec(
     ss: UnsafePointer[UInt8, MutAnyOrigin],
     ct: UnsafePointer[UInt8, ImmutAnyOrigin],
     sk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem1024"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM1024_dec")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM1024_dec")
     return func(ss, ct, sk)
 
 
-fn mlkem1024_check_pk(
+def mlkem1024_check_pk(
     pk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem1024"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM1024_check_pk")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM1024_check_pk")
     return func(pk)
 
 
-fn mlkem1024_check_sk(
+def mlkem1024_check_sk(
     sk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmlkem1024"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLKEM_NATIVE_MLKEM1024_check_sk")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLKEM_NATIVE_MLKEM1024_check_sk")
     return func(sk)

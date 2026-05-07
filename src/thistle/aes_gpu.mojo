@@ -14,7 +14,7 @@ from std.utils import StaticTuple
 
 
 @always_inline
-fn aes_encrypt_block[rounds: Int](
+def aes_encrypt_block[rounds: Int](
     state0: UInt8, state1: UInt8, state2: UInt8, state3: UInt8,
     state4: UInt8, state5: UInt8, state6: UInt8, state7: UInt8,
     state8: UInt8, state9: UInt8, state10: UInt8, state11: UInt8,
@@ -188,7 +188,7 @@ fn aes_encrypt_block[rounds: Int](
 
 
 @always_inline
-fn aes_encrypt_ecb[rounds: Int](
+def aes_encrypt_ecb[rounds: Int](
     input_data: UnsafePointer[UInt8, MutAnyOrigin],
     output_data: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys_data: UnsafePointer[UInt32, MutAnyOrigin],
@@ -206,7 +206,7 @@ fn aes_encrypt_ecb[rounds: Int](
 
 
 @always_inline
-fn aes_encrypt_cbc[rounds: Int](
+def aes_encrypt_cbc[rounds: Int](
     input_data: UnsafePointer[UInt8, MutAnyOrigin],
     output_data: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys_data: UnsafePointer[UInt32, MutAnyOrigin],
@@ -239,7 +239,7 @@ fn aes_encrypt_cbc[rounds: Int](
 
 
 @always_inline
-fn aes_encrypt_ctr[rounds: Int](
+def aes_encrypt_ctr[rounds: Int](
     input_data: UnsafePointer[UInt8, MutAnyOrigin],
     output_data: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys_data: UnsafePointer[UInt32, MutAnyOrigin],
@@ -276,7 +276,7 @@ fn aes_encrypt_ctr[rounds: Int](
 
 
 @always_inline
-fn aes_encrypt_gcm[rounds: Int](
+def aes_encrypt_gcm[rounds: Int](
     input_data: UnsafePointer[UInt8, MutAnyOrigin],
     output_data: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys_data: UnsafePointer[UInt32, MutAnyOrigin],
@@ -319,7 +319,7 @@ fn aes_encrypt_gcm[rounds: Int](
         incr_counter(counter)
 
 
-fn incr_counter(mut counter: StaticTuple[UInt8, 16]) -> None:
+def incr_counter(mut counter: StaticTuple[UInt8, 16]) -> None:
     var carry: UInt8 = 1
     for i in range(15, -1, -1):
         var new_val = counter[i] + carry
@@ -328,7 +328,7 @@ fn incr_counter(mut counter: StaticTuple[UInt8, 16]) -> None:
         if carry == 0:
             break
 
-fn xts_mul_alpha(tweak: UnsafePointer[UInt8, MutAnyOrigin]) -> None:
+def xts_mul_alpha(tweak: UnsafePointer[UInt8, MutAnyOrigin]) -> None:
     var high_bit = (tweak[0] & 0x80) != 0
     for i in range(16):
         var new_val = tweak[i] << 1
@@ -340,7 +340,7 @@ fn xts_mul_alpha(tweak: UnsafePointer[UInt8, MutAnyOrigin]) -> None:
 
 
 @always_inline
-fn aes_gpu_kernel_ecb(
+def aes_gpu_kernel_ecb(
     input_data: UnsafePointer[UInt8, MutAnyOrigin],
     output_data: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys_data: UnsafePointer[UInt32, MutAnyOrigin],
@@ -349,7 +349,7 @@ fn aes_gpu_kernel_ecb(
     rounds: Int,
 ) -> None:
     var tid = global_idx.x
-    if tid >= UInt(n):
+    if tid >= n:
         return
     var bp = input_data + tid * 16
     var op = output_data + tid * 16
@@ -362,7 +362,7 @@ fn aes_gpu_kernel_ecb(
 
 
 @always_inline
-fn aes_gpu_kernel_cbc(
+def aes_gpu_kernel_cbc(
     input_data: UnsafePointer[UInt8, MutAnyOrigin],
     output_data: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys_data: UnsafePointer[UInt32, MutAnyOrigin],
@@ -372,7 +372,7 @@ fn aes_gpu_kernel_cbc(
     rounds: Int,
 ) -> None:
     var tid = global_idx.x
-    if tid >= UInt(n):
+    if tid >= n:
         return
     var bp = input_data + tid * 16
     var op = output_data + tid * 16
@@ -385,7 +385,7 @@ fn aes_gpu_kernel_cbc(
 
 
 @always_inline
-fn aes_gpu_kernel_ctr(
+def aes_gpu_kernel_ctr(
     input_data: UnsafePointer[UInt8, MutAnyOrigin],
     output_data: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys_data: UnsafePointer[UInt32, MutAnyOrigin],
@@ -395,7 +395,7 @@ fn aes_gpu_kernel_ctr(
     rounds: Int,
 ) -> None:
     var tid = global_idx.x
-    if tid >= UInt(n):
+    if tid >= n:
         return
     var bp = input_data + tid * 16
     var op = output_data + tid * 16
@@ -422,7 +422,7 @@ fn aes_gpu_kernel_ctr(
 
 
 @always_inline
-fn aes_gpu_kernel_gcm(
+def aes_gpu_kernel_gcm(
     input_data: UnsafePointer[UInt8, MutAnyOrigin],
     output_data: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys_data: UnsafePointer[UInt32, MutAnyOrigin],
@@ -432,7 +432,7 @@ fn aes_gpu_kernel_gcm(
     rounds: Int,
 ) -> None:
     var tid = global_idx.x
-    if tid >= UInt(n):
+    if tid >= n:
         return
     var bp = input_data + tid * 16
     var op = output_data + tid * 16
@@ -448,7 +448,7 @@ fn aes_gpu_kernel_gcm(
 
 
 @always_inline
-fn aes_gpu_kernel_xts(
+def aes_gpu_kernel_xts(
     input_data: UnsafePointer[UInt8, MutAnyOrigin],
     output_data: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys_data1: UnsafePointer[UInt32, MutAnyOrigin],
@@ -459,7 +459,7 @@ fn aes_gpu_kernel_xts(
     rounds: Int,
 ) -> None:
     var tid = global_idx.x
-    if tid >= UInt(n):
+    if tid >= n:
         return
     var bp = input_data + tid * 16
     var op = output_data + tid * 16

@@ -38,12 +38,12 @@ comptime SIGMA = (
 
 
 @always_inline
-fn rotr64[n: Int](x: UInt64) -> UInt64:
+def rotr64[n: Int](x: UInt64) -> UInt64:
     return (x >> UInt64(n)) | (x << UInt64(64 - n))
 
 
 @always_inline
-fn g(a: UInt64, b: UInt64, c: UInt64, d: UInt64, x: UInt64, y: UInt64) -> Tuple[UInt64, UInt64, UInt64, UInt64]:
+def g(a: UInt64, b: UInt64, c: UInt64, d: UInt64, x: UInt64, y: UInt64) -> Tuple[UInt64, UInt64, UInt64, UInt64]:
     var va = a + b + x
     var vd = rotr64[32](d ^ va)
     var vc = c + vd
@@ -56,7 +56,7 @@ fn g(a: UInt64, b: UInt64, c: UInt64, d: UInt64, x: UInt64, y: UInt64) -> Tuple[
 
 
 @always_inline
-fn round_fn[r: Int](
+def round_fn[r: Int](
     mut v0: UInt64, mut v1: UInt64, mut v2: UInt64, mut v3: UInt64,
     mut v4: UInt64, mut v5: UInt64, mut v6: UInt64, mut v7: UInt64,
     mut v8: UInt64, mut v9: UInt64, mut v10: UInt64, mut v11: UInt64,
@@ -79,12 +79,12 @@ fn round_fn[r: Int](
 
 
 @always_inline
-fn zero_buffer(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
+def zero_buffer(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
     for i in range(len):
         ptr[i] = 0
 
 @always_inline
-fn zero_and_free(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
+def zero_and_free(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
     zero_buffer(ptr, len)
     ptr.free()
 
@@ -98,7 +98,7 @@ struct Blake2b(Movable):
     var out_len: Int
     var key_len: Int
 
-    fn __init__(out self, out_len: Int = 64):
+    def __init__(out self, out_len: Int = 64):
         self.out_len = out_len
         self.key_len = 0
         self.h = BLAKE2B_IV
@@ -115,7 +115,7 @@ struct Blake2b(Movable):
 
         self.h[0] ^= p0
 
-    fn __init__(out self, out_len: Int, key: Span[UInt8, ...]):
+    def __init__(out self, out_len: Int, key: Span[UInt8, ...]):
         self.out_len = out_len
         self.key_len = len(key)
         self.h = BLAKE2B_IV
@@ -138,7 +138,7 @@ struct Blake2b(Movable):
                 self.buffer[self.buffer_len] = 0
                 self.buffer_len += 1
 
-    fn __init__(out self, *, deinit take: Self):
+    def __init__(out self, *, deinit take: Self):
         self.h = take.h
         self.t_low = take.t_low
         self.t_high = take.t_high
@@ -147,10 +147,10 @@ struct Blake2b(Movable):
         self.out_len = take.out_len
         self.key_len = take.key_len
 
-    fn __del__(deinit self):
+    def __del__(deinit self):
         zero_and_free(self.buffer, 128)
 
-    fn compress(mut self, is_last: Bool):
+    def compress(mut self, is_last: Bool):
         var v0 = self.h[0]
         var v1 = self.h[1]
         var v2 = self.h[2]
@@ -198,7 +198,7 @@ struct Blake2b(Movable):
         self.h[6] ^= v6 ^ v14
         self.h[7] ^= v7 ^ v15
 
-    fn update(mut self, data: Span[UInt8, ...]):
+    def update(mut self, data: Span[UInt8, ...]):
         var i = 0
         while i < len(data):
             if self.buffer_len == 128:
@@ -223,7 +223,7 @@ struct Blake2b(Movable):
             self.buffer_len += to_copy
             i += to_copy
 
-    fn finalize(mut self) -> List[UInt8]:
+    def finalize(mut self) -> List[UInt8]:
         var old_low = self.t_low
         self.t_low += UInt64(self.buffer_len)
         if self.t_low < old_low:
@@ -245,14 +245,14 @@ struct Blake2b(Movable):
         return output^
 
 
-fn nibble_to_hex_char(nibble: UInt8) -> UInt8:
+def nibble_to_hex_char(nibble: UInt8) -> UInt8:
     if nibble < 10:
         return nibble + 0x30
     else:
         return nibble - 10 + 0x61
 
 
-fn bytes_to_hex(data: List[UInt8]) -> String:
+def bytes_to_hex(data: List[UInt8]) -> String:
     var result = String()
     for i in range(len(data)):
         var b = data[i]
@@ -263,7 +263,7 @@ fn bytes_to_hex(data: List[UInt8]) -> String:
     return result
 
 
-fn string_to_bytes(s: String) -> List[UInt8]:
+def string_to_bytes(s: String) -> List[UInt8]:
     var data = List[UInt8]()
     var bytes = s.as_bytes()
     for i in range(len(bytes)):
@@ -271,13 +271,13 @@ fn string_to_bytes(s: String) -> List[UInt8]:
     return data^
 
 
-fn blake2b_hash(data: Span[UInt8, ...], out_len: Int = 64) -> List[UInt8]:
+def blake2b_hash(data: Span[UInt8, ...], out_len: Int = 64) -> List[UInt8]:
     var ctx = Blake2b(out_len)
     ctx.update(data)
     return ctx.finalize()
 
 
-fn blake2b_hash_keyed(
+def blake2b_hash_keyed(
     data: Span[UInt8, ...], key: Span[UInt8, ...], out_len: Int = 64
 ) -> List[UInt8]:
     var ctx = Blake2b(out_len, key)
@@ -285,7 +285,7 @@ fn blake2b_hash_keyed(
     return ctx.finalize()
 
 
-fn blake2b_hash_string(s: String, out_len: Int = 64) -> String:
+def blake2b_hash_string(s: String, out_len: Int = 64) -> String:
     var data = string_to_bytes(s)
     var hash = blake2b_hash(Span[UInt8, ...](data), out_len)
     return bytes_to_hex(hash)

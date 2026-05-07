@@ -14,35 +14,35 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
     var limbs: SIMD[DType.uint64, 5]
 
     @always_inline
-    fn __init__(out self):
+    def __init__(out self):
         self.limbs = SIMD[DType.uint64, 5](0, 0, 0, 0, 0)
 
     @always_inline
-    fn __init__(out self, l0: UInt64, l1: UInt64, l2: UInt64, l3: UInt64, l4: UInt64):
+    def __init__(out self, l0: UInt64, l1: UInt64, l2: UInt64, l3: UInt64, l4: UInt64):
         self.limbs = SIMD[DType.uint64, 5](l0, l1, l2, l3, l4)
 
     @always_inline
-    fn __init__(out self, limbs: SIMD[DType.uint64, 5]):
+    def __init__(out self, limbs: SIMD[DType.uint64, 5]):
         self.limbs = limbs
 
     @always_inline
-    fn __copyinit__(out self, copy: Self):
+    def __copyinit__(out self, copy: Self):
         self.limbs = copy.limbs
 
     @always_inline
-    fn __moveinit__(out self, deinit take: Self):
+    def __moveinit__(out self, deinit take: Self):
         self.limbs = take.limbs
 
     @staticmethod
-    fn ZERO() -> FieldElement51:
+    def ZERO() -> FieldElement51:
         return FieldElement51(0, 0, 0, 0, 0)
 
     @staticmethod
-    fn ONE() -> FieldElement51:
+    def ONE() -> FieldElement51:
         return FieldElement51(1, 0, 0, 0, 0)
 
     @staticmethod
-    fn MINUS_ONE() -> FieldElement51:
+    def MINUS_ONE() -> FieldElement51:
         return FieldElement51(
             2251799813685228,
             2251799813685247,
@@ -52,7 +52,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         )
 
     @always_inline
-    fn to_int(self) -> Int:
+    def to_int(self) -> Int:
         # Producer must use a canonical form first.
 		# Note: this is the same reduction is the same as with bytes so interpept this to the same as as_bytes.
         var res = self._reduce(self.limbs)
@@ -88,7 +88,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return Int(v)
 
     @staticmethod
-    fn from_int(x: Int) -> FieldElement51:
+    def from_int(x: Int) -> FieldElement51:
         if x >= 0 and x < 2251799813685248:
             return FieldElement51(UInt64(x), 0, 0, 0, 0)
         
@@ -114,7 +114,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return FieldElement51(l0, l1, l2, l3, l4)
 
     @always_inline
-    fn __add__(self, other: FieldElement51) -> FieldElement51:
+    def __add__(self, other: FieldElement51) -> FieldElement51:
         var a0 = self.limbs[0] + other.limbs[0]
         var a1 = self.limbs[1] + other.limbs[1]
         var a2 = self.limbs[2] + other.limbs[2]
@@ -165,7 +165,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return FieldElement51(a0, a1, a2, a3, a4)
 
     @always_inline
-    fn __sub__(self, other: FieldElement51) -> FieldElement51:
+    def __sub__(self, other: FieldElement51) -> FieldElement51:
         var l = SIMD[DType.uint64, 5]()
         # Add 2*p to ensure results are positive
         # p_limbs = [2^51-19, 2^51-1, 2^51-1, 2^51-1, 2^51-1]
@@ -178,7 +178,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return self._carry_reduce_from_limbs(l)
 
     @always_inline
-    fn _carry_reduce_from_limbs(self, limbs: SIMD[DType.uint64, 5]) -> FieldElement51:
+    def _carry_reduce_from_limbs(self, limbs: SIMD[DType.uint64, 5]) -> FieldElement51:
         var l = limbs
         var MASK = UInt64(0x7FFFFFFFFFFFF)
         
@@ -198,7 +198,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return FieldElement51(l)
 
     @always_inline
-    fn __mul__(self, other: FieldElement51) -> FieldElement51:
+    def __mul__(self, other: FieldElement51) -> FieldElement51:
         var a = self.limbs
         var b = other.limbs
 
@@ -227,7 +227,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return self._carry_reduce(c0, c1, c2, c3, c4)
 
     @always_inline
-    fn mul_u32(self, other: UInt32) -> FieldElement51:
+    def mul_u32(self, other: UInt32) -> FieldElement51:
         var a = self.limbs
         var b = UInt128(other)
         
@@ -240,7 +240,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return self._carry_reduce(c0, c1, c2, c3, c4)
 
     @always_inline
-    fn square(self) -> FieldElement51:
+    def square(self) -> FieldElement51:
         var a = self.limbs
         var a0 = UInt128(a[0])
         var a1 = UInt128(a[1])
@@ -260,7 +260,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return self._carry_reduce(c0, c1, c2, c3, c4)
 
     @always_inline
-    fn invert(self) -> FieldElement51:
+    def invert(self) -> FieldElement51:
         var t0 = self.square()
         var t1 = t0.pow2k(2)
         var t2 = self * t1
@@ -284,14 +284,14 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         var t20 = t19.pow2k(5)
         return t20 * t3
 
-    fn pow2k(self, k: Int) -> FieldElement51:
+    def pow2k(self, k: Int) -> FieldElement51:
         var res = self
         for _ in range(k):
             res = res.square()
         return res
 
     @always_inline
-    fn _carry_reduce(self, var c0: UInt128, var c1: UInt128, var c2: UInt128, var c3: UInt128, var c4: UInt128) -> FieldElement51:
+    def _carry_reduce(self, var c0: UInt128, var c1: UInt128, var c2: UInt128, var c3: UInt128, var c4: UInt128) -> FieldElement51:
         var MASK = UInt64(0x7FFFFFFFFFFFF)
         
         c1 += c0 >> 51
@@ -334,7 +334,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return raw._reduce(raw.limbs)
 
     @always_inline
-    fn _reduce(self, limbs: SIMD[DType.uint64, 5]) -> FieldElement51:
+    def _reduce(self, limbs: SIMD[DType.uint64, 5]) -> FieldElement51:
         var l = limbs
         var MASK = UInt64(0x7FFFFFFFFFFFF)
         for _ in range(5):
@@ -346,8 +346,8 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return FieldElement51(l)
 
     @staticmethod
-    fn from_bytes(bytes: List[UInt8]) -> FieldElement51:
-        fn load8(ptr: UnsafePointer[UInt8, _]) -> UInt64:
+    def from_bytes(bytes: List[UInt8]) -> FieldElement51:
+        def load8(ptr: UnsafePointer[UInt8, _]) -> UInt64:
             return ptr.bitcast[UInt64]().load()
 
         var ptr = bytes.unsafe_ptr()
@@ -361,7 +361,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         
         return FieldElement51(l0, l1, l2, l3, l4)
 
-    fn to_bytes(self) -> List[UInt8]:
+    def to_bytes(self) -> List[UInt8]:
         var res = self._reduce(self.limbs)
         var limbs = res.limbs
         

@@ -20,7 +20,7 @@ struct AESConfig:
     var block_size: Int
     var key_size: Int
 
-    fn __init__(out self):
+    def __init__(out self):
         self.num_rounds = 10
         self.block_size = 16
         self.key_size = 16
@@ -30,15 +30,15 @@ comptime ROUNDS_128: Int = 10
 comptime BLOCK_SIZE: Int = 16
 
 @always_inline
-fn gf_mul2(a: UInt8) -> UInt8:
+def gf_mul2(a: UInt8) -> UInt8:
     return (a << UInt8(1)) ^ (UInt8(0x1b) if (a & 0x80) != 0 else UInt8(0))
 
 @always_inline
-fn gf_mul3(a: UInt8) -> UInt8:
+def gf_mul3(a: UInt8) -> UInt8:
     return a ^ gf_mul2(a)
 
 @always_inline
-fn cpu_aes_encrypt(
+def cpu_aes_encrypt(
     pt_bytes: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
     rounds: Int = ROUNDS_128
@@ -286,7 +286,7 @@ fn cpu_aes_encrypt(
 
 
 @always_inline
-fn cpu_aes_ecb_kernel(
+def cpu_aes_ecb_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
@@ -312,7 +312,7 @@ fn cpu_aes_ecb_kernel(
 
 
 @always_inline
-fn cpu_aes_cbc_kernel(
+def cpu_aes_cbc_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
@@ -361,7 +361,7 @@ fn cpu_aes_cbc_kernel(
 
 
 @always_inline
-fn cpu_aes_ctr_kernel(
+def cpu_aes_ctr_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
@@ -401,14 +401,14 @@ fn cpu_aes_ctr_kernel(
         i += 1
 
 
-fn cpu_gf_mul2_xts(val: UInt8) -> UInt8:
+def cpu_gf_mul2_xts(val: UInt8) -> UInt8:
     var result = val << 1
     if (val & 0x80) != 0:
         result = result ^ 0x87
     return result
 
 
-fn cpu_compute_xts_tweak_list(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> List[UInt8]:
+def cpu_compute_xts_tweak_list(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> List[UInt8]:
     var result = List[UInt8](capacity=16)
     for i in range(16):
         result.append(tweak_ptr.load(i))
@@ -425,7 +425,7 @@ fn cpu_compute_xts_tweak_list(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> 
 
 
 @always_inline
-fn cpu_aes_xts_kernel(
+def cpu_aes_xts_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys1: UnsafePointer[UInt32, MutAnyOrigin],
@@ -469,11 +469,11 @@ fn cpu_aes_xts_kernel(
 
 
 @always_inline
-fn sbox_lookup(idx: UInt8) -> UInt8:
+def sbox_lookup(idx: UInt8) -> UInt8:
     return SBOX[idx]
 
 @always_inline
-fn sub_word(w: UInt32) -> UInt32:
+def sub_word(w: UInt32) -> UInt32:
     var b0 = UInt32(sbox_lookup(UInt8((w >> 24) & 0xff)))
     var b1 = UInt32(sbox_lookup(UInt8((w >> 16) & 0xff)))
     var b2 = UInt32(sbox_lookup(UInt8((w >> 8) & 0xff)))
@@ -521,32 +521,32 @@ comptime RCON: StaticTuple[UInt8, 11] = StaticTuple[UInt8, 11](
 )
 
 
-fn ttable0(x: UInt8) -> UInt32:
+def ttable0(x: UInt8) -> UInt32:
     var s = SBOX[x]
     var m2 = gf_mul2(s)
     var m3 = gf_mul3(s)
     return (UInt32(m2) << 24) | (UInt32(s) << 16) | (UInt32(s) << 8) | UInt32(m3)
 
-fn ttable1(x: UInt8) -> UInt32:
+def ttable1(x: UInt8) -> UInt32:
     var s = SBOX[x]
     var m2 = gf_mul2(s)
     var m3 = gf_mul3(s)
     return (UInt32(m3) << 24) | (UInt32(m2) << 16) | (UInt32(s) << 8) | UInt32(s)
 
-fn ttable2(x: UInt8) -> UInt32:
+def ttable2(x: UInt8) -> UInt32:
     var s = SBOX[x]
     var m2 = gf_mul2(s)
     var m3 = gf_mul3(s)
     return (UInt32(s) << 24) | (UInt32(m3) << 16) | (UInt32(m2) << 8) | UInt32(s)
 
-fn ttable3(x: UInt8) -> UInt32:
+def ttable3(x: UInt8) -> UInt32:
     var s = SBOX[x]
     var m2 = gf_mul2(s)
     var m3 = gf_mul3(s)
     return (UInt32(s) << 24) | (UInt32(s) << 16) | (UInt32(m3) << 8) | UInt32(m2)
 
 
-fn expand_key_128(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
+def expand_key_128(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
     var w = alloc[UInt32](44)
     
     for i in range(4):
@@ -564,7 +564,7 @@ fn expand_key_128(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> Unsaf
     return w
 
 
-fn expand_key_192(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
+def expand_key_192(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
     var w = alloc[UInt32](52)
     
     for i in range(6):
@@ -582,7 +582,7 @@ fn expand_key_192(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> Unsaf
     return w
 
 
-fn expand_key_256(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
+def expand_key_256(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
     var w = alloc[UInt32](60)
     
     for i in range(8):
@@ -606,7 +606,7 @@ struct AESKey:
     var _data: StackBuffer[UInt8, 16]
     var _round_keys: StackBuffer[UInt32, 44]
     
-    fn __init__(out self, key: StaticTuple[UInt8, 16]) raises:
+    def __init__(out self, key: StaticTuple[UInt8, 16]) raises:
         self._data = StackBuffer[UInt8, 16]()
         for i in range(16):
             self._data.ptr().store(i, key[i])
@@ -616,8 +616,8 @@ struct AESKey:
             self._round_keys[i] = rk_ptr[i]
         rk_ptr.free()
     
-    fn __del__(deinit self):
+    def __del__(deinit self):
         pass
     
-    fn round_keys(self) -> UnsafePointer[UInt32, MutAnyOrigin]:
+    def round_keys(mut self) -> UnsafePointer[UInt32, MutAnyOrigin]:
         return self._round_keys.ptr()

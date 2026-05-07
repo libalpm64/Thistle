@@ -3,7 +3,7 @@ from std.memory import UnsafePointer
 from std.collections import List
 from std.python import Python
 
-fn _get_random_lib_path() raises -> String:
+def _get_random_lib_path() raises -> String:
     var os_mod = Python.import_module("os")
     var sys_mod = Python.import_module("sys")
     
@@ -24,13 +24,13 @@ fn _get_random_lib_path() raises -> String:
     return lib_path
 
 
-fn random_fill(buf: UnsafePointer[UInt8, MutAnyOrigin], len: Int) raises:
+def random_fill(buf: UnsafePointer[UInt8, MutAnyOrigin], len: Int) raises:
     var lib = OwnedDLHandle(_get_random_lib_path())
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], Int)]("randombytes")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], Int)]("randombytes")
     func(buf, len)
 
 
-fn random_bytes(n: Int) raises -> List[UInt8]:
+def random_bytes(n: Int) raises -> List[UInt8]:
     var result = List[UInt8](capacity=n)
     for i in range(n):
         result.append(0)

@@ -12,7 +12,7 @@ from std.memory.unsafe_pointer import UnsafePointer
 # This is a test file this is only for testing purposes.
 # This file will be removed later on.
 
-fn byte_to_hex(b: UInt8) -> String:
+def byte_to_hex(b: UInt8) -> String:
     var hi = Int(b >> 4)
     var lo = Int(b & 0xF)
     return chr(48 + hi if hi < 10 else 87 + hi) + chr(48 + lo if lo < 10 else 87 + lo)
@@ -24,7 +24,7 @@ struct TestResult(Copyable, Movable):
     var failures: List[String]
 
 
-fn hex_char_to_val(c: Int) -> UInt8:
+def hex_char_to_val(c: Int) -> UInt8:
     if c >= 48 and c <= 57:
         return UInt8(c - 48)
     if c >= 97 and c <= 102:
@@ -34,7 +34,7 @@ fn hex_char_to_val(c: Int) -> UInt8:
     return 0
 
 
-fn hex_to_bytes(hex_str: String) -> List[UInt8]:
+def hex_to_bytes(hex_str: String) -> List[UInt8]:
     var result = List[UInt8]()
     var hex_bytes = hex_str.as_bytes()
     var i = 0
@@ -48,7 +48,7 @@ fn hex_to_bytes(hex_str: String) -> List[UInt8]:
     return result^
 
 
-fn load_json(path: String, py: PythonObject) raises -> PythonObject:
+def load_json(path: String, py: PythonObject) raises -> PythonObject:
     var json = Python.import_module("json")
     var file = open(path, "r")
     var content = file.read()
@@ -56,7 +56,7 @@ fn load_json(path: String, py: PythonObject) raises -> PythonObject:
     return json.loads(content)
 
 
-fn print_result(name: String, result: TestResult):
+def print_result(name: String, result: TestResult):
     if result.failed == 0:
         print("Testing " + name + " [pass] (" + String(result.passed) + " vectors)")
     else:
@@ -65,7 +65,7 @@ fn print_result(name: String, result: TestResult):
             print("  - " + result.failures[i])
 
 
-fn test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> TestResult:
+def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> TestResult:
     var passed = 0
     var failed = 0
     var failures = List[String]()
@@ -160,7 +160,7 @@ fn test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> TestR
     return TestResult(passed, failed, failures^)
 
 
-fn test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
+def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
     var passed = 0
     var failed = 0
     var failures = List[String]()
@@ -254,7 +254,7 @@ fn test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
         elif "CBC" in mode:
             var iv_ptr = alloc[UInt8](16)
             var iv_hex = String(tv.get("iv", PythonObject()))
-            if len(iv_hex) == 0:
+            if iv_hex.byte_length() == 0:
                 for j in range(16):
                     iv_ptr[j] = 0
             else:
@@ -278,7 +278,7 @@ fn test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
         elif "CTR" in mode:
             var iv_hex = String(tv.get("iv", PythonObject()))
             var nonce_ptr = alloc[UInt8](16)
-            if len(iv_hex) == 0:
+            if iv_hex.byte_length() == 0:
                 for j in range(16):
                     nonce_ptr[j] = 0
             else:
@@ -302,7 +302,7 @@ fn test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
         elif "GCM" in mode:
             var nonce_hex = String(tv.get("nonce", PythonObject()))
             var nonce_ptr = alloc[UInt8](12)
-            if len(nonce_hex) == 0:
+            if nonce_hex.byte_length() == 0:
                 for j in range(12):
                     nonce_ptr[j] = 0
             else:
@@ -326,7 +326,7 @@ fn test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
         elif "XTS" in mode:
             var tweak_hex = String(tv.get("tweak", PythonObject()))
             var tweak_ptr = alloc[UInt8](16)
-            if len(tweak_hex) == 0:
+            if tweak_hex.byte_length() == 0:
                 for j in range(16):
                     tweak_ptr[j] = 0
             else:

@@ -2,7 +2,7 @@
 from std.collections import List
 from thistle.ed25519 import ed25519_verify
 
-fn hex_to_bytes(s: String) -> List[UInt8]:
+def hex_to_bytes(s: String) -> List[UInt8]:
     var r = List[UInt8]()
     var b = s.as_bytes()
     for i in range(0, len(s), 2):
@@ -11,7 +11,7 @@ fn hex_to_bytes(s: String) -> List[UInt8]:
         r.append((hi << 4) | lo)
     return r^
 
-fn main() raises:
+def main() raises:
     var ok_count = 0
     var fail_count = 0
 

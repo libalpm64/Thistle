@@ -7,7 +7,7 @@ from std.collections import List
 from std.python import Python
 
 
-fn _get_lib_path(lib_name: String) raises -> String:
+def _get_lib_path(lib_name: String) raises -> String:
     var os_mod = Python.import_module("os")
     var sys_mod = Python.import_module("sys")
     
@@ -64,26 +64,26 @@ comptime MLD_PREHASH_SHAKE_128: Int = 11
 comptime MLD_PREHASH_SHAKE_256: Int = 12
 
 
-fn mldsa44_keypair(
+def mldsa44_keypair(
     pk: UnsafePointer[UInt8, MutAnyOrigin],
     sk: UnsafePointer[UInt8, MutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa44"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_keypair")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_keypair")
     return func(pk, sk)
 
 
-fn mldsa44_keypair_internal(
+def mldsa44_keypair_internal(
     pk: UnsafePointer[UInt8, MutAnyOrigin],
     sk: UnsafePointer[UInt8, MutAnyOrigin],
     seed: UnsafePointer[UInt8, MutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa44"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_keypair_internal")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_keypair_internal")
     return func(pk, sk, seed)
 
 
-fn mldsa44_signature(
+def mldsa44_signature(
     sig: UnsafePointer[UInt8, MutAnyOrigin],
     siglen: UnsafePointer[UInt64, MutAnyOrigin],
     msg: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -93,11 +93,11 @@ fn mldsa44_signature(
     sk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa44"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_signature")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_signature")
     return func(sig, siglen, msg, msg_len, ctx, ctx_len, sk)
 
 
-fn mldsa44_signature_internal(
+def mldsa44_signature_internal(
     sig: UnsafePointer[UInt8, MutAnyOrigin],
     siglen: UnsafePointer[UInt64, MutAnyOrigin],
     msg: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -109,11 +109,11 @@ fn mldsa44_signature_internal(
     externalmu: Int
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa44"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int) -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_signature_internal")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_signature_internal")
     return func(sig, siglen, msg, msg_len, pre, pre_len, rnd, sk, externalmu)
 
 
-fn mldsa44_signature_pre_hash_internal(
+def mldsa44_signature_pre_hash_internal(
     sig: UnsafePointer[UInt8, MutAnyOrigin],
     siglen: UnsafePointer[UInt64, MutAnyOrigin],
     ph: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -125,11 +125,11 @@ fn mldsa44_signature_pre_hash_internal(
     hashalg: Int
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa44"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int) -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_signature_pre_hash_internal")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_signature_pre_hash_internal")
     return func(sig, siglen, ph, ph_len, ctx, ctx_len, rnd, sk, hashalg)
 
 
-fn mldsa44_signature_pre_hash_shake256(
+def mldsa44_signature_pre_hash_shake256(
     sig: UnsafePointer[UInt8, MutAnyOrigin],
     siglen: UnsafePointer[UInt64, MutAnyOrigin],
     msg: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -140,11 +140,11 @@ fn mldsa44_signature_pre_hash_shake256(
     sk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa44"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_signature_pre_hash_shake256")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_signature_pre_hash_shake256")
     return func(sig, siglen, msg, msg_len, ctx, ctx_len, rnd, sk)
 
 
-fn mldsa44_verify(
+def mldsa44_verify(
     sig: UnsafePointer[UInt8, ImmutAnyOrigin],
     sig_len: Int,
     msg: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -154,11 +154,11 @@ fn mldsa44_verify(
     pk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa44"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_verify")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_verify")
     return func(sig, sig_len, msg, msg_len, ctx, ctx_len, pk)
 
 
-fn mldsa44_verify_internal(
+def mldsa44_verify_internal(
     sig: UnsafePointer[UInt8, ImmutAnyOrigin],
     sig_len: Int,
     msg: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -169,11 +169,11 @@ fn mldsa44_verify_internal(
     externalmu: Int
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa44"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int) -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_verify_internal")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_verify_internal")
     return func(sig, sig_len, msg, msg_len, pre, pre_len, pk, externalmu)
 
 
-fn mldsa44_verify_pre_hash_internal(
+def mldsa44_verify_pre_hash_internal(
     sig: UnsafePointer[UInt8, ImmutAnyOrigin],
     sig_len: Int,
     ph: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -184,41 +184,41 @@ fn mldsa44_verify_pre_hash_internal(
     hashalg: Int
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa44"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int) -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_verify_pre_hash_internal")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_verify_pre_hash_internal")
     return func(sig, sig_len, ph, ph_len, ctx, ctx_len, pk, hashalg)
 
 
-fn mldsa44_verify_extmu(
+def mldsa44_verify_extmu(
     sig: UnsafePointer[UInt8, ImmutAnyOrigin],
     sig_len: Int,
     mu: UnsafePointer[UInt8, ImmutAnyOrigin],
     pk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa44"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_verify_extmu")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA44_verify_extmu")
     return func(sig, sig_len, mu, pk)
 
 
-fn mldsa65_keypair(
+def mldsa65_keypair(
     pk: UnsafePointer[UInt8, MutAnyOrigin],
     sk: UnsafePointer[UInt8, MutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa65"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_keypair")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_keypair")
     return func(pk, sk)
 
 
-fn mldsa65_keypair_internal(
+def mldsa65_keypair_internal(
     pk: UnsafePointer[UInt8, MutAnyOrigin],
     sk: UnsafePointer[UInt8, MutAnyOrigin],
     seed: UnsafePointer[UInt8, MutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa65"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_keypair_internal")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_keypair_internal")
     return func(pk, sk, seed)
 
 
-fn mldsa65_signature(
+def mldsa65_signature(
     sig: UnsafePointer[UInt8, MutAnyOrigin],
     siglen: UnsafePointer[UInt64, MutAnyOrigin],
     msg: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -228,11 +228,11 @@ fn mldsa65_signature(
     sk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa65"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_signature")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_signature")
     return func(sig, siglen, msg, msg_len, ctx, ctx_len, sk)
 
 
-fn mldsa65_signature_internal(
+def mldsa65_signature_internal(
     sig: UnsafePointer[UInt8, MutAnyOrigin],
     siglen: UnsafePointer[UInt64, MutAnyOrigin],
     msg: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -244,11 +244,11 @@ fn mldsa65_signature_internal(
     externalmu: Int
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa65"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int) -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_signature_internal")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_signature_internal")
     return func(sig, siglen, msg, msg_len, pre, pre_len, rnd, sk, externalmu)
 
 
-fn mldsa65_signature_pre_hash_internal(
+def mldsa65_signature_pre_hash_internal(
     sig: UnsafePointer[UInt8, MutAnyOrigin],
     siglen: UnsafePointer[UInt64, MutAnyOrigin],
     ph: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -260,11 +260,11 @@ fn mldsa65_signature_pre_hash_internal(
     hashalg: Int
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa65"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int) -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_signature_pre_hash_internal")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_signature_pre_hash_internal")
     return func(sig, siglen, ph, ph_len, ctx, ctx_len, rnd, sk, hashalg)
 
 
-fn mldsa65_signature_pre_hash_shake256(
+def mldsa65_signature_pre_hash_shake256(
     sig: UnsafePointer[UInt8, MutAnyOrigin],
     siglen: UnsafePointer[UInt64, MutAnyOrigin],
     msg: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -275,11 +275,11 @@ fn mldsa65_signature_pre_hash_shake256(
     sk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa65"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_signature_pre_hash_shake256")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_signature_pre_hash_shake256")
     return func(sig, siglen, msg, msg_len, ctx, ctx_len, rnd, sk)
 
 
-fn mldsa65_verify(
+def mldsa65_verify(
     sig: UnsafePointer[UInt8, ImmutAnyOrigin],
     sig_len: Int,
     msg: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -289,11 +289,11 @@ fn mldsa65_verify(
     pk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa65"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_verify")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_verify")
     return func(sig, sig_len, msg, msg_len, ctx, ctx_len, pk)
 
 
-fn mldsa65_verify_internal(
+def mldsa65_verify_internal(
     sig: UnsafePointer[UInt8, ImmutAnyOrigin],
     sig_len: Int,
     msg: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -304,11 +304,11 @@ fn mldsa65_verify_internal(
     externalmu: Int
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa65"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int) -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_verify_internal")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_verify_internal")
     return func(sig, sig_len, msg, msg_len, pre, pre_len, pk, externalmu)
 
 
-fn mldsa65_verify_pre_hash_internal(
+def mldsa65_verify_pre_hash_internal(
     sig: UnsafePointer[UInt8, ImmutAnyOrigin],
     sig_len: Int,
     ph: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -319,41 +319,41 @@ fn mldsa65_verify_pre_hash_internal(
     hashalg: Int
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa65"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int) -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_verify_pre_hash_internal")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_verify_pre_hash_internal")
     return func(sig, sig_len, ph, ph_len, ctx, ctx_len, pk, hashalg)
 
 
-fn mldsa65_verify_extmu(
+def mldsa65_verify_extmu(
     sig: UnsafePointer[UInt8, ImmutAnyOrigin],
     sig_len: Int,
     mu: UnsafePointer[UInt8, ImmutAnyOrigin],
     pk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa65"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_verify_extmu")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA65_verify_extmu")
     return func(sig, sig_len, mu, pk)
 
 
-fn mldsa87_keypair(
+def mldsa87_keypair(
     pk: UnsafePointer[UInt8, MutAnyOrigin],
     sk: UnsafePointer[UInt8, MutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa87"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_keypair")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_keypair")
     return func(pk, sk)
 
 
-fn mldsa87_keypair_internal(
+def mldsa87_keypair_internal(
     pk: UnsafePointer[UInt8, MutAnyOrigin],
     sk: UnsafePointer[UInt8, MutAnyOrigin],
     seed: UnsafePointer[UInt8, MutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa87"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_keypair_internal")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt8, MutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_keypair_internal")
     return func(pk, sk, seed)
 
 
-fn mldsa87_signature(
+def mldsa87_signature(
     sig: UnsafePointer[UInt8, MutAnyOrigin],
     siglen: UnsafePointer[UInt64, MutAnyOrigin],
     msg: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -363,11 +363,11 @@ fn mldsa87_signature(
     sk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa87"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_signature")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_signature")
     return func(sig, siglen, msg, msg_len, ctx, ctx_len, sk)
 
 
-fn mldsa87_signature_internal(
+def mldsa87_signature_internal(
     sig: UnsafePointer[UInt8, MutAnyOrigin],
     siglen: UnsafePointer[UInt64, MutAnyOrigin],
     msg: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -379,11 +379,11 @@ fn mldsa87_signature_internal(
     externalmu: Int
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa87"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int) -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_signature_internal")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_signature_internal")
     return func(sig, siglen, msg, msg_len, pre, pre_len, rnd, sk, externalmu)
 
 
-fn mldsa87_signature_pre_hash_internal(
+def mldsa87_signature_pre_hash_internal(
     sig: UnsafePointer[UInt8, MutAnyOrigin],
     siglen: UnsafePointer[UInt64, MutAnyOrigin],
     ph: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -395,11 +395,11 @@ fn mldsa87_signature_pre_hash_internal(
     hashalg: Int
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa87"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int) -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_signature_pre_hash_internal")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_signature_pre_hash_internal")
     return func(sig, siglen, ph, ph_len, ctx, ctx_len, rnd, sk, hashalg)
 
 
-fn mldsa87_signature_pre_hash_shake256(
+def mldsa87_signature_pre_hash_shake256(
     sig: UnsafePointer[UInt8, MutAnyOrigin],
     siglen: UnsafePointer[UInt64, MutAnyOrigin],
     msg: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -410,11 +410,11 @@ fn mldsa87_signature_pre_hash_shake256(
     sk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa87"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_signature_pre_hash_shake256")
+    var func = lib.get_function[def(UnsafePointer[UInt8, MutAnyOrigin], UnsafePointer[UInt64, MutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_signature_pre_hash_shake256")
     return func(sig, siglen, msg, msg_len, ctx, ctx_len, rnd, sk)
 
 
-fn mldsa87_verify(
+def mldsa87_verify(
     sig: UnsafePointer[UInt8, ImmutAnyOrigin],
     sig_len: Int,
     msg: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -424,11 +424,11 @@ fn mldsa87_verify(
     pk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa87"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_verify")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_verify")
     return func(sig, sig_len, msg, msg_len, ctx, ctx_len, pk)
 
 
-fn mldsa87_verify_internal(
+def mldsa87_verify_internal(
     sig: UnsafePointer[UInt8, ImmutAnyOrigin],
     sig_len: Int,
     msg: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -439,11 +439,11 @@ fn mldsa87_verify_internal(
     externalmu: Int
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa87"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int) -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_verify_internal")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_verify_internal")
     return func(sig, sig_len, msg, msg_len, pre, pre_len, pk, externalmu)
 
 
-fn mldsa87_verify_pre_hash_internal(
+def mldsa87_verify_pre_hash_internal(
     sig: UnsafePointer[UInt8, ImmutAnyOrigin],
     sig_len: Int,
     ph: UnsafePointer[UInt8, ImmutAnyOrigin],
@@ -454,29 +454,29 @@ fn mldsa87_verify_pre_hash_internal(
     hashalg: Int
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa87"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int) -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_verify_pre_hash_internal")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], Int) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_verify_pre_hash_internal")
     return func(sig, sig_len, ph, ph_len, ctx, ctx_len, pk, hashalg)
 
 
-fn mldsa87_verify_extmu(
+def mldsa87_verify_extmu(
     sig: UnsafePointer[UInt8, ImmutAnyOrigin],
     sig_len: Int,
     mu: UnsafePointer[UInt8, ImmutAnyOrigin],
     pk: UnsafePointer[UInt8, ImmutAnyOrigin]
 ) raises -> Int:
     var lib = OwnedDLHandle(_get_lib_path("libmldsa87"))
-    var func = lib.get_function[fn(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_verify_extmu")
+    var func = lib.get_function[def(UnsafePointer[UInt8, ImmutAnyOrigin], Int, UnsafePointer[UInt8, ImmutAnyOrigin], UnsafePointer[UInt8, ImmutAnyOrigin]) thin abi("C") -> Int]("PQCP_MLDSA_NATIVE_MLDSA87_verify_extmu")
     return func(sig, sig_len, mu, pk)
 
 
-fn nibble_to_hex_char(n: UInt8) -> UInt8:
+def nibble_to_hex_char(n: UInt8) -> UInt8:
     if n < 10:
         return n + 48
     else:
         return n + 55
 
 
-fn bytes_to_hex_str(data: List[UInt8]) -> String:
+def bytes_to_hex_str(data: List[UInt8]) -> String:
     var result = String()
     for i in range(len(data)):
         var b = data[i]

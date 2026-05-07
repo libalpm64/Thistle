@@ -62,7 +62,7 @@ comptime POW2_256_LIMBS = SIMD[DType.uint64, 5](
     0x0000099411b7c309,
 )
 
-fn _pack_limbs(limbs: SIMD[DType.uint64, 5]) -> List[UInt8]:
+def _pack_limbs(limbs: SIMD[DType.uint64, 5]) -> List[UInt8]:
     var words = SIMD[DType.uint64, 4](0, 0, 0, 0)
     words[0] = limbs[0] | (limbs[1] << UInt64(52))
     words[1] = (limbs[1] >> UInt64(12)) | (limbs[2] << UInt64(40))
@@ -74,7 +74,7 @@ fn _pack_limbs(limbs: SIMD[DType.uint64, 5]) -> List[UInt8]:
             out.append(UInt8(words[i] >> UInt64(j * 8)) & 0xFF)
     return out^
 
-fn bytes_to_hex(bytes: List[UInt8]) -> String:
+def bytes_to_hex(bytes: List[UInt8]) -> String:
     var r = String(capacity=len(bytes)*2)
     for i in range(len(bytes)):
         var hi = Int(bytes[i] >> 4)
@@ -83,7 +83,7 @@ fn bytes_to_hex(bytes: List[UInt8]) -> String:
         r += chr(lo + 48 if lo < 10 else lo - 10 + 97)
     return r
 
-fn _unpack_limbs(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 5]:
+def _unpack_limbs(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 5]:
     var words = SIMD[DType.uint64, 4](0, 0, 0, 0)
     for i in range(4):
         for j in range(8):
@@ -98,7 +98,7 @@ fn _unpack_limbs(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 5]:
     s[4] = (words[3] >> UInt64(16)) & TOP_MASK
     return s
 
-fn _from_512_raw(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 5]:
+def _from_512_raw(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 5]:
     var ptr = bytes.unsafe_ptr()
     var lo_span = Span[UInt8, ...](ptr=ptr, length=32)
     var hi_span = Span[UInt8, ...](ptr=ptr + 32, length=32)
@@ -109,14 +109,14 @@ fn _from_512_raw(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 5]:
     return res.limbs
 
 @always_inline
-fn ed25519_d() -> FieldElement51:
+def ed25519_d() -> FieldElement51:
     return FieldElement51(ED25519_D_LIMBS)
 
 @always_inline
-fn ed25519_d2() -> FieldElement51:
+def ed25519_d2() -> FieldElement51:
     return ed25519_d() * FieldElement51(2, 0, 0, 0, 0)
 
-fn ed25519_base_point() -> EdwardsPoint:
+def ed25519_base_point() -> EdwardsPoint:
     var x_bytes = List[UInt8](capacity=32)
     x_bytes.append(0x1a); x_bytes.append(0xd5); x_bytes.append(0x25); x_bytes.append(0x8f)
     x_bytes.append(0x60); x_bytes.append(0x2d); x_bytes.append(0x56); x_bytes.append(0xc9)
@@ -149,36 +149,36 @@ struct Scalar(Movable, Copyable, ImplicitlyCopyable):
     var limbs: SIMD[DType.uint64, 5]
 
     @always_inline
-    fn __init__(out self):
+    def __init__(out self):
         self.limbs = SIMD[DType.uint64, 5](0, 0, 0, 0, 0)
 
     @always_inline
-    fn __init__(out self, limbs: SIMD[DType.uint64, 5]):
+    def __init__(out self, limbs: SIMD[DType.uint64, 5]):
         self.limbs = limbs
 
     @always_inline
-    fn __copyinit__(out self, copy: Self):
+    def __copyinit__(out self, copy: Self):
         self.limbs = copy.limbs
 
     @always_inline
-    fn __moveinit__(out self, deinit take: Self):
+    def __moveinit__(out self, deinit take: Self):
         self.limbs = take.limbs
 
     @staticmethod
-    fn from_bytes(bytes: Span[UInt8, ...]) -> Scalar:
+    def from_bytes(bytes: Span[UInt8, ...]) -> Scalar:
         var raw = _unpack_limbs(bytes)
         return Scalar(raw)._montgomery_mul(Scalar(RR_LIMBS))
 
-    fn to_bytes(self) -> List[UInt8]:
+    def to_bytes(self) -> List[UInt8]:
         var raw = self._montgomery_mul(Scalar(SIMD[DType.uint64, 5](1, 0, 0, 0, 0)))
         return _pack_limbs(raw.limbs)
 
     @staticmethod
-    fn from_bytes_wide(bytes: Span[UInt8, ...]) -> Scalar:
+    def from_bytes_wide(bytes: Span[UInt8, ...]) -> Scalar:
         var limbs = _from_512_raw(bytes)
         return Scalar(limbs)
 
-    fn __add__(self, other: Scalar) -> Scalar:
+    def __add__(self, other: Scalar) -> Scalar:
         comptime MASK = (UInt64(1) << 52) - 1
         var sum = SIMD[DType.uint64, 5](0, 0, 0, 0, 0)
         var carry: UInt64 = 0
@@ -187,17 +187,17 @@ struct Scalar(Movable, Copyable, ImplicitlyCopyable):
             sum[i] = carry & MASK
         return Scalar(sum)._sub(Scalar(L_LIMBS))
 
-    fn __sub__(self, other: Scalar) -> Scalar:
+    def __sub__(self, other: Scalar) -> Scalar:
         return self._sub(other)
 
-    fn __neg__(self) -> Scalar:
+    def __neg__(self) -> Scalar:
         return Scalar(L_LIMBS)._sub(self)
 
-    fn __mul__(self, other: Scalar) -> Scalar:
+    def __mul__(self, other: Scalar) -> Scalar:
         return self._montgomery_mul(other)
 
     @staticmethod
-    fn _montgomery_mul_raw(a: SIMD[DType.uint64, 5], b: SIMD[DType.uint64, 5]) -> SIMD[DType.uint64, 5]:
+    def _montgomery_mul_raw(a: SIMD[DType.uint64, 5], b: SIMD[DType.uint64, 5]) -> SIMD[DType.uint64, 5]:
         var z = StackInlineArray[UInt128, 9](uninitialized=True)
         for i in range(9): z[i] = 0
         for i in range(5):
@@ -222,11 +222,11 @@ struct Scalar(Movable, Copyable, ImplicitlyCopyable):
         r[4] = carry.cast[DType.uint64]()
         return r
 
-    fn _montgomery_mul(self, other: Scalar) -> Scalar:
+    def _montgomery_mul(self, other: Scalar) -> Scalar:
         var r = Scalar._montgomery_mul_raw(self.limbs, other.limbs)
         return Scalar(r)._sub(Scalar(L_LIMBS))
 
-    fn _sub(self, other: Scalar) -> Scalar:
+    def _sub(self, other: Scalar) -> Scalar:
         comptime MASK = (UInt64(1) << 52) - 1
         var diff = SIMD[DType.uint64, 5](0, 0, 0, 0, 0)
         var borrow: UInt64 = 0
@@ -253,26 +253,26 @@ struct EdwardsPoint(Movable, Copyable, ImplicitlyCopyable):
     var T: FieldElement51
 
     @always_inline
-    fn __init__(out self):
+    def __init__(out self):
         self.X = FieldElement51.ZERO()
         self.Y = FieldElement51.ONE()
         self.Z = FieldElement51.ONE()
         self.T = FieldElement51.ZERO()
 
     @always_inline
-    fn __init__(out self, X: FieldElement51, Y: FieldElement51, Z: FieldElement51, T: FieldElement51):
+    def __init__(out self, X: FieldElement51, Y: FieldElement51, Z: FieldElement51, T: FieldElement51):
         self.X = X; self.Y = Y; self.Z = Z; self.T = T
 
     @always_inline
-    fn __copyinit__(out self, copy: Self):
+    def __copyinit__(out self, copy: Self):
         self.X = copy.X; self.Y = copy.Y; self.Z = copy.Z; self.T = copy.T
 
     @always_inline
-    fn __moveinit__(out self, deinit take: Self):
+    def __moveinit__(out self, deinit take: Self):
         self.X = take.X^; self.Y = take.Y^; self.Z = take.Z^; self.T = take.T^
 
 
-fn edwards_add(p: EdwardsPoint, q: EdwardsPoint) -> EdwardsPoint:
+def edwards_add(p: EdwardsPoint, q: EdwardsPoint) -> EdwardsPoint:
     var d2 = FieldElement51(ED25519_D2_LIMBS)
     var A = (p.Y - p.X) * (q.Y - q.X)
     var B = (p.Y + p.X) * (q.Y + q.X)
@@ -284,7 +284,7 @@ fn edwards_add(p: EdwardsPoint, q: EdwardsPoint) -> EdwardsPoint:
     var H = B + A
     return EdwardsPoint(E * F, G * H, F * G, E * H)
 
-fn edwards_double(p: EdwardsPoint) -> EdwardsPoint:
+def edwards_double(p: EdwardsPoint) -> EdwardsPoint:
     var A = p.X.square()
     var B = p.Y.square()
     var C = p.Z.square() * FieldElement51(2, 0, 0, 0, 0)
@@ -294,14 +294,14 @@ fn edwards_double(p: EdwardsPoint) -> EdwardsPoint:
     var F = C + G
     return EdwardsPoint(E * F, G * H, F * G, E * H)
 
-fn edwards_negate(p: EdwardsPoint) -> EdwardsPoint:
+def edwards_negate(p: EdwardsPoint) -> EdwardsPoint:
     return EdwardsPoint(FieldElement51.ZERO() - p.X, p.Y, p.Z, FieldElement51.ZERO() - p.T)
 
 # stack aliasing bug on ARM64 that occurs when ed25519_d2()
 # is called inside a loop that also modifies EdwardsPoint values.
 # COMPILER-BUG (will never sort)
 @no_inline
-fn _edwards_add_d2(p: EdwardsPoint, q: EdwardsPoint, d2: FieldElement51) -> EdwardsPoint:
+def _edwards_add_d2(p: EdwardsPoint, q: EdwardsPoint, d2: FieldElement51) -> EdwardsPoint:
     var A = (p.Y - p.X) * (q.Y - q.X)
     var B = (p.Y + p.X) * (q.Y + q.X)
     var C = p.T * q.T * d2
@@ -313,7 +313,7 @@ fn _edwards_add_d2(p: EdwardsPoint, q: EdwardsPoint, d2: FieldElement51) -> Edwa
     return EdwardsPoint(E * F, G * H, F * G, E * H)
 
 @no_inline
-fn _edwards_double_standalone(p: EdwardsPoint) -> EdwardsPoint:
+def _edwards_double_standalone(p: EdwardsPoint) -> EdwardsPoint:
     var A = p.X.square()
     var B = p.Y.square()
     var C = p.Z.square() * FieldElement51(2, 0, 0, 0, 0)
@@ -324,7 +324,7 @@ fn _edwards_double_standalone(p: EdwardsPoint) -> EdwardsPoint:
     return EdwardsPoint(E * F, G * H, F * G, E * H)
 
 
-fn fe_to_bytes(fe: FieldElement51) -> List[UInt8]:
+def fe_to_bytes(fe: FieldElement51) -> List[UInt8]:
     var canonical = fe._reduce(fe.limbs)
     var l = canonical.limbs
     var MASK = UInt64(0x7FFFFFFFFFFFF)
@@ -371,8 +371,8 @@ fn fe_to_bytes(fe: FieldElement51) -> List[UInt8]:
     return bytes^
 
 @no_inline
-fn fe_from_bytes(bytes: Span[UInt8, ...]) -> FieldElement51:
-    fn load8(ptr: UnsafePointer[UInt8, _]) -> UInt64:
+def fe_from_bytes(bytes: Span[UInt8, ...]) -> FieldElement51:
+    def load8(ptr: UnsafePointer[UInt8, _]) -> UInt64:
         return ptr.bitcast[UInt64]().load()
     var ptr = bytes.unsafe_ptr()
     var MASK = UInt64(0x7FFFFFFFFFFFF)
@@ -384,7 +384,7 @@ fn fe_from_bytes(bytes: Span[UInt8, ...]) -> FieldElement51:
     return FieldElement51(l0, l1, l2, l3, l4)
 
 @no_inline
-fn edwards_encode(p: EdwardsPoint) -> List[UInt8]:
+def edwards_encode(p: EdwardsPoint) -> List[UInt8]:
     var z_inv = p.Z.invert()
     var x = p.X * z_inv
     var y = p.Y * z_inv
@@ -395,7 +395,7 @@ fn edwards_encode(p: EdwardsPoint) -> List[UInt8]:
     return out^
 
 @no_inline
-fn edwards_decode(data: Span[UInt8, ...]) -> EdwardsPoint:
+def edwards_decode(data: Span[UInt8, ...]) -> EdwardsPoint:
     var y_bytes = List[UInt8](capacity=32)
     for i in range(32):
         y_bytes.append(data[i])
@@ -415,7 +415,7 @@ fn edwards_decode(data: Span[UInt8, ...]) -> EdwardsPoint:
     return EdwardsPoint(x, y, FieldElement51.ONE(), t)
 
 @no_inline
-fn sqrt_ratio(u: FieldElement51, v: FieldElement51) -> FieldElement51:
+def sqrt_ratio(u: FieldElement51, v: FieldElement51) -> FieldElement51:
     var v_sq = v.square()
     var v3 = v_sq * v
     var v4 = v_sq.square()
@@ -466,7 +466,7 @@ fn sqrt_ratio(u: FieldElement51, v: FieldElement51) -> FieldElement51:
 
 
 @no_inline
-fn _scalar_mult(k: Span[UInt8, ...], p: EdwardsPoint) -> EdwardsPoint:
+def _scalar_mult(k: Span[UInt8, ...], p: EdwardsPoint) -> EdwardsPoint:
 	# ARM COMPILER-BUG
     # ed25519_d2() inside the loop corrupts the accumulator r.
 	# two _scalar_mult_base calls corrupt each other.
@@ -488,11 +488,11 @@ fn _scalar_mult(k: Span[UInt8, ...], p: EdwardsPoint) -> EdwardsPoint:
             r = _edwards_add_d2(r, q, FieldElement51(d2.limbs))
     return r
 
-fn _scalar_mult_base(k: Span[UInt8, ...]) -> EdwardsPoint:
+def _scalar_mult_base(k: Span[UInt8, ...]) -> EdwardsPoint:
     var bp = ed25519_base_point()
     return _scalar_mult(k, bp)
 
-fn ed25519_generate_public_key(private_key: Span[UInt8, ...]) -> List[UInt8]:
+def ed25519_generate_public_key(private_key: Span[UInt8, ...]) -> List[UInt8]:
     var hash = sha512_hash(private_key)
     var s = List[UInt8](capacity=32)
     for i in range(32):
@@ -505,7 +505,7 @@ fn ed25519_generate_public_key(private_key: Span[UInt8, ...]) -> List[UInt8]:
     _ = s
     return edwards_encode(pub_point)
 
-fn ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...]) -> List[UInt8]:
+def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...]) -> List[UInt8]:
     var hash = sha512_hash(private_key)
 
     var s = List[UInt8](capacity=32)
@@ -570,7 +570,7 @@ fn ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...]) -> Lis
     for i in range(32): sig.append(S_bytes[i])
     return sig^
 
-fn ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], signature: Span[UInt8, ...]) -> Bool:
+def ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], signature: Span[UInt8, ...]) -> Bool:
     var A = edwards_decode(public_key)
 
     var R_enc = List[UInt8](capacity=32)

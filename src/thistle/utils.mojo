@@ -6,18 +6,18 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
     var _ptr: UnsafePointer[Self.ElementType, MutExternalOrigin]
 
     @always_inline
-    fn __init__(out self, *, uninitialized: Bool):
+    def __init__(out self, *, uninitialized: Bool):
         self._ptr = stack_allocation[Self.size, Self.ElementType]()
 
     @always_inline
-    fn __init__(out self, var *elems: Self.ElementType, __list_literal__: ()):
+    def __init__(out self, var *elems: Self.ElementType, __list_literal__: NoneType):
         debug_assert(
             len(elems) == Self.size, "No. of elems must match array size"
         )
         self = Self(storage=elems^)
 
     @always_inline
-    fn __init__[
+    def __init__[
         origin: MutOrigin,
     ](
         out self,
@@ -43,10 +43,10 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
             )
             ptr += 1
 
-        storage^._anihilate()
+        storage^._annihilate()
 
     @always_inline
-    fn unsafe_ptr[
+    def unsafe_ptr[
         origin: Origin, address_space: AddressSpace, //
     ](ref[origin, address_space] self) -> UnsafePointer[
         Self.ElementType,
@@ -61,7 +61,7 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
         )
 
     @always_inline
-    fn unsafe_get[I: Indexer](ref self, idx: I) -> ref[MutExternalOrigin] Self.ElementType:
+    def unsafe_get[I: Indexer](ref self, idx: I) -> ref[MutExternalOrigin] Self.ElementType:
         var i = index(idx)
         debug_assert(
             0 <= i < Self.size,
@@ -73,7 +73,7 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
         return self._ptr[i]
 
     @always_inline
-    fn __getitem_param__[
+    def __getitem_param__[
         idx: Some[Indexer]
     ](ref self) -> ref[MutExternalOrigin] Self.ElementType:
         comptime i = index(idx)
@@ -81,7 +81,7 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
         return self.unsafe_get(i)
 
     @always_inline
-    fn __getitem_param__[
+    def __getitem_param__[
         idx: Int
     ](ref self) -> ref[MutExternalOrigin] Self.ElementType:
         comptime i = index(idx)
@@ -89,7 +89,7 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
         return self.unsafe_get(i)
 
     @always_inline
-    fn __getitem__(ref self, idx: Int) -> ref[MutExternalOrigin] Self.ElementType:
+    def __getitem__(ref self, idx: Int) -> ref[MutExternalOrigin] Self.ElementType:
         debug_assert(
             0 <= idx < Self.size,
             "Index out of bounds: ", idx, " should be in [0, ", Self.size, ")",
@@ -97,7 +97,7 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
         return self.unsafe_get(idx)
 
     @always_inline
-    fn unsafe_set[
+    def unsafe_set[
         _T: Copyable & ImplicitlyDestructible
     ](mut self: StackInlineArray[_T, ...], idx: Int, var value: _T):
         debug_assert(
@@ -107,7 +107,7 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
         (self._ptr + idx).destroy_pointee()
         (self._ptr + idx).init_pointee_move(value^)
 
-    fn __del__(deinit self):
+    def __del__(deinit self):
         _constrained_conforms_to[
             conforms_to(Self.ElementType, ImplicitlyDestructible),
             Parent=Self,
@@ -128,62 +128,62 @@ struct StackBuffer[T: Copyable & ImplicitlyDestructible, N: Int](Movable):
     var _data: InlineArray[Self.T, Self.N]
     var _len: Int
 
-    fn __init__(out self):
+    def __init__(out self):
         comptime assert Self.T.__del__is_trivial, "StackBuffer requires trivially destructible types (UInt8, UInt32, UInt64, etc)"
         self._data = InlineArray[Self.T, Self.N](uninitialized=True)
         self._len = 0
 
-    fn __init__(out self, *, var fill: Self.T):
+    def __init__(out self, *, var fill: Self.T):
         self._data = InlineArray[Self.T, Self.N](fill=fill^)
         self._len = 0
 
-    fn __init__(out self, *, deinit take: Self):
+    def __init__(out self, *, deinit take: Self):
         self._data = take._data^
         self._len = take._len
 
-    fn len(self) -> Int:
+    def len(self) -> Int:
         return self._len
 
-    fn capacity(self) -> Int:
+    def capacity(self) -> Int:
         return Self.N
 
-    fn remaining(self) -> Int:
+    def remaining(self) -> Int:
         return Self.N - self._len
 
-    fn push(mut self, var val: Self.T):
+    def push(mut self, var val: Self.T):
         debug_assert(self._len < Self.N, "StackBuffer overflow")
         self._data[self._len] = val^
         self._len += 1
 
-    fn push_unchecked(mut self, var val: Self.T):
+    def push_unchecked(mut self, var val: Self.T):
         self._data[self._len] = val^
         self._len += 1
 
-    fn pop(mut self) -> Self.T:
+    def pop(mut self) -> Self.T:
         debug_assert(self._len > 0, "StackBuffer underflow")
         self._len -= 1
         return self._data[self._len].copy()
 
-    fn top(ref self) -> ref[self._data] Self.T:
+    def top(ref self) -> ref[self._data] Self.T:
         debug_assert(self._len > 0, "StackBuffer empty")
         return self._data[self._len - 1]
 
-    fn clear(mut self):
+    def clear(mut self):
         self._len = 0
 
-    fn reset(mut self):
+    def reset(mut self):
         self.clear()
 
-    fn __getitem__(ref self, i: Int) -> ref[self._data] Self.T:
+    def __getitem__(ref self, i: Int) -> ref[self._data] Self.T:
         debug_assert(0 <= i < Self.N, "StackBuffer index out of bounds")
         return self._data[i]
 
-    fn __setitem__(mut self, i: Int, var val: Self.T):
+    def __setitem__(mut self, i: Int, var val: Self.T):
         debug_assert(0 <= i < Self.N, "StackBuffer index out of bounds")
         self._data[i] = val^
 
-    fn ptr(mut self) -> UnsafePointer[Self.T, MutAnyOrigin]:
+    def ptr(mut self) -> UnsafePointer[Self.T, MutAnyOrigin]:
         return self._data.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
 
-    fn const_ptr(ref self) -> UnsafePointer[Self.T, ImmutExternalOrigin]:
+    def const_ptr(ref self) -> UnsafePointer[Self.T, ImmutExternalOrigin]:
         return self._data.unsafe_ptr().unsafe_origin_cast[ImmutExternalOrigin]()

@@ -50,7 +50,7 @@ comptime SBOX = StaticTuple[UInt32, 256](
 )
 
 @always_inline
-fn _sbox(idx: Int) -> UInt8:
+def _sbox(idx: Int) -> UInt8:
     return UInt8(SBOX[idx])
 
 comptime AMUL0 = StaticTuple[UInt32, 256](
@@ -121,7 +121,7 @@ comptime AMUL0 = StaticTuple[UInt32, 256](
 )
 
 @always_inline
-fn _amul0(idx: Int) -> UInt32:
+def _amul0(idx: Int) -> UInt32:
     return AMUL0[idx]
 
 comptime AMUL1 = StaticTuple[UInt32, 256](
@@ -192,7 +192,7 @@ comptime AMUL1 = StaticTuple[UInt32, 256](
 )
 
 @always_inline
-fn _amul1(idx: Int) -> UInt32:
+def _amul1(idx: Int) -> UInt32:
     return AMUL1[idx]
 
 comptime AMUL2 = StaticTuple[UInt32, 256](
@@ -263,7 +263,7 @@ comptime AMUL2 = StaticTuple[UInt32, 256](
 )
 
 @always_inline
-fn _amul2(idx: Int) -> UInt32:
+def _amul2(idx: Int) -> UInt32:
     return AMUL2[idx]
 
 comptime AMUL3 = StaticTuple[UInt32, 256](
@@ -334,27 +334,27 @@ comptime AMUL3 = StaticTuple[UInt32, 256](
 )
 
 @always_inline
-fn _amul3(idx: Int) -> UInt32:
+def _amul3(idx: Int) -> UInt32:
     return AMUL3[idx]
 
 @always_inline
-fn gf_mult_by_2(t: UInt8) -> UInt8:
+def gf_mult_by_2(t: UInt8) -> UInt8:
     var lq = UInt32(t) << 1
     lq ^= ((lq >> 8) & 1) * 0x011B
     return UInt8(lq ^ 0xFF)
 
 @always_inline
-fn gf_mult_by_3(t: UInt8) -> UInt8:
+def gf_mult_by_3(t: UInt8) -> UInt8:
     var lq = (UInt32(t) << 1) ^ UInt32(t)
     lq ^= ((lq >> 8) & 1) * 0x011B
     return UInt8(lq ^ 0xFF)
 
 @always_inline
-fn nlf(a: UInt32, b: UInt32, c: UInt32, d: UInt32) -> UInt32:
+def nlf(a: UInt32, b: UInt32, c: UInt32, d: UInt32) -> UInt32:
     return ((a + b) & 0xFFFFFFFF) ^ c ^ d
 
 @always_inline
-fn sub_k2(in_val: UInt32) -> UInt32:
+def sub_k2(in_val: UInt32) -> UInt32:
     var w0 = Int(in_val & 0xFF)
     var w1 = Int((in_val >> 8) & 0xFF)
     var w2 = Int((in_val >> 16) & 0xFF)
@@ -394,20 +394,20 @@ struct KCipher2:
     var l2: UInt32
     var r2: UInt32
     
-    fn __init__(out self):
+    def __init__(out self):
         self.a0 = 0; self.a1 = 0; self.a2 = 0; self.a3 = 0; self.a4 = 0
         self.b0 = 0; self.b1 = 0; self.b2 = 0; self.b3 = 0; self.b4 = 0
         self.b5 = 0; self.b6 = 0; self.b7 = 0; self.b8 = 0; self.b9 = 0; self.b10 = 0
         self.l1 = 0; self.r1 = 0; self.l2 = 0; self.r2 = 0
 
-    fn __init__(out self, key: SIMD[DType.uint32, 4], iv: SIMD[DType.uint32, 4]):
+    def __init__(out self, key: SIMD[DType.uint32, 4], iv: SIMD[DType.uint32, 4]):
         self.a0 = 0; self.a1 = 0; self.a2 = 0; self.a3 = 0; self.a4 = 0
         self.b0 = 0; self.b1 = 0; self.b2 = 0; self.b3 = 0; self.b4 = 0
         self.b5 = 0; self.b6 = 0; self.b7 = 0; self.b8 = 0; self.b9 = 0; self.b10 = 0
         self.l1 = 0; self.r1 = 0; self.l2 = 0; self.r2 = 0
         self._init(key, iv)
 
-    fn _key_expansion(mut self, key: SIMD[DType.uint32, 4], iv: SIMD[DType.uint32, 4]) -> SIMD[DType.uint32, 12]:
+    def _key_expansion(mut self, key: SIMD[DType.uint32, 4], iv: SIMD[DType.uint32, 4]) -> SIMD[DType.uint32, 12]:
         var ik = SIMD[DType.uint32, 12](0)
         
         ik[0] = key[0]
@@ -427,7 +427,7 @@ struct KCipher2:
         
         return ik
 
-    fn _init(mut self, key: SIMD[DType.uint32, 4], iv: SIMD[DType.uint32, 4]):
+    def _init(mut self, key: SIMD[DType.uint32, 4], iv: SIMD[DType.uint32, 4]):
         var ik = self._key_expansion(key, iv)
         
         self.a0 = ik[4]
@@ -457,7 +457,7 @@ struct KCipher2:
             self._next_init()
 
     @always_inline
-    fn _next_init(mut self):
+    def _next_init(mut self):
         var nL1 = sub_k2(self.r2 + self.b4)
         var nR1 = sub_k2(self.l2 + self.b9)
         var nL2 = sub_k2(self.l1)
@@ -506,7 +506,7 @@ struct KCipher2:
         self.r2 = nR2
 
     @always_inline
-    fn _next_normal(mut self):
+    def _next_normal(mut self):
         var nL1 = sub_k2(self.r2 + self.b4)
         var nR1 = sub_k2(self.l2 + self.b9)
         var nL2 = sub_k2(self.l1)
@@ -553,19 +553,19 @@ struct KCipher2:
         self.l2 = nL2
         self.r2 = nR2
 
-    fn _next(mut self, mode: Int):
+    def _next(mut self, mode: Int):
         if mode == INIT:
             self._next_init()
         else:
             self._next_normal()
 
     @always_inline
-    fn stream(mut self) -> UInt64:
+    def stream(mut self) -> UInt64:
         var zh = nlf(self.b10, self.l2, self.l1, self.a0)
         var zl = nlf(self.b0, self.r2, self.r1, self.a4)
         return (UInt64(zh) << 32) | UInt64(zl)
 
-    fn encrypt_inplace[origin: Origin[mut=True]](mut self, mut data: Span[mut=True, UInt8, origin]):
+    def encrypt_inplace[origin: Origin[mut=True]](mut self, mut data: Span[mut=True, UInt8, origin]):
         var len_data = len(data)
         var data_ptr = data.unsafe_ptr()
         var data_u64 = data_ptr.bitcast[UInt64]()

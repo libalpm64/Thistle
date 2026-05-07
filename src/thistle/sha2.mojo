@@ -53,62 +53,62 @@ comptime SHA512_K = SIMD[DType.uint64, 80](
 )
 
 @always_inline
-fn ch32(x: UInt32, y: UInt32, z: UInt32) -> UInt32:
+def ch32(x: UInt32, y: UInt32, z: UInt32) -> UInt32:
     return (x & y) ^ ((~x) & z)
 
 
 @always_inline
-fn maj32(x: UInt32, y: UInt32, z: UInt32) -> UInt32:
+def maj32(x: UInt32, y: UInt32, z: UInt32) -> UInt32:
     return (x & y) ^ (x & z) ^ (y & z)
 
 
 @always_inline
-fn ch64(x: UInt64, y: UInt64, z: UInt64) -> UInt64:
+def ch64(x: UInt64, y: UInt64, z: UInt64) -> UInt64:
     return (x & y) ^ ((~x) & z)
 
 
 @always_inline
-fn maj64(x: UInt64, y: UInt64, z: UInt64) -> UInt64:
+def maj64(x: UInt64, y: UInt64, z: UInt64) -> UInt64:
     return (x & y) ^ (x & z) ^ (y & z)
 
 
 @always_inline
-fn sigma0_32(x: UInt32) -> UInt32:
+def sigma0_32(x: UInt32) -> UInt32:
     return rotate_bits_right[2](x) ^ rotate_bits_right[13](x) ^ rotate_bits_right[22](x)
 
 
 @always_inline
-fn sigma1_32(x: UInt32) -> UInt32:
+def sigma1_32(x: UInt32) -> UInt32:
     return rotate_bits_right[6](x) ^ rotate_bits_right[11](x) ^ rotate_bits_right[25](x)
 
 
 @always_inline
-fn small_sigma0_32(x: UInt32) -> UInt32:
+def small_sigma0_32(x: UInt32) -> UInt32:
     return rotate_bits_right[7](x) ^ rotate_bits_right[18](x) ^ (x >> 3)
 
 
 @always_inline
-fn small_sigma1_32(x: UInt32) -> UInt32:
+def small_sigma1_32(x: UInt32) -> UInt32:
     return rotate_bits_right[17](x) ^ rotate_bits_right[19](x) ^ (x >> 10)
 
 
 @always_inline
-fn sigma0_64(x: UInt64) -> UInt64:
+def sigma0_64(x: UInt64) -> UInt64:
     return rotate_bits_right[28](x) ^ rotate_bits_right[34](x) ^ rotate_bits_right[39](x)
 
 
 @always_inline
-fn sigma1_64(x: UInt64) -> UInt64:
+def sigma1_64(x: UInt64) -> UInt64:
     return rotate_bits_right[14](x) ^ rotate_bits_right[18](x) ^ rotate_bits_right[41](x)
 
 
 @always_inline
-fn small_sigma0_64(x: UInt64) -> UInt64:
+def small_sigma0_64(x: UInt64) -> UInt64:
     return rotate_bits_right[1](x) ^ rotate_bits_right[8](x) ^ (x >> 7)
 
 
 @always_inline
-fn small_sigma1_64(x: UInt64) -> UInt64:
+def small_sigma1_64(x: UInt64) -> UInt64:
     return rotate_bits_right[19](x) ^ rotate_bits_right[61](x) ^ (x >> 6)
 
 
@@ -142,17 +142,17 @@ comptime SHA384Config = SHA2Config[
 
 
 @always_inline
-fn ch_generic[WordType: DType.integral](x: SIMD[WordType, 1], y: SIMD[WordType, 1], z: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
+def ch_generic[WordType: DType.integral](x: SIMD[WordType, 1], y: SIMD[WordType, 1], z: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
     return (x & y) ^ ((~x) & z)
 
 
 @always_inline
-fn maj_generic[WordType: DType.integral](x: SIMD[WordType, 1], y: SIMD[WordType, 1], z: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
+def maj_generic[WordType: DType.integral](x: SIMD[WordType, 1], y: SIMD[WordType, 1], z: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
     return (x & y) ^ (x & z) ^ (y & z)
 
 
 @always_inline
-fn sigma0_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
+def sigma0_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
     comptime if WordType == DType.uint32:
         return SIMD[WordType, 1](rotate_bits_right[2](x[0]) ^ rotate_bits_right[13](x[0]) ^ rotate_bits_right[22](x[0]))
     else:
@@ -160,7 +160,7 @@ fn sigma0_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[WordTy
 
 
 @always_inline
-fn sigma1_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
+def sigma1_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
     comptime if WordType == DType.uint32:
         return SIMD[WordType, 1](rotate_bits_right[6](x[0]) ^ rotate_bits_right[11](x[0]) ^ rotate_bits_right[25](x[0]))
     else:
@@ -168,7 +168,7 @@ fn sigma1_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[WordTy
 
 
 @always_inline
-fn small_sigma0_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
+def small_sigma0_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
     comptime if WordType == DType.uint32:
         return SIMD[WordType, 1](rotate_bits_right[7](x[0]) ^ rotate_bits_right[18](x[0]) ^ (x[0] >> 3))
     else:
@@ -176,7 +176,7 @@ fn small_sigma0_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[
 
 
 @always_inline
-fn small_sigma1_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
+def small_sigma1_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
     comptime if WordType == DType.uint32:
         return SIMD[WordType, 1](rotate_bits_right[17](x[0]) ^ rotate_bits_right[19](x[0]) ^ (x[0] >> 10))
     else:
@@ -185,7 +185,7 @@ fn small_sigma1_generic[WordType: DType.integral](x: SIMD[WordType, 1]) -> SIMD[
 
 # hex conversions
 @always_inline
-fn nibble_to_hex_char(nibble: UInt8) -> UInt8:
+def nibble_to_hex_char(nibble: UInt8) -> UInt8:
     """Convert a nibble (0-15) to its hex character ASCII value."""
     if nibble < 10:
         return nibble + 0x30
@@ -193,7 +193,7 @@ fn nibble_to_hex_char(nibble: UInt8) -> UInt8:
         return nibble - 10 + 0x61
 
 
-fn bytes_to_hex(data: List[UInt8]) -> String:
+def bytes_to_hex(data: List[UInt8]) -> String:
     """Convert a byte list to a hexadecimal string."""
     var result = String(capacity=len(data) * 2)
     for i in range(len(data)):
@@ -205,7 +205,7 @@ fn bytes_to_hex(data: List[UInt8]) -> String:
     return result
 
 
-fn bytes_to_hex(data: SIMD[DType.uint8, 16]) -> String:
+def bytes_to_hex(data: SIMD[DType.uint8, 16]) -> String:
     """Convert a 16-byte SIMD vector to a hexadecimal string."""
     var result = String(capacity=32)
     for i in range(16):
@@ -217,7 +217,7 @@ fn bytes_to_hex(data: SIMD[DType.uint8, 16]) -> String:
     return result
 
 
-fn bytes_to_hex(data: Span[UInt8, ...]) -> String:
+def bytes_to_hex(data: Span[UInt8, ...]) -> String:
     """Convert a byte span to a hexadecimal string."""
     var result = String(capacity=len(data) * 2)
     for i in range(len(data)):
@@ -229,7 +229,7 @@ fn bytes_to_hex(data: Span[UInt8, ...]) -> String:
     return result
 
 
-fn string_to_bytes(s: String) -> List[UInt8]:
+def string_to_bytes(s: String) -> List[UInt8]:
     """Convert a string to a list of bytes."""
     var data = List[UInt8]()
     var bytes = s.as_bytes()
@@ -282,22 +282,22 @@ comptime SHA384_IV = SIMD[DType.uint64, 8](
 )
 
 @always_inline
-fn zero_buffer(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
+def zero_buffer(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
     memset_zero(ptr, len)
 
 
 @always_inline
-fn load_32be(ptr: UnsafePointer[UInt8, ImmutAnyOrigin], offset: Int) -> UInt32:
+def load_32be(ptr: UnsafePointer[UInt8, ImmutAnyOrigin], offset: Int) -> UInt32:
     var word = UInt32(ptr[offset]) << 24 | UInt32(ptr[offset + 1]) << 16 | UInt32(ptr[offset + 2]) << 8 | UInt32(ptr[offset + 3])
     return word
 
 
 @always_inline
-fn load_64be(ptr: UnsafePointer[UInt8, ImmutAnyOrigin], offset: Int) -> UInt64:
+def load_64be(ptr: UnsafePointer[UInt8, ImmutAnyOrigin], offset: Int) -> UInt64:
     return UInt64(ptr[offset]) << 56 | UInt64(ptr[offset + 1]) << 48 | UInt64(ptr[offset + 2]) << 40 | UInt64(ptr[offset + 3]) << 32 | UInt64(ptr[offset + 4]) << 24 | UInt64(ptr[offset + 5]) << 16 | UInt64(ptr[offset + 6]) << 8 | UInt64(ptr[offset + 7])
 
 @always_inline
-fn zero_and_free(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
+def zero_and_free(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
     zero_buffer(ptr, len)
     ptr.free()
 
@@ -307,43 +307,43 @@ struct SHA256Context(Movable):
     var buffer: UnsafePointer[UInt8, MutAnyOrigin]
     var buffer_len: Int
 
-    fn __init__(out self):
+    def __init__(out self):
         self.state = SHA256_IV
         self.count = 0
         self.buffer = alloc[UInt8](64)
         memset_zero(self.buffer, 64)
         self.buffer_len = 0
 
-    fn __init__(out self, iv: SIMD[DType.uint32, 8]):
+    def __init__(out self, iv: SIMD[DType.uint32, 8]):
         self.state = iv
         self.count = 0
         self.buffer = alloc[UInt8](64)
         memset_zero(self.buffer, 64)
         self.buffer_len = 0
 
-    fn __init__(out self, *, deinit take: Self):
+    def __init__(out self, *, deinit take: Self):
         self.state = take.state
         self.count = take.count
         self.buffer = take.buffer
         self.buffer_len = take.buffer_len
 
-    fn __del__(deinit self):
+    def __del__(deinit self):
         zero_and_free(self.buffer, 64)
 
-    fn reset(mut self):
+    def reset(mut self):
         self.state = SHA256_IV
         self.count = 0
         memset_zero(self.buffer, 64)
         self.buffer_len = 0
 
-    fn reset(mut self, iv: SIMD[DType.uint32, 8]):
+    def reset(mut self, iv: SIMD[DType.uint32, 8]):
         self.state = iv
         self.count = 0
         memset_zero(self.buffer, 64)
         self.buffer_len = 0
 
 @always_inline
-fn sha256_transform(
+def sha256_transform(
     state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]
 ) -> SIMD[DType.uint32, 8]:
     var w = InlineArray[UInt32, 16](uninitialized=True)
@@ -399,7 +399,7 @@ fn sha256_transform(
     return state + SIMD[DType.uint32, 8](a, b, c, d, e, f, g, h)
 
 
-fn sha256_update(mut ctx: SHA256Context, data: Span[UInt8, ...]):
+def sha256_update(mut ctx: SHA256Context, data: Span[UInt8, ...]):
     var i = 0
     var total_len = len(data)
 
@@ -441,7 +441,7 @@ fn sha256_update(mut ctx: SHA256Context, data: Span[UInt8, ...]):
         ctx.buffer_len += remaining
 
 
-fn sha256_final(mut ctx: SHA256Context) -> List[UInt8]:
+def sha256_final(mut ctx: SHA256Context) -> List[UInt8]:
     var bit_count = ctx.count + UInt64(ctx.buffer_len) * 8
 
     ctx.buffer[ctx.buffer_len] = 0x80
@@ -476,13 +476,13 @@ fn sha256_final(mut ctx: SHA256Context) -> List[UInt8]:
     return output^
 
 
-fn sha256_hash(data: Span[UInt8, ...]) -> List[UInt8]:
+def sha256_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     var ctx = SHA256Context()
     sha256_update(ctx, data)
     return sha256_final(ctx)
 
 
-fn sha256_final_to_buffer(mut ctx: SHA256Context, output: UnsafePointer[UInt8, MutAnyOrigin]):
+def sha256_final_to_buffer(mut ctx: SHA256Context, output: UnsafePointer[UInt8, MutAnyOrigin]):
     var bit_count = ctx.count + UInt64(ctx.buffer_len) * 8
 
     ctx.buffer[ctx.buffer_len] = 0x80
@@ -522,7 +522,7 @@ struct SHA512Context(Movable):
     var buffer: UnsafePointer[UInt8, MutAnyOrigin]
     var buffer_len: Int
 
-    fn __init__(out self):
+    def __init__(out self):
         self.state = SHA512_IV
         self.count_high = 0
         self.count_low = 0
@@ -530,7 +530,7 @@ struct SHA512Context(Movable):
         memset_zero(self.buffer, 128)
         self.buffer_len = 0
 
-    fn __init__(out self, iv: SIMD[DType.uint64, 8]):
+    def __init__(out self, iv: SIMD[DType.uint64, 8]):
         self.state = iv
         self.count_high = 0
         self.count_low = 0
@@ -538,24 +538,24 @@ struct SHA512Context(Movable):
         memset_zero(self.buffer, 128)
         self.buffer_len = 0
 
-    fn __init__(out self, *, deinit take: Self):
+    def __init__(out self, *, deinit take: Self):
         self.state = take.state
         self.count_high = take.count_high
         self.count_low = take.count_low
         self.buffer = take.buffer
         self.buffer_len = take.buffer_len
 
-    fn __del__(deinit self):
+    def __del__(deinit self):
         zero_and_free(self.buffer, 128)
 
-    fn reset(mut self):
+    def reset(mut self):
         self.state = SHA512_IV
         self.count_high = 0
         self.count_low = 0
         memset_zero(self.buffer, 128)
         self.buffer_len = 0
 
-    fn reset(mut self, iv: SIMD[DType.uint64, 8]):
+    def reset(mut self, iv: SIMD[DType.uint64, 8]):
         self.state = iv
         self.count_high = 0
         self.count_low = 0
@@ -564,7 +564,7 @@ struct SHA512Context(Movable):
 
 
 @always_inline
-fn sha512_transform(
+def sha512_transform(
     state: SIMD[DType.uint64, 8], block: Span[UInt8, ...]
 ) -> SIMD[DType.uint64, 8]:
     var w = InlineArray[UInt64, 16](uninitialized=True)
@@ -624,7 +624,7 @@ fn sha512_transform(
 
 
 @always_inline
-fn sha2_transform[Config: SHA2Config](
+def sha2_transform[Config: SHA2Config](
     state: SIMD[Config.WordType, 8], block: Span[UInt8, ...]
 ) -> SIMD[Config.WordType, 8]:
     comptime WordType = Config.WordType
@@ -680,7 +680,7 @@ fn sha2_transform[Config: SHA2Config](
     return state + SIMD[Config.WordType, 8](a, b, c, d, e, f, g, h)
 
 
-fn sha512_update(mut ctx: SHA512Context, data: Span[UInt8, ...]):
+def sha512_update(mut ctx: SHA512Context, data: Span[UInt8, ...]):
     var i = 0
     var total_len = len(data)
 
@@ -732,7 +732,7 @@ fn sha512_update(mut ctx: SHA512Context, data: Span[UInt8, ...]):
         ctx.buffer_len += remaining
 
 
-fn sha512_final(mut ctx: SHA512Context) -> List[UInt8]:
+def sha512_final(mut ctx: SHA512Context) -> List[UInt8]:
     var final_low = ctx.count_low + UInt64(ctx.buffer_len) * 8
     var final_high = ctx.count_high
     if final_low < ctx.count_low:
@@ -778,13 +778,13 @@ fn sha512_final(mut ctx: SHA512Context) -> List[UInt8]:
     return output^
 
 
-fn sha512_hash(data: Span[UInt8, ...]) -> List[UInt8]:
+def sha512_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     var ctx = SHA512Context()
     sha512_update(ctx, data)
     return sha512_final(ctx)
 
 
-fn sha512_final_to_buffer(mut ctx: SHA512Context, output: UnsafePointer[UInt8, MutAnyOrigin]):
+def sha512_final_to_buffer(mut ctx: SHA512Context, output: UnsafePointer[UInt8, MutAnyOrigin]):
     var final_low = ctx.count_low + UInt64(ctx.buffer_len) * 8
     var final_high = ctx.count_high
     if final_low < ctx.count_low:
@@ -826,7 +826,7 @@ fn sha512_final_to_buffer(mut ctx: SHA512Context, output: UnsafePointer[UInt8, M
         output[i * 8 + 7] = UInt8(UInt64(ctx.state[i]) & 0xFF)
 
 
-fn sha256_final_with_len(mut ctx: SHA256Context, output_len: Int) -> List[UInt8]:
+def sha256_final_with_len(mut ctx: SHA256Context, output_len: Int) -> List[UInt8]:
     var bit_count = ctx.count + UInt64(ctx.buffer_len) * 8
 
     ctx.buffer[ctx.buffer_len] = 0x80
@@ -864,13 +864,13 @@ fn sha256_final_with_len(mut ctx: SHA256Context, output_len: Int) -> List[UInt8]
     return output^
 
 
-fn sha224_hash(data: Span[UInt8, ...]) -> List[UInt8]:
+def sha224_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     var ctx = SHA256Context(SHA224_IV)
     sha256_update(ctx, data)
     return sha256_final_with_len(ctx, 28)
 
 
-fn sha512_final_with_len(mut ctx: SHA512Context, output_len: Int) -> List[UInt8]:
+def sha512_final_with_len(mut ctx: SHA512Context, output_len: Int) -> List[UInt8]:
     var final_low = ctx.count_low + UInt64(ctx.buffer_len) * 8
     var final_high = ctx.count_high
     if final_low < ctx.count_low:
@@ -913,32 +913,32 @@ fn sha512_final_with_len(mut ctx: SHA512Context, output_len: Int) -> List[UInt8]
     return output^
 
 
-fn sha384_hash(data: Span[UInt8, ...]) -> List[UInt8]:
+def sha384_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     var ctx = SHA512Context(SHA384_IV)
     sha512_update(ctx, data)
     return sha512_final_with_len(ctx, 48)
 
 
 # String functions
-fn sha256_hash_string(s: String) -> String:
+def sha256_hash_string(s: String) -> String:
     var data = string_to_bytes(s)
     var hash = sha256_hash(Span[UInt8, ...](data))
     return bytes_to_hex(hash)
 
 
-fn sha512_hash_string(s: String) -> String:
+def sha512_hash_string(s: String) -> String:
     var data = string_to_bytes(s)
     var hash = sha512_hash(Span[UInt8, ...](data))
     return bytes_to_hex(hash)
 
 
-fn sha224_hash_string(s: String) -> String:
+def sha224_hash_string(s: String) -> String:
     var data = string_to_bytes(s)
     var hash = sha224_hash(Span[UInt8, ...](data))
     return bytes_to_hex(hash)
 
 
-fn sha384_hash_string(s: String) -> String:
+def sha384_hash_string(s: String) -> String:
     var data = string_to_bytes(s)
     var hash = sha384_hash(Span[UInt8, ...](data))
     return bytes_to_hex(hash)

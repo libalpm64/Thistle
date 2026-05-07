@@ -36,11 +36,11 @@ comptime HEX_CHARS = SIMD[DType.uint8, 16](
 
 
 @always_inline
-fn rotl64[n: Int](x: UInt64) -> UInt64:
+def rotl64[n: Int](x: UInt64) -> UInt64:
     return rotate_bits_left[n](x)
 
 
-fn keccak_f1600(state: UnsafePointer[UInt64, MutAnyOrigin]):
+def keccak_f1600(state: UnsafePointer[UInt64, MutAnyOrigin]):
     var a0 = state[0]
     var a1 = state[1]
     var a2 = state[2]
@@ -188,7 +188,7 @@ fn keccak_f1600(state: UnsafePointer[UInt64, MutAnyOrigin]):
 
 
 @always_inline
-fn nibble_to_hex_char(nibble: UInt8) -> UInt8:
+def nibble_to_hex_char(nibble: UInt8) -> UInt8:
     if nibble < 10:
         return nibble + 0x30
     else:
@@ -196,7 +196,7 @@ fn nibble_to_hex_char(nibble: UInt8) -> UInt8:
 
 
 @always_inline
-fn bytes_to_hex_simd(data: UnsafePointer[UInt8, ImmutAnyOrigin], len: Int) -> String:
+def bytes_to_hex_simd(data: UnsafePointer[UInt8, ImmutAnyOrigin], len: Int) -> String:
     var result = String(capacity=len * 2)
     var i = 0
     while i + 16 <= len:
@@ -221,11 +221,11 @@ fn bytes_to_hex_simd(data: UnsafePointer[UInt8, ImmutAnyOrigin], len: Int) -> St
     return result
 
 
-fn bytes_to_hex(data: List[UInt8]) -> String:
+def bytes_to_hex(data: List[UInt8]) -> String:
     return bytes_to_hex_simd(data.unsafe_ptr(), len(data))
 
 
-fn string_to_bytes(s: String) -> List[UInt8]:
+def string_to_bytes(s: String) -> List[UInt8]:
     var data = List[UInt8]()
     var bytes = s.as_bytes()
     for i in range(len(bytes)):
@@ -239,24 +239,24 @@ struct SHA3Context(Movable):
     var buffer: StackBuffer[UInt8, 168]
     var buffer_len: Int
 
-    fn __init__(out self, rate_bits: Int):
+    def __init__(out self, rate_bits: Int):
         self.state = StackBuffer[UInt64, 25](fill=0)
         self.rate_bytes = rate_bits // 8
         self.buffer = StackBuffer[UInt8, 168](fill=0)
         self.buffer_len = 0
 
-    fn __init__(out self, *, deinit take: Self):
+    def __init__(out self, *, deinit take: Self):
         self.state = take.state^
         self.rate_bytes = take.rate_bytes
         self.buffer = take.buffer^
         self.buffer_len = take.buffer_len
 
-    fn __del__(deinit self):
+    def __del__(deinit self):
         pass
 
 
 @always_inline
-fn sha3_absorb_block(state: UnsafePointer[UInt64, MutAnyOrigin], block: UnsafePointer[UInt8, ImmutAnyOrigin], rate_bytes: Int):
+def sha3_absorb_block(state: UnsafePointer[UInt64, MutAnyOrigin], block: UnsafePointer[UInt8, ImmutAnyOrigin], rate_bytes: Int):
     var block_u64 = block.bitcast[UInt64]()
     var full_lanes = rate_bytes // 8
     for i in range(full_lanes):
@@ -264,7 +264,7 @@ fn sha3_absorb_block(state: UnsafePointer[UInt64, MutAnyOrigin], block: UnsafePo
     keccak_f1600(state)
 
 
-fn sha3_update(mut ctx: SHA3Context, data: Span[UInt8, ...]):
+def sha3_update(mut ctx: SHA3Context, data: Span[UInt8, ...]):
     var i = 0
     var total_len = len(data)
 
@@ -302,7 +302,7 @@ fn sha3_update(mut ctx: SHA3Context, data: Span[UInt8, ...]):
         ctx.buffer_len = remaining
 
 
-fn sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
+def sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
     ctx.buffer[ctx.buffer_len] = 0x06
     ctx.buffer_len += 1
 
@@ -335,54 +335,54 @@ fn sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
 
 
 @always_inline
-fn sha3_hash(rate_bits: Int, data: Span[UInt8, ...], output_len: Int) -> List[UInt8]:
+def sha3_hash(rate_bits: Int, data: Span[UInt8, ...], output_len: Int) -> List[UInt8]:
     var ctx = SHA3Context(rate_bits)
     sha3_update(ctx, data)
     return sha3_final(ctx, output_len)
 
 
-fn sha3_224(data: Span[UInt8, ...]) -> List[UInt8]:
+def sha3_224(data: Span[UInt8, ...]) -> List[UInt8]:
     return sha3_hash(1152, data, 28)
 
 
-fn sha3_256(data: Span[UInt8, ...]) -> List[UInt8]:
+def sha3_256(data: Span[UInt8, ...]) -> List[UInt8]:
     return sha3_hash(1088, data, 32)
 
 
-fn sha3_384(data: Span[UInt8, ...]) -> List[UInt8]:
+def sha3_384(data: Span[UInt8, ...]) -> List[UInt8]:
     return sha3_hash(832, data, 48)
 
 
-fn sha3_512(data: Span[UInt8, ...]) -> List[UInt8]:
+def sha3_512(data: Span[UInt8, ...]) -> List[UInt8]:
     return sha3_hash(576, data, 64)
 
 
-fn sha3_224_hash_string(s: String) -> String:
+def sha3_224_hash_string(s: String) -> String:
     var data = string_to_bytes(s)
     var hash = sha3_224(Span[UInt8, ...](data))
     return bytes_to_hex(hash)
 
 
-fn sha3_256_hash_string(s: String) -> String:
+def sha3_256_hash_string(s: String) -> String:
     var data = string_to_bytes(s)
     var hash = sha3_256(Span[UInt8, ...](data))
     return bytes_to_hex(hash)
 
 
-fn sha3_384_hash_string(s: String) -> String:
+def sha3_384_hash_string(s: String) -> String:
     var data = string_to_bytes(s)
     var hash = sha3_384(Span[UInt8, ...](data))
     return bytes_to_hex(hash)
 
 
-fn sha3_512_hash_string(s: String) -> String:
+def sha3_512_hash_string(s: String) -> String:
     var data = string_to_bytes(s)
     var hash = sha3_512(Span[UInt8, ...](data))
     return bytes_to_hex(hash)
 
 
 @always_inline
-fn shake_hash(rate_bits: Int, data: Span[UInt8, ...], output_len: Int) -> List[UInt8]:
+def shake_hash(rate_bits: Int, data: Span[UInt8, ...], output_len: Int) -> List[UInt8]:
     var ctx = SHA3Context(rate_bits)
     sha3_update(ctx, data)
     ctx.buffer[ctx.buffer_len] = 0x1F
@@ -408,9 +408,9 @@ fn shake_hash(rate_bits: Int, data: Span[UInt8, ...], output_len: Int) -> List[U
     return output^
 
 
-fn shake128(data: Span[UInt8, ...], output_len_bytes: Int) -> List[UInt8]:
+def shake128(data: Span[UInt8, ...], output_len_bytes: Int) -> List[UInt8]:
     return shake_hash(1344, data, output_len_bytes)
 
 
-fn shake256(data: Span[UInt8, ...], output_len_bytes: Int) -> List[UInt8]:
+def shake256(data: Span[UInt8, ...], output_len_bytes: Int) -> List[UInt8]:
     return shake_hash(1088, data, output_len_bytes)

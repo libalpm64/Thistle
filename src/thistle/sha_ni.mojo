@@ -42,12 +42,12 @@ comptime SHA256_K = SIMD[DType.uint32, 64](
 
 
 @always_inline
-fn has_x86_sha_ni() -> Bool:
+def has_x86_sha_ni() -> Bool:
     return CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]()
 
 
 @always_inline("nodebug")
-fn _rnds2(cdgh: SIMD128, abef: SIMD128, wk: SIMD128) -> SIMD128:
+def _rnds2(cdgh: SIMD128, abef: SIMD128, wk: SIMD128) -> SIMD128:
     comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]():
         return llvm_intrinsic["llvm.x86.sha256rnds2", SIMD128, has_side_effect=False](cdgh, abef, wk)
     else:
@@ -55,7 +55,7 @@ fn _rnds2(cdgh: SIMD128, abef: SIMD128, wk: SIMD128) -> SIMD128:
 
 
 @always_inline("nodebug")
-fn _msg1(a: SIMD128, b: SIMD128) -> SIMD128:
+def _msg1(a: SIMD128, b: SIMD128) -> SIMD128:
     comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]():
         return llvm_intrinsic["llvm.x86.sha256msg1", SIMD128, has_side_effect=False](a, b)
     else:
@@ -63,7 +63,7 @@ fn _msg1(a: SIMD128, b: SIMD128) -> SIMD128:
 
 
 @always_inline("nodebug")
-fn _msg2(a: SIMD128, b: SIMD128) -> SIMD128:
+def _msg2(a: SIMD128, b: SIMD128) -> SIMD128:
     comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]():
         return llvm_intrinsic["llvm.x86.sha256msg2", SIMD128, has_side_effect=False](a, b)
     else:
@@ -71,28 +71,28 @@ fn _msg2(a: SIMD128, b: SIMD128) -> SIMD128:
 
 
 @always_inline("nodebug")
-fn byte_swap32(v: SIMD128) -> SIMD128:
+def byte_swap32(v: SIMD128) -> SIMD128:
     var bytes = bitcast[DType.uint8, 16](v)
     var swapped = bytes.shuffle[3,2,1,0, 7,6,5,4, 11,10,9,8, 15,14,13,12]()
     return bitcast[DType.uint32, 4](swapped)
 
 
 @always_inline("nodebug")
-fn Load(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]) -> SIMD128:
+def Load(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]) -> SIMD128:
     return byte_swap32(ptr.bitcast[UInt32]().load[width=4]())
 
 
 @always_inline("nodebug")
-fn Load_aligned(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]) -> SIMD128:
+def Load_aligned(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]) -> SIMD128:
     return byte_swap32(ptr.bitcast[UInt32]().load[width=4, alignment=16]())
 
 
 @always_inline("nodebug")
-fn prefetch_next_block(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]):
+def prefetch_next_block(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]):
     prefetch[PrefetchOptions().for_read().high_locality().to_data_cache()](ptr + 64)
 
 
-fn sha256ni_transform(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]) -> SIMD[DType.uint32, 8]:
+def sha256ni_transform(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]) -> SIMD[DType.uint32, 8]:
     var ptr = block.unsafe_ptr()
     
     # states:  s1 = [H, G, D, C], s0 = [F, E, B, A]
@@ -139,14 +139,14 @@ struct SHA256NIContext(Movable):
     var buffer: StackBuffer[UInt8, 64]
     var buffer_len: Int
 
-    fn __init__(out self):
+    def __init__(out self):
         self.state = SHA256_IV
         self.count = 0
         self.buffer = StackBuffer[UInt8, 64](fill=0)
         self.buffer_len = 0
 
 
-fn sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]:
+def sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     var ctx = SHA256NIContext()
 
     var i = 0
@@ -193,5 +193,5 @@ fn sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     return output^
 
 
-fn has_sha_ni() -> Bool:
+def has_sha_ni() -> Bool:
     return has_x86_sha_ni()

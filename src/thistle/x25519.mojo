@@ -4,7 +4,7 @@
 from .curve25519 import FieldElement51
 from .constants import APLUS2_OVER_FOUR
 
-fn x25519(scalar_in: List[UInt8], point: List[UInt8]) -> List[UInt8]:
+def x25519(scalar_in: List[UInt8], point: List[UInt8]) -> List[UInt8]:
     var scalar = scalar_in.copy()
     scalar[0] &= 248
     scalar[31] &= 127

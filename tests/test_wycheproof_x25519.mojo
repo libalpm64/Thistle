@@ -7,7 +7,7 @@
 from std.collections import List
 from thistle.x25519 import x25519
 
-fn b32(
+def b32(
     b00: UInt8, b01: UInt8, b02: UInt8, b03: UInt8,
     b04: UInt8, b05: UInt8, b06: UInt8, b07: UInt8,
     b08: UInt8, b09: UInt8, b10: UInt8, b11: UInt8,
@@ -28,12 +28,12 @@ fn b32(
     r.append(b28); r.append(b29); r.append(b30); r.append(b31)
     return r^
 
-fn cmp32(a: List[UInt8], b: List[UInt8]) -> Bool:
+def cmp32(a: List[UInt8], b: List[UInt8]) -> Bool:
     for i in range(32):
         if a[i] != b[i]: return False
     return True
 
-fn main():
+def main():
     var passed = 0
     var failed = 0
     var total = 0

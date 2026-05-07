@@ -2,7 +2,7 @@ from std.collections import List
 from thistle.ed25519 import bytes_to_hex, Scalar, _scalar_mult_base, edwards_encode
 from thistle.sha2 import sha512_hash
 
-fn hex_to_bytes(s: String) -> List[UInt8]:
+def hex_to_bytes(s: String) -> List[UInt8]:
     var r = List[UInt8]()
     var b = s.as_bytes()
     for i in range(0, len(s), 2):
@@ -11,7 +11,7 @@ fn hex_to_bytes(s: String) -> List[UInt8]:
         r.append((hi << 4) | lo)
     return r^
 
-fn main() raises:
+def main() raises:
     var priv = hex_to_bytes("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
     var hash = sha512_hash(Span[UInt8, ...](priv))
 

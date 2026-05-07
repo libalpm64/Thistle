@@ -26,47 +26,47 @@ comptime SIMD64x4_MASK32 = SIMD64x4(MASK32)
 
 
 @always_inline
-fn rotate_left_simd128(v: SIMD128, shift: Int) -> SIMD128:
+def rotate_left_simd128(v: SIMD128, shift: Int) -> SIMD128:
     return (v << shift) | (v >> (64 - shift))
 
 
 @always_inline
-fn load_128bit_simd(ptr: UnsafePointer[UInt64, ImmutAnyOrigin], offset: Int) -> SIMD128:
+def load_128bit_simd(ptr: UnsafePointer[UInt64, ImmutAnyOrigin], offset: Int) -> SIMD128:
     return SIMD128(ptr[offset], ptr[offset + 1])
 
 
 @always_inline
-fn store_128bit_simd(ptr: UnsafePointer[UInt64, MutAnyOrigin], offset: Int, val: SIMD128):
+def store_128bit_simd(ptr: UnsafePointer[UInt64, MutAnyOrigin], offset: Int, val: SIMD128):
     ptr[offset] = val[0]
     ptr[offset + 1] = val[1]
 
 @always_inline
-fn zero_buffer(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
+def zero_buffer(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
     for i in range(len):
         ptr[i] = 0
 
 @always_inline
-fn zero_buffer_u64(ptr: UnsafePointer[UInt64, MutAnyOrigin], len: Int):
+def zero_buffer_u64(ptr: UnsafePointer[UInt64, MutAnyOrigin], len: Int):
     for i in range(len):
         ptr[i] = 0
 
 @always_inline
-fn zero_and_free(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
+def zero_and_free(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
     zero_buffer(ptr, len)
     ptr.free()
 
 @always_inline
-fn zero_and_free_u64(ptr: UnsafePointer[UInt64, MutAnyOrigin], len: Int):
+def zero_and_free_u64(ptr: UnsafePointer[UInt64, MutAnyOrigin], len: Int):
     zero_buffer_u64(ptr, len)
     ptr.free()
 
 
 @always_inline
-fn f_bla_mka(x: UInt64, y: UInt64) -> UInt64:
+def f_bla_mka(x: UInt64, y: UInt64) -> UInt64:
     return x + y + 2 * (x & MASK32) * (y & MASK32)
 
 @always_inline
-fn gb(a: UInt64, b: UInt64, c: UInt64, d: UInt64) -> Tuple[UInt64, UInt64, UInt64, UInt64]:
+def gb(a: UInt64, b: UInt64, c: UInt64, d: UInt64) -> Tuple[UInt64, UInt64, UInt64, UInt64]:
     var a_new = f_bla_mka(a, b)
     var d_new = rotate_bits_left[shift=32](d ^ a_new)
     var c_new = f_bla_mka(c, d_new)
@@ -79,20 +79,20 @@ fn gb(a: UInt64, b: UInt64, c: UInt64, d: UInt64) -> Tuple[UInt64, UInt64, UInt6
 
 
 @always_inline
-fn f_bla_mka_simd128(x: SIMD128, y: SIMD128) -> SIMD128:
+def f_bla_mka_simd128(x: SIMD128, y: SIMD128) -> SIMD128:
     return x + y + (x & SIMD128_MASK32) * (y & SIMD128_MASK32) * SIMD128(2)
 
 
 @always_inline
-fn f_bla_mka_simd(x: SIMD64x4, y: SIMD64x4) -> SIMD64x4:
+def f_bla_mka_simd(x: SIMD64x4, y: SIMD64x4) -> SIMD64x4:
     return x + y + (x & SIMD64x4_MASK32) * (y & SIMD64x4_MASK32) * SIMD64x4(2)
 
 @always_inline
-fn rotate_left_simd(v: SIMD64x4, shift: Int) -> SIMD64x4:
+def rotate_left_simd(v: SIMD64x4, shift: Int) -> SIMD64x4:
     return (v << shift) | (v >> (64 - shift))
 
 @always_inline
-fn gb_simd128(a: SIMD128, b: SIMD128, c: SIMD128, d: SIMD128) -> Tuple[SIMD128, SIMD128, SIMD128, SIMD128]:
+def gb_simd128(a: SIMD128, b: SIMD128, c: SIMD128, d: SIMD128) -> Tuple[SIMD128, SIMD128, SIMD128, SIMD128]:
     var a_new = f_bla_mka_simd128(a, b)
     var d_new = rotate_left_simd128(d ^ a_new, 32)
     var c_new = f_bla_mka_simd128(c, d_new)
@@ -105,7 +105,7 @@ fn gb_simd128(a: SIMD128, b: SIMD128, c: SIMD128, d: SIMD128) -> Tuple[SIMD128, 
 
 
 @always_inline
-fn gb_simd(a: SIMD64x4, b: SIMD64x4, c: SIMD64x4, d: SIMD64x4) -> Tuple[SIMD64x4, SIMD64x4, SIMD64x4, SIMD64x4]:
+def gb_simd(a: SIMD64x4, b: SIMD64x4, c: SIMD64x4, d: SIMD64x4) -> Tuple[SIMD64x4, SIMD64x4, SIMD64x4, SIMD64x4]:
     var a_new = f_bla_mka_simd(a, b)
     var d_new = rotate_left_simd(d ^ a_new, 32)
     var c_new = f_bla_mka_simd(c, d_new)
@@ -117,7 +117,7 @@ fn gb_simd(a: SIMD64x4, b: SIMD64x4, c: SIMD64x4, d: SIMD64x4) -> Tuple[SIMD64x4
     return (a_new, b_new, c_new, d_new)
 
 @always_inline
-fn _p_column(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
+def _p_column(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
     var v0, v4, v8, v12 = gb(v[base + 0], v[base + 4], v[base + 8], v[base + 12])
     var v1, v5, v9, v13 = gb(v[base + 1], v[base + 5], v[base + 9], v[base + 13])
     var v2, v6, v10, v14 = gb(v[base + 2], v[base + 6], v[base + 10], v[base + 14])
@@ -140,7 +140,7 @@ fn _p_column(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
     v[base + 15] = v15
 
 @always_inline
-fn _p_diagonal(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
+def _p_diagonal(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
     var v0, v5, v10, v15 = gb(v[base + 0], v[base + 5], v[base + 10], v[base + 15])
     var v1, v6, v11, v12 = gb(v[base + 1], v[base + 6], v[base + 11], v[base + 12])
     var v2, v7, v8, v13 = gb(v[base + 2], v[base + 7], v[base + 8], v[base + 13])
@@ -164,7 +164,7 @@ fn _p_diagonal(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
 
 
 @always_inline
-fn _p_column_simd(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
+def _p_column_simd(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
     var v0 = load_128bit_simd(v, base + 0)
     var v1 = load_128bit_simd(v, base + 2)
     var v2 = load_128bit_simd(v, base + 4)
@@ -220,7 +220,7 @@ fn _p_column_simd(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
 
 
 @always_inline
-fn _p_diagonal_simd(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
+def _p_diagonal_simd(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
     var v0 = load_128bit_simd(v, base + 0)
     var v1 = load_128bit_simd(v, base + 2)
     var v2 = load_128bit_simd(v, base + 4)
@@ -279,26 +279,26 @@ struct MemoryPool:
     var temp_buffer: UnsafePointer[UInt64, MutAnyOrigin]
     var buffer_size: Int
 
-    fn __init__(out self, size: Int):
+    def __init__(out self, size: Int):
         self.buffer_size = size
         self.block_buffer = alloc[UInt64](size)
         self.temp_buffer = alloc[UInt64](size)
 
-    fn __delinit__(deinit self):
+    def __delinit__(deinit self):
         zero_and_free_u64(self.block_buffer, self.buffer_size)
         zero_and_free_u64(self.temp_buffer, self.buffer_size)
 
     @always_inline
-    fn get_block(self) -> UnsafePointer[UInt64, MutAnyOrigin]:
+    def get_block(self) -> UnsafePointer[UInt64, MutAnyOrigin]:
         return self.block_buffer
 
     @always_inline
-    fn get_temp(self) -> UnsafePointer[UInt64, MutAnyOrigin]:
+    def get_temp(self) -> UnsafePointer[UInt64, MutAnyOrigin]:
         return self.temp_buffer
 
 
 @always_inline
-fn compression_g_with_pool(
+def compression_g_with_pool(
     out_ptr: UnsafePointer[UInt64, MutAnyOrigin],
     x_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
     y_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
@@ -405,7 +405,7 @@ fn compression_g_with_pool(
 
 
 @always_inline
-fn compression_g_simd(
+def compression_g_simd(
     out_ptr: UnsafePointer[UInt64, MutAnyOrigin],
     x_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
     y_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
@@ -514,7 +514,7 @@ fn compression_g_simd(
 
 
 @always_inline
-fn compression_g(
+def compression_g(
     out_ptr: UnsafePointer[UInt64, MutAnyOrigin],
     x_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
     y_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
@@ -589,7 +589,7 @@ fn compression_g(
 
 
 @always_inline
-fn store_le32(ptr: UnsafePointer[UInt8, MutAnyOrigin], offset: Int, val: Int):
+def store_le32(ptr: UnsafePointer[UInt8, MutAnyOrigin], offset: Int, val: Int):
     ptr[offset + 0] = UInt8(val & 0xFF)
     ptr[offset + 1] = UInt8((val >> 8) & 0xFF)
     ptr[offset + 2] = UInt8((val >> 16) & 0xFF)
@@ -597,7 +597,7 @@ fn store_le32(ptr: UnsafePointer[UInt8, MutAnyOrigin], offset: Int, val: Int):
 
 
 @always_inline
-fn store_le64(ptr: UnsafePointer[UInt8, MutAnyOrigin], offset: Int, val: Int):
+def store_le64(ptr: UnsafePointer[UInt8, MutAnyOrigin], offset: Int, val: Int):
     ptr[offset + 0] = UInt8(val & 0xFF)
     ptr[offset + 1] = UInt8((val >> 8) & 0xFF)
     ptr[offset + 2] = UInt8((val >> 16) & 0xFF)
@@ -608,7 +608,7 @@ fn store_le64(ptr: UnsafePointer[UInt8, MutAnyOrigin], offset: Int, val: Int):
     ptr[offset + 7] = UInt8((val >> 56) & 0xFF)
 
 
-fn blake2b_with_le32_prefix(digest_size: Int, prefix_val: Int, input: Span[UInt8, ...]) -> List[UInt8]:
+def blake2b_with_le32_prefix(digest_size: Int, prefix_val: Int, input: Span[UInt8, ...]) -> List[UInt8]:
     var ctx = Blake2b(digest_size)
     var le_buf = alloc[UInt8](4)
     store_le32(le_buf, 0, prefix_val)
@@ -618,7 +618,7 @@ fn blake2b_with_le32_prefix(digest_size: Int, prefix_val: Int, input: Span[UInt8
     return ctx.finalize()
 
 
-fn variable_length_hash_to_ptr(t_len: Int, input: Span[UInt8, ...], out_ptr: UnsafePointer[UInt8, MutAnyOrigin]):
+def variable_length_hash_to_ptr(t_len: Int, input: Span[UInt8, ...], out_ptr: UnsafePointer[UInt8, MutAnyOrigin]):
     if t_len <= 64:
         var ctx = Blake2b(t_len)
         var le_buf = alloc[UInt8](4)
@@ -670,7 +670,7 @@ fn variable_length_hash_to_ptr(t_len: Int, input: Span[UInt8, ...], out_ptr: Uns
     zero_and_free(v_buf, 64)
 
 
-fn variable_length_hash(t_len: Int, input: Span[UInt8, ...]) -> List[UInt8]:
+def variable_length_hash(t_len: Int, input: Span[UInt8, ...]) -> List[UInt8]:
     var out_buf = alloc[UInt8](t_len)
     variable_length_hash_to_ptr(t_len, input, out_buf)
     var result = List[UInt8](capacity=t_len)
@@ -681,7 +681,7 @@ fn variable_length_hash(t_len: Int, input: Span[UInt8, ...]) -> List[UInt8]:
 
 
 @always_inline
-fn _argon2_process_lane(
+def _argon2_process_lane(
     memory: UnsafePointer[UInt64, MutAnyOrigin],
     lane: Int,
     t: Int,
@@ -807,7 +807,7 @@ struct Argon2id:
     var secret: List[UInt8]
     var ad: List[UInt8]
 
-    fn __init__(
+    def __init__(
         out self,
         salt: Span[UInt8, ...],
         parallelism: Int = 4,
@@ -828,7 +828,7 @@ struct Argon2id:
         self.secret = List[UInt8]()
         self.ad = List[UInt8]()
 
-    fn __init__(
+    def __init__(
         out self,
         salt: Span[UInt8, ...],
         secret: Span[UInt8, ...],
@@ -855,7 +855,7 @@ struct Argon2id:
         for i in range(len(ad)):
             self.ad.append(ad[i])
 
-    fn hash(self, password: Span[UInt8, ...]) -> List[UInt8]:
+    def hash(self, password: Span[UInt8, ...]) -> List[UInt8]:
         var h0_ctx = Blake2b(64)
         
         var le_buf = alloc[UInt8](4)
@@ -945,7 +945,7 @@ struct Argon2id:
                     type_code, parallelism,
                 )
                 @parameter
-                fn process_lane(lane: Int):
+                def process_lane(lane: Int):
                     _argon2_process_lane(
                         memory, lane, t, slice_idx, seg_start, seg_end,
                         segment_length, q, m_prime_blocks, iterations,
@@ -976,7 +976,7 @@ struct Argon2id:
         return result^
 
 
-fn argon2id_hash_string(password: String, salt: String) -> String:
+def argon2id_hash_string(password: String, salt: String) -> String:
     var p_bytes = password.as_bytes()
     var s_bytes = salt.as_bytes()
     var ctx = Argon2id(s_bytes)

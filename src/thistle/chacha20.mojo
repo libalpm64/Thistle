@@ -16,7 +16,7 @@ comptime CHACHA_CONSTANTS = SIMD[DType.uint32, 4](
 )
 
 @always_inline
-fn simd_quarter_round(
+def simd_quarter_round(
     mut a: SIMD[DType.uint32, 4],
     mut b: SIMD[DType.uint32, 4],
     mut c: SIMD[DType.uint32, 4],
@@ -43,7 +43,7 @@ fn simd_quarter_round(
 
 
 @always_inline
-fn shuffle_for_diagonal(
+def shuffle_for_diagonal(
     row0: SIMD[DType.uint32, 4],
     row1: SIMD[DType.uint32, 4],
     row2: SIMD[DType.uint32, 4],
@@ -59,7 +59,7 @@ fn shuffle_for_diagonal(
 
 
 @always_inline
-fn unshuffle_from_diagonal(
+def unshuffle_from_diagonal(
     a: SIMD[DType.uint32, 4],
     b: SIMD[DType.uint32, 4],
     c: SIMD[DType.uint32, 4],
@@ -75,7 +75,7 @@ fn unshuffle_from_diagonal(
 
 
 @always_inline
-fn simd_double_round(
+def simd_double_round(
     mut row0: SIMD[DType.uint32, 4],
     mut row1: SIMD[DType.uint32, 4],
     mut row2: SIMD[DType.uint32, 4],
@@ -95,7 +95,7 @@ fn simd_double_round(
     return unshuffle_from_diagonal(diag_a, diag_b, diag_c, diag_d)
 
 @always_inline
-fn simd_quarter_round_8x(
+def simd_quarter_round_8x(
     mut a: SIMD[DType.uint32, 8],
     mut b: SIMD[DType.uint32, 8],
     mut c: SIMD[DType.uint32, 8],
@@ -122,7 +122,7 @@ fn simd_quarter_round_8x(
 
 
 @always_inline
-fn simd_double_round_8x(
+def simd_double_round_8x(
     mut row0: SIMD[DType.uint32, 8],
     mut row1: SIMD[DType.uint32, 8],
     mut row2: SIMD[DType.uint32, 8],
@@ -147,7 +147,7 @@ fn simd_double_round_8x(
 
 
 @always_inline
-fn chacha20_dual_block_core(
+def chacha20_dual_block_core(
     key: SIMD[DType.uint32, 8],
     counter1: UInt32,
     counter2: UInt32,
@@ -195,7 +195,7 @@ fn chacha20_dual_block_core(
 
 
 @always_inline
-fn chacha20_block_core(
+def chacha20_block_core(
     key: SIMD[DType.uint32, 8],
     counter: UInt32,
     nonce: SIMD[DType.uint32, 3],
@@ -228,7 +228,7 @@ fn chacha20_block_core(
     )
 
 
-fn chacha20_block(
+def chacha20_block(
     key: SIMD[DType.uint8, 32], counter: UInt32, nonce: SIMD[DType.uint8, 12]
 ) -> SIMD[DType.uint8, 64]:
     """ChaCha20 block function for compatibility."""
@@ -239,7 +239,7 @@ fn chacha20_block(
 
 
 @always_inline
-fn xor_block_simd[
+def xor_block_simd[
     origin: Origin[mut=True]
 ](
     mut data: Span[mut=True, UInt8, origin],
@@ -331,7 +331,7 @@ fn xor_block_simd[
 
 
 @always_inline
-fn xor_block(
+def xor_block(
     dst: UnsafePointer[UInt8, MutExternalOrigin],
     src: Span[UInt8, ...],
     keystream: SIMD[DType.uint32, 16],
@@ -355,7 +355,7 @@ fn xor_block(
 
 
 @always_inline
-fn xor_block_inplace[origin: Origin[mut=True]](
+def xor_block_inplace[origin: Origin[mut=True]](
     data_ptr: UnsafePointer[UInt8, origin],
     keystream: SIMD[DType.uint32, 16],
     offset: Int,
@@ -382,7 +382,7 @@ struct ChaCha20:
     var nonce: SIMD[DType.uint32, 3]
     var counter: UInt32
 
-    fn __init__(
+    def __init__(
         out self,
         key_bytes: SIMD[DType.uint8, 32],
         nonce_bytes: SIMD[DType.uint8, 12],
@@ -392,12 +392,12 @@ struct ChaCha20:
         self.nonce = bitcast[DType.uint32, 3](nonce_bytes)
         self.counter = counter
 
-    fn encrypt(
+    def encrypt(
         mut self, plaintext: Span[UInt8, ...]
     ) -> UnsafePointer[UInt8, MutExternalOrigin]:
         var len_pt = len(plaintext)
         if len_pt == 0:
-            var null_ptr: UnsafePointer[UInt8, MutExternalOrigin] = {}
+            var null_ptr = UnsafePointer[UInt8, MutExternalOrigin].unsafe_dangling()
             return null_ptr
 
         var ciphertext = alloc[UInt8](len_pt)
@@ -438,12 +438,12 @@ struct ChaCha20:
 
         return ciphertext
 
-    fn decrypt(
+    def decrypt(
         mut self, ciphertext: Span[UInt8, ...]
     ) -> UnsafePointer[UInt8, MutExternalOrigin]:
         return self.encrypt(ciphertext)
 
-    fn encrypt_inplace[origin: Origin[mut=True]](
+    def encrypt_inplace[origin: Origin[mut=True]](
         mut self, mut data: Span[mut=True, UInt8, origin]
     ):
         var len_data = len(data)

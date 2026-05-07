@@ -18,7 +18,7 @@ comptime SIMD128 = SIMD[DType.uint64, 2]
 
 
 @always_inline
-fn _aese(lhs: SIMD16, rhs: SIMD16) -> SIMD16:
+def _aese(lhs: SIMD16, rhs: SIMD16) -> SIMD16:
     comptime if CompilationTarget.has_neon():
         return llvm_intrinsic["llvm.aarch64.crypto.aese", SIMD16, has_side_effect=False](
             lhs, rhs
@@ -28,7 +28,7 @@ fn _aese(lhs: SIMD16, rhs: SIMD16) -> SIMD16:
 
 
 @always_inline
-fn _aesmc(state: SIMD16) -> SIMD16:
+def _aesmc(state: SIMD16) -> SIMD16:
     comptime if CompilationTarget.has_neon():
         return llvm_intrinsic["llvm.aarch64.crypto.aesmc", SIMD16, has_side_effect=False](
             state
@@ -38,12 +38,12 @@ fn _aesmc(state: SIMD16) -> SIMD16:
 
 
 @always_inline
-fn has_arm_crypto() -> Bool:
+def has_arm_crypto() -> Bool:
     return CompilationTarget.has_neon()
 
 
 @always_inline
-fn _mm_aesenc_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
+def _mm_aesenc_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
     comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
         return llvm_intrinsic["llvm.x86.aesni.aesenc", SIMD128, has_side_effect=False](
             lhs, rhs
@@ -53,7 +53,7 @@ fn _mm_aesenc_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
 
 
 @always_inline
-fn _mm_aesenclast_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
+def _mm_aesenclast_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
     comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
         return llvm_intrinsic["llvm.x86.aesni.aesenclast", SIMD128, has_side_effect=False](
             lhs, rhs
@@ -63,7 +63,7 @@ fn _mm_aesenclast_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
 
 
 @always_inline
-fn _mm_aeskeygenassist_si128(v: SIMD128, imm8: Int) -> SIMD128:
+def _mm_aeskeygenassist_si128(v: SIMD128, imm8: Int) -> SIMD128:
     comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
         return llvm_intrinsic[
             "llvm.x86.aesni.aeskeygenassist",
@@ -75,12 +75,12 @@ fn _mm_aeskeygenassist_si128(v: SIMD128, imm8: Int) -> SIMD128:
 
 
 @always_inline
-fn has_x86_aes_ni() -> Bool:
+def has_x86_aes_ni() -> Bool:
     return CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]()
 
 
 @always_inline
-fn _mm_loadu_si128(ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> SIMD128:
+def _mm_loadu_si128(ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> SIMD128:
     var bytes = SIMD[DType.uint8, 16](
         ptr[0], ptr[1], ptr[2], ptr[3],
         ptr[4], ptr[5], ptr[6], ptr[7],
@@ -91,13 +91,13 @@ fn _mm_loadu_si128(ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> SIMD128:
 
 
 @always_inline
-fn _mm_storeu_si128(ptr: UnsafePointer[UInt8, MutAnyOrigin], data: SIMD128) -> None:
+def _mm_storeu_si128(ptr: UnsafePointer[UInt8, MutAnyOrigin], data: SIMD128) -> None:
     var bytes: SIMD[DType.uint8, 16] = bitcast[DType.uint8, 16](data)
     ptr.store[width=16](0, bytes)
 
 
 @always_inline
-fn _load_round_key(idx: Int, round_keys: UnsafePointer[UInt32, MutAnyOrigin]) -> SIMD128:
+def _load_round_key(idx: Int, round_keys: UnsafePointer[UInt32, MutAnyOrigin]) -> SIMD128:
     var w0 = round_keys.load(idx * 4)
     var w1 = round_keys.load(idx * 4 + 1)
     var w2 = round_keys.load(idx * 4 + 2)
@@ -111,7 +111,7 @@ fn _load_round_key(idx: Int, round_keys: UnsafePointer[UInt32, MutAnyOrigin]) ->
     return bitcast[DType.uint64, 2](bytes.to_bits())
 
 
-fn x86_aes_encrypt_128(
+def x86_aes_encrypt_128(
     pt: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
 ) -> None:
@@ -120,7 +120,7 @@ fn x86_aes_encrypt_128(
     _mm_storeu_si128(pt, state)
 
 
-fn x86_aes_encrypt_192(
+def x86_aes_encrypt_192(
     pt: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
 ) -> None:
@@ -129,7 +129,7 @@ fn x86_aes_encrypt_192(
     _mm_storeu_si128(pt, state)
 
 
-fn x86_aes_encrypt_256(
+def x86_aes_encrypt_256(
     pt: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
 ) -> None:
@@ -139,7 +139,7 @@ fn x86_aes_encrypt_256(
 
 
 @always_inline
-fn x86_aes_encrypt_128_direct(
+def x86_aes_encrypt_128_direct(
     mut state: SIMD128,
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
 ) -> None:
@@ -154,7 +154,7 @@ fn x86_aes_encrypt_128_direct(
 
 
 @always_inline
-fn x86_aes_encrypt_192_direct(
+def x86_aes_encrypt_192_direct(
     mut state: SIMD128,
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
 ) -> None:
@@ -169,7 +169,7 @@ fn x86_aes_encrypt_192_direct(
 
 
 @always_inline
-fn x86_aes_encrypt_256_direct(
+def x86_aes_encrypt_256_direct(
     mut state: SIMD128,
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
 ) -> None:
@@ -183,7 +183,7 @@ fn x86_aes_encrypt_256_direct(
     state = _mm_aesenclast_si128(state, keys[14])
 
 
-fn arm_aes_encrypt_128(
+def arm_aes_encrypt_128(
     pt: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
 ) -> None:
@@ -267,7 +267,7 @@ fn arm_aes_encrypt_128(
     pt.store(15, result[15])
 
 
-fn arm_aes_encrypt_192(
+def arm_aes_encrypt_192(
     pt: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
 ) -> None:
@@ -357,7 +357,7 @@ fn arm_aes_encrypt_192(
     pt.store(15, result[15])
 
 
-fn arm_aes_encrypt_256(
+def arm_aes_encrypt_256(
     pt: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
 ) -> None:
@@ -454,7 +454,7 @@ fn arm_aes_encrypt_256(
 
 
 @always_inline
-fn arm_aes_ecb_kernel(
+def arm_aes_ecb_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
@@ -480,7 +480,7 @@ fn arm_aes_ecb_kernel(
 
 
 @always_inline
-fn arm_aes_cbc_kernel(
+def arm_aes_cbc_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
@@ -529,7 +529,7 @@ fn arm_aes_cbc_kernel(
 
 
 @always_inline
-fn arm_aes_ctr_kernel(
+def arm_aes_ctr_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
@@ -571,7 +571,7 @@ fn arm_aes_ctr_kernel(
         i += 1
 
 
-fn gf_mul2(x: UInt8) -> UInt8:
+def gf_mul2(x: UInt8) -> UInt8:
     var result = x << 1
     var hi_bit = (x >> 7) & 1
     if hi_bit == 1:
@@ -580,7 +580,7 @@ fn gf_mul2(x: UInt8) -> UInt8:
 
 
 @always_inline
-fn arm_aes_gcm_kernel(
+def arm_aes_gcm_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
@@ -620,14 +620,14 @@ fn arm_aes_gcm_kernel(
         i += 1
 
 
-fn gf_mul2_xts(val: UInt8) -> UInt8:
+def gf_mul2_xts(val: UInt8) -> UInt8:
     var result = val << 1
     if (val & 0x80) != 0:
         result = result ^ 0x87
     return result
 
 
-fn compute_xts_tweak(tweak_bytes: List[UInt8]) -> List[UInt8]:
+def compute_xts_tweak(tweak_bytes: List[UInt8]) -> List[UInt8]:
     var result = List[UInt8](capacity=16)
     for i in range(16):
         result.append(tweak_bytes[i])
@@ -643,7 +643,7 @@ fn compute_xts_tweak(tweak_bytes: List[UInt8]) -> List[UInt8]:
     return result^
 
 
-fn compute_xts_tweak_list(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> StackBuffer[UInt8, 16]:
+def compute_xts_tweak_list(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> StackBuffer[UInt8, 16]:
     var result = StackBuffer[UInt8, 16]()
     for i in range(16):
         result[i] = tweak_ptr.load(i)
@@ -660,7 +660,7 @@ fn compute_xts_tweak_list(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> Stac
 
 
 @always_inline
-fn arm_aes_xts_kernel(
+def arm_aes_xts_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys1: UnsafePointer[UInt32, MutAnyOrigin],
@@ -705,7 +705,7 @@ fn arm_aes_xts_kernel(
 
 
 @always_inline
-fn x86_aes_ecb_kernel(
+def x86_aes_ecb_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
@@ -728,7 +728,7 @@ fn x86_aes_ecb_kernel(
 
 
 @always_inline
-fn x86_aes_cbc_kernel(
+def x86_aes_cbc_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
@@ -756,7 +756,7 @@ fn x86_aes_cbc_kernel(
 
 
 @always_inline
-fn x86_aes_ctr_kernel(
+def x86_aes_ctr_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
@@ -787,7 +787,7 @@ fn x86_aes_ctr_kernel(
 
 
 @always_inline
-fn x86_aes_gcm_kernel(
+def x86_aes_gcm_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
@@ -820,14 +820,14 @@ fn x86_aes_gcm_kernel(
 
 
 @always_inline
-fn _gf_mul2_xts_simd(val: SIMD128) -> SIMD128:
+def _gf_mul2_xts_simd(val: SIMD128) -> SIMD128:
     var shifted = val << 1
     var carry = (val >> 63) & SIMD[DType.uint64, 2](0x87, 0x87)
     return shifted ^ carry
 
 
 @always_inline
-fn x86_aes_xts_kernel(
+def x86_aes_xts_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys1: UnsafePointer[UInt32, MutAnyOrigin],
@@ -861,7 +861,7 @@ fn x86_aes_xts_kernel(
 
 
 @always_inline
-fn aes_encrypt(
+def aes_encrypt(
     pt: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
     rounds: Int = 10
@@ -890,5 +890,5 @@ fn aes_encrypt(
 
 
 @always_inline
-fn has_aes_ni() -> Bool:
+def has_aes_ni() -> Bool:
     return has_x86_aes_ni() or has_arm_crypto()

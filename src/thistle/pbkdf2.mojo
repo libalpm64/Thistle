@@ -22,7 +22,7 @@ from .sha2 import (
 
 
 @always_inline
-fn encode_counter_be(counter: UInt32) -> SIMD[DType.uint8, 4]:
+def encode_counter_be(counter: UInt32) -> SIMD[DType.uint8, 4]:
     return SIMD[DType.uint8, 4](
         UInt8((counter >> 24) & 0xFF),
         UInt8((counter >> 16) & 0xFF),
@@ -41,7 +41,7 @@ struct PBKDF2SHA256:
     var inner_ctx: SHA256Context
     var outer_ctx: SHA256Context
 
-    fn __init__(out self, password: Span[UInt8, ...]):
+    def __init__(out self, password: Span[UInt8, ...]):
         self.ipad = alloc[UInt8](64)
         self.opad = alloc[UInt8](64)
         self.inner_hash = alloc[UInt8](32)
@@ -72,7 +72,7 @@ struct PBKDF2SHA256:
         memset_zero(k, 64)
         k.free()
 
-    fn __del__(deinit self):
+    def __del__(deinit self):
         self.ipad.free()
         self.opad.free()
         self.inner_hash.free()
@@ -81,7 +81,7 @@ struct PBKDF2SHA256:
         self.counter_bytes.free()
 
     @always_inline
-    fn hmac(mut self, data: Span[UInt8, ...]):
+    def hmac(mut self, data: Span[UInt8, ...]):
         self.inner_ctx.reset()
         sha256_update(self.inner_ctx, Span[UInt8, ...](ptr=self.ipad, length=64))
         sha256_update(self.inner_ctx, data)
@@ -93,7 +93,7 @@ struct PBKDF2SHA256:
         sha256_final_to_buffer(self.outer_ctx, self.u_block)
 
     @always_inline
-    fn hmac_with_counter(mut self, data: Span[UInt8, ...], counter: UInt32):
+    def hmac_with_counter(mut self, data: Span[UInt8, ...], counter: UInt32):
         self.counter_bytes[0] = UInt8((counter >> 24) & 0xFF)
         self.counter_bytes[1] = UInt8((counter >> 16) & 0xFF)
         self.counter_bytes[2] = UInt8((counter >> 8) & 0xFF)
@@ -111,7 +111,7 @@ struct PBKDF2SHA256:
         sha256_final_to_buffer(self.outer_ctx, self.u_block)
 
     @always_inline
-    fn derive(mut self, salt: Span[UInt8, ...], iterations: Int, dklen: Int) -> List[UInt8]:
+    def derive(mut self, salt: Span[UInt8, ...], iterations: Int, dklen: Int) -> List[UInt8]:
         var hLen = 32
         var num_blocks = (dklen + hLen - 1) // hLen
 
@@ -139,7 +139,7 @@ struct PBKDF2SHA256:
         return derived_key^
 
 
-fn pbkdf2_hmac_sha256(
+def pbkdf2_hmac_sha256(
     password: Span[UInt8, ...], salt: Span[UInt8, ...], iterations: Int, dkLen: Int
 ) -> List[UInt8]:
     var pbkdf2 = PBKDF2SHA256(password)
@@ -156,7 +156,7 @@ struct PBKDF2SHA512:
     var inner_ctx: SHA512Context
     var outer_ctx: SHA512Context
 
-    fn __init__(out self, password: Span[UInt8, ...]):
+    def __init__(out self, password: Span[UInt8, ...]):
         self.ipad = alloc[UInt8](128)
         self.opad = alloc[UInt8](128)
         self.inner_hash = alloc[UInt8](64)
@@ -187,7 +187,7 @@ struct PBKDF2SHA512:
         memset_zero(k, 128)
         k.free()
 
-    fn __del__(deinit self):
+    def __del__(deinit self):
         self.ipad.free()
         self.opad.free()
         self.inner_hash.free()
@@ -196,7 +196,7 @@ struct PBKDF2SHA512:
         self.counter_bytes.free()
 
     @always_inline
-    fn hmac(mut self, data: Span[UInt8, ...]):
+    def hmac(mut self, data: Span[UInt8, ...]):
         self.inner_ctx.reset()
         sha512_update(self.inner_ctx, Span[UInt8, ...](ptr=self.ipad, length=128))
         sha512_update(self.inner_ctx, data)
@@ -208,7 +208,7 @@ struct PBKDF2SHA512:
         sha512_final_to_buffer(self.outer_ctx, self.u_block)
 
     @always_inline
-    fn hmac_with_counter(mut self, data: Span[UInt8, ...], counter: UInt32):
+    def hmac_with_counter(mut self, data: Span[UInt8, ...], counter: UInt32):
         self.counter_bytes[0] = UInt8((counter >> 24) & 0xFF)
         self.counter_bytes[1] = UInt8((counter >> 16) & 0xFF)
         self.counter_bytes[2] = UInt8((counter >> 8) & 0xFF)
@@ -226,7 +226,7 @@ struct PBKDF2SHA512:
         sha512_final_to_buffer(self.outer_ctx, self.u_block)
 
     @always_inline
-    fn derive(mut self, salt: Span[UInt8, ...], iterations: Int, dklen: Int) -> List[UInt8]:
+    def derive(mut self, salt: Span[UInt8, ...], iterations: Int, dklen: Int) -> List[UInt8]:
         var hLen = 64
         var num_blocks = (dklen + hLen - 1) // hLen
 
@@ -254,7 +254,7 @@ struct PBKDF2SHA512:
         return derived_key^
 
 
-fn pbkdf2_hmac_sha512(
+def pbkdf2_hmac_sha512(
     password: Span[UInt8, ...], salt: Span[UInt8, ...], iterations: Int, dkLen: Int
 ) -> List[UInt8]:
     var pbkdf2 = PBKDF2SHA512(password)
@@ -262,7 +262,7 @@ fn pbkdf2_hmac_sha512(
 
 
 @always_inline
-fn hmac_sha256(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
+def hmac_sha256(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
     var pbkdf2 = PBKDF2SHA256(key)
     pbkdf2.hmac(data)
     var result = List[UInt8](capacity=32)
@@ -272,7 +272,7 @@ fn hmac_sha256(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
 
 
 @always_inline
-fn hmac_sha512(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
+def hmac_sha512(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
     var pbkdf2 = PBKDF2SHA512(key)
     pbkdf2.hmac(data)
     var result = List[UInt8](capacity=64)

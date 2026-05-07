@@ -37,7 +37,7 @@ comptime SIGMA6 = 0xB05688C2B3E6C1FD
 
 
 @always_inline
-fn rotl128(high: UInt64, low: UInt64, n: Int) -> SIMD[DType.uint64, 2]:
+def rotl128(high: UInt64, low: UInt64, n: Int) -> SIMD[DType.uint64, 2]:
     if n < 64:
         var s = UInt64(n)
         return SIMD[DType.uint64, 2](
@@ -52,7 +52,7 @@ fn rotl128(high: UInt64, low: UInt64, n: Int) -> SIMD[DType.uint64, 2]:
 
 
 @always_inline
-fn camellia_f(f_in: UInt64, ke: UInt64) -> UInt64:
+def camellia_f(f_in: UInt64, ke: UInt64) -> UInt64:
     var x = f_in ^ ke
     
     var t1 = UInt8((x >> 56) & 0xFF)
@@ -90,7 +90,7 @@ fn camellia_f(f_in: UInt64, ke: UInt64) -> UInt64:
 
 
 @always_inline
-fn camellia_fl(fl_in: UInt64, ke: UInt64) -> UInt64:
+def camellia_fl(fl_in: UInt64, ke: UInt64) -> UInt64:
     var x1 = UInt32(fl_in >> 32)
     var x2 = UInt32(fl_in & 0xFFFFFFFF)
     var k1 = UInt32(ke >> 32)
@@ -103,7 +103,7 @@ fn camellia_fl(fl_in: UInt64, ke: UInt64) -> UInt64:
 
 
 @always_inline
-fn camellia_flinv(flinv_in: UInt64, ke: UInt64) -> UInt64:
+def camellia_flinv(flinv_in: UInt64, ke: UInt64) -> UInt64:
     var y1 = UInt32(flinv_in >> 32)
     var y2 = UInt32(flinv_in & 0xFFFFFFFF)
     var k1 = UInt32(ke >> 32)
@@ -121,7 +121,7 @@ struct CamelliaCipher:
     var ke: SIMD[DType.uint64, 6]
     var is_128: Bool
     
-    fn __init__(out self, key: Span[UInt8, ...]):
+    def __init__(out self, key: Span[UInt8, ...]):
         self.kw = SIMD[DType.uint64, 4](0)
         self.k = SIMD[DType.uint64, 24](0)
         self.ke = SIMD[DType.uint64, 6](0)
@@ -135,10 +135,10 @@ struct CamelliaCipher:
             print("Error: Invalid key length. Must be 16, 24, or 32 bytes.")
 
     @always_inline
-    fn _bytes_to_u64_be(ref self, b: Span[UInt8, ...]) -> UInt64:
+    def _bytes_to_u64_be(ref self, b: Span[UInt8, ...]) -> UInt64:
         return byte_swap(bitcast[DType.uint64, 1](b.unsafe_ptr().load[width=8](0))[0])
 
-    fn _key_schedule_128(mut self, key: Span[UInt8, ...]):
+    def _key_schedule_128(mut self, key: Span[UInt8, ...]):
         var kl_h = self._bytes_to_u64_be(key[0:8])
         var kl_l = self._bytes_to_u64_be(key[8:16])
         var kr_h: UInt64 = 0
@@ -204,7 +204,7 @@ struct CamelliaCipher:
         self.kw[2] = rot[0]
         self.kw[3] = rot[1]
 
-    fn _key_schedule_192_256(mut self, key: Span[UInt8, ...]):
+    def _key_schedule_192_256(mut self, key: Span[UInt8, ...]):
         var kl_h = self._bytes_to_u64_be(key[0:8])
         var kl_l = self._bytes_to_u64_be(key[8:16])
         var kr_h: UInt64
@@ -294,7 +294,7 @@ struct CamelliaCipher:
         self.kw[2] = rot[0]
         self.kw[3] = rot[1]
 
-    fn encrypt(self, block: SIMD[DType.uint8, 16]) -> SIMD[DType.uint8, 16]:
+    def encrypt(self, block: SIMD[DType.uint8, 16]) -> SIMD[DType.uint8, 16]:
         var cast_block = bitcast[DType.uint64, 2](block)
         var d1 = byte_swap(cast_block[0])
         var d2 = byte_swap(cast_block[1])
@@ -345,7 +345,7 @@ struct CamelliaCipher:
         
         return bitcast[DType.uint8, 16](SIMD[DType.uint64, 2](byte_swap(d2), byte_swap(d1)))
 
-    fn decrypt(self, block: SIMD[DType.uint8, 16]) -> SIMD[DType.uint8, 16]:
+    def decrypt(self, block: SIMD[DType.uint8, 16]) -> SIMD[DType.uint8, 16]:
         var cast_block = bitcast[DType.uint64, 2](block)
         var d1 = byte_swap(cast_block[1])
         var d2 = byte_swap(cast_block[0])
@@ -396,8 +396,8 @@ struct CamelliaCipher:
         
         return bitcast[DType.uint8, 16](SIMD[DType.uint64, 2](byte_swap(d1), byte_swap(d2)))
 
-    fn encrypt(self, block: Span[UInt8, ...]) -> SIMD[DType.uint8, 16]:
+    def encrypt(self, block: Span[UInt8, ...]) -> SIMD[DType.uint8, 16]:
         return self.encrypt(block.unsafe_ptr().load[width=16](0))
 
-    fn decrypt(self, block: Span[UInt8, ...]) -> SIMD[DType.uint8, 16]:
+    def decrypt(self, block: Span[UInt8, ...]) -> SIMD[DType.uint8, 16]:
         return self.decrypt(block.unsafe_ptr().load[width=16](0))

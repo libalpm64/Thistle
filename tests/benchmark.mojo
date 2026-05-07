@@ -28,14 +28,14 @@ comptime TEST_CT: StaticTuple[UInt8, 16] = StaticTuple[UInt8, 16](
     0x3a, 0xd7, 0x7b, 0xb4, 0x0d, 0x7a, 0x36, 0x60, 0xa8, 0x9e, 0xca, 0xf3, 0x24, 0x66, 0xef, 0x97
 )
 
-fn generate_data(length: Int) -> List[UInt8]:
+def generate_data(length: Int) -> List[UInt8]:
     var data = List[UInt8](capacity=length)
     for i in range(length):
         data.append(UInt8(i % 256))
     return data^
 
 
-fn benchmark_sha256(data: List[UInt8], duration_secs: Float64) -> String:
+def benchmark_sha256(data: List[UInt8], duration_secs: Float64) -> String:
     var span = Span[UInt8, ...](data)
     _ = sha256_hash(span)
     var count = 0
@@ -50,7 +50,7 @@ fn benchmark_sha256(data: List[UInt8], duration_secs: Float64) -> String:
     return "sha256 | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-fn benchmark_sha256ni(data: List[UInt8], duration_secs: Float64) -> String:
+def benchmark_sha256ni(data: List[UInt8], duration_secs: Float64) -> String:
     if not has_sha_ni():
         return "sha256-ni | (NI not available)"
     var span = Span[UInt8, ...](data)
@@ -67,7 +67,7 @@ fn benchmark_sha256ni(data: List[UInt8], duration_secs: Float64) -> String:
     return "sha256-ni | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-fn benchmark_sha512(data: List[UInt8], duration_secs: Float64) -> String:
+def benchmark_sha512(data: List[UInt8], duration_secs: Float64) -> String:
     var span = Span[UInt8, ...](data)
     _ = sha512_hash(span)
     var count = 0
@@ -82,7 +82,7 @@ fn benchmark_sha512(data: List[UInt8], duration_secs: Float64) -> String:
     return "sha512 | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-fn benchmark_sha3_256(data: List[UInt8], duration_secs: Float64) -> String:
+def benchmark_sha3_256(data: List[UInt8], duration_secs: Float64) -> String:
     var span = Span[UInt8, ...](data)
     _ = sha3_256(span)
     var count = 0
@@ -97,7 +97,7 @@ fn benchmark_sha3_256(data: List[UInt8], duration_secs: Float64) -> String:
     return "sha3-256 | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-fn benchmark_blake2b(data: List[UInt8], duration_secs: Float64) -> String:
+def benchmark_blake2b(data: List[UInt8], duration_secs: Float64) -> String:
     var span = Span[UInt8, ...](data)
     var count = 0
     var start = perf_counter()
@@ -113,7 +113,7 @@ fn benchmark_blake2b(data: List[UInt8], duration_secs: Float64) -> String:
     return "blake2b | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-fn benchmark_blake3(data: List[UInt8], duration_secs: Float64) -> String:
+def benchmark_blake3(data: List[UInt8], duration_secs: Float64) -> String:
     var span = Span[UInt8, ...](data)
     _ = blake3_parallel_hash(span)
     var count = 0
@@ -128,7 +128,7 @@ fn benchmark_blake3(data: List[UInt8], duration_secs: Float64) -> String:
     return "blake3 | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-fn benchmark_camellia(data_size: Int, duration_secs: Float64) -> String:
+def benchmark_camellia(data_size: Int, duration_secs: Float64) -> String:
     var key = List[UInt8]()
     for i in range(16):
         key.append(UInt8(i))
@@ -153,7 +153,7 @@ fn benchmark_camellia(data_size: Int, duration_secs: Float64) -> String:
     return "camellia | throughput: " + String(mbps)[byte=:6] + " mb/s, blocks: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-fn benchmark_chacha20(data_size: Int, duration_secs: Float64) -> String:
+def benchmark_chacha20(data_size: Int, duration_secs: Float64) -> String:
     var key = SIMD[DType.uint8, 32](0)
     for i in range(32):
         key[i] = UInt8(i)
@@ -181,7 +181,7 @@ fn benchmark_chacha20(data_size: Int, duration_secs: Float64) -> String:
     return "chacha20 | throughput: " + String(mbps)[byte=:6] + " mb/s, encrypts: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-fn benchmark_kcipher2(data_size: Int, duration_secs: Float64) -> String:
+def benchmark_kcipher2(data_size: Int, duration_secs: Float64) -> String:
     var key = SIMD[DType.uint32, 4](0, 0, 0, 0)
     var iv = SIMD[DType.uint32, 4](0, 0, 0, 0)
     var cipher = KCipher2(key, iv)
@@ -204,7 +204,7 @@ fn benchmark_kcipher2(data_size: Int, duration_secs: Float64) -> String:
     return "kcipher2 | throughput: " + String(mbps)[byte=:6] + " mb/s, encrypts: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-fn benchmark_argon2(duration_secs: Float64) -> String:
+def benchmark_argon2(duration_secs: Float64) -> String:
     var password = String("password").as_bytes()
     var salt = String("saltsalt12345678").as_bytes()
     var ctx = Argon2id(salt, memory_size_kb=65536, iterations=3, parallelism=4)
@@ -222,7 +222,7 @@ fn benchmark_argon2(duration_secs: Float64) -> String:
     return "argon2id | throughput: " + String(hps)[byte=:6] + " h/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-fn benchmark_aes_cpu(duration_secs: Float64) raises -> String:
+def benchmark_aes_cpu(duration_secs: Float64) raises -> String:
     var key = AESKey(TEST_KEY)
     var round_keys = key.round_keys()
     var pt_bytes = alloc[UInt8](16)
@@ -249,7 +249,7 @@ fn benchmark_aes_cpu(duration_secs: Float64) raises -> String:
     return "aes-128-cpu | throughput: " + String(mbps)[byte=:6] + " mb/s, blocks: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-fn benchmark_aes_gpu_ecb() raises -> String:
+def benchmark_aes_gpu_ecb() raises -> String:
     comptime
     if not has_accelerator():
         return "aes-128-gpu-ecb | (GPU not available)"
@@ -329,7 +329,7 @@ fn benchmark_aes_gpu_ecb() raises -> String:
         return "aes-128-gpu-ecb | throughput: " + String(gbps)[byte=:6] + " gb/s, iterations: " + String(iterations)
 
 
-fn benchmark_aes_gpu_cbc() raises -> String:
+def benchmark_aes_gpu_cbc() raises -> String:
     comptime
     if not has_accelerator():
         return "aes-128-gpu-cbc | (GPU not available)"
@@ -417,7 +417,7 @@ fn benchmark_aes_gpu_cbc() raises -> String:
         return "aes-128-gpu-cbc | throughput: " + String(gbps)[byte=:6] + " gb/s, iterations: " + String(iterations)
 
 
-fn benchmark_aes_gpu_ctr() raises -> String:
+def benchmark_aes_gpu_ctr() raises -> String:
     comptime
     if not has_accelerator():
         return "aes-128-gpu-ctr | (GPU not available)"
