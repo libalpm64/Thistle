@@ -8,7 +8,7 @@ version = "1.0.2"
 [tasks]
 build-pq = { cmd = "bash libs/build.sh", inputs = ["libs/src/**/*.c", "libs/build.sh"] }
 test = { cmd = "mojo run -I src/ tests/thistle_test_vectors.mojo", depends-on = ["build-pq"] }
-test-pq = { cmd = "LD_PRELOAD=libs/randombytes.so mojo run -I src/ tests/pq_test_vectors.mojo", depends-on = ["build-pq"] }
+test-pq = { cmd = "LD_LIBRARY_PATH=libs:${LD_LIBRARY_PATH:-} mojo run -I src/ tests/pq_test_vectors.mojo", depends-on = ["build-pq"] }
 bench = { cmd = "mojo run -I src/ tests/benchmark.mojo", depends-on = ["build-pq"] }
 clean-pq = "rm -rf libs/src/mldsa-native libs/src/mlkem-native libs/*.so libs/*.dylib libs/*.dll"
 
