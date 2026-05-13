@@ -4,11 +4,12 @@
 """
 By Libalpm64
 Non-Production code
-Do note use on ARM because of a stack aliasing bug.
+Do note use on ARM Verification fails because group homomorphism is broken.
 """
 from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
 from std.collections import List
+from std.memory import bitcast
 from .curve25519 import FieldElement51
 from .sha2 import sha512_hash
 from .utils import StackInlineArray
@@ -62,32 +63,39 @@ comptime POW2_256_LIMBS = SIMD[DType.uint64, 5](
     0x0000099411b7c309,
 )
 
+comptime L_BYTES = SIMD[DType.uint8, 32](
+    0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
+    0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
+)
+
+
+@always_inline
+def _s_lt_l(s: Span[UInt8, ...]) -> Bool:
+    # Little endian lexicographic compare from MSB
+    for i in range(31, -1, -1):
+        var li = L_BYTES[i]
+        if s[i] < li:
+            return True
+        if s[i] > li:
+            return False
+    return False
+
 def _pack_limbs(limbs: SIMD[DType.uint64, 5]) -> List[UInt8]:
     var words = SIMD[DType.uint64, 4](0, 0, 0, 0)
-    words[0] = limbs[0] | (limbs[1] << UInt64(52))
-    words[1] = (limbs[1] >> UInt64(12)) | (limbs[2] << UInt64(40))
-    words[2] = (limbs[2] >> UInt64(24)) | (limbs[3] << UInt64(28))
-    words[3] = (limbs[3] >> UInt64(36)) | (limbs[4] << UInt64(16))
+    words[0] = limbs[0] | (limbs[1] << 52)
+    words[1] = (limbs[1] >> 12) | (limbs[2] << 40)
+    words[2] = (limbs[2] >> 24) | (limbs[3] << 28)
+    words[3] = (limbs[3] >> 36) | (limbs[4] << 16)
+    var bytes = bitcast[DType.uint8, 32](words)
     var out = List[UInt8](capacity=32)
-    for i in range(4):
-        for j in range(8):
-            out.append(UInt8(words[i] >> UInt64(j * 8)) & 0xFF)
+    for i in range(32):
+        out.append(bytes[i])
     return out^
 
-def bytes_to_hex(bytes: List[UInt8]) -> String:
-    var r = String(capacity=len(bytes)*2)
-    for i in range(len(bytes)):
-        var hi = Int(bytes[i] >> 4)
-        var lo = Int(bytes[i] & 15)
-        r += chr(hi + 48 if hi < 10 else hi - 10 + 97)
-        r += chr(lo + 48 if lo < 10 else lo - 10 + 97)
-    return r
-
 def _unpack_limbs(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 5]:
-    var words = SIMD[DType.uint64, 4](0, 0, 0, 0)
-    for i in range(4):
-        for j in range(8):
-            words[i] |= UInt64(bytes[i * 8 + j]) << UInt64(j * 8)
+    var words = bytes.unsafe_ptr().bitcast[UInt64]().load[width=4]()
     comptime MASK = (UInt64(1) << 52) - 1
     comptime TOP_MASK = (UInt64(1) << 48) - 1
     var s = SIMD[DType.uint64, 5](0, 0, 0, 0, 0)
@@ -117,32 +125,21 @@ def ed25519_d2() -> FieldElement51:
     return ed25519_d() * FieldElement51(2, 0, 0, 0, 0)
 
 def ed25519_base_point() -> EdwardsPoint:
-    var x_bytes = List[UInt8](capacity=32)
-    x_bytes.append(0x1a); x_bytes.append(0xd5); x_bytes.append(0x25); x_bytes.append(0x8f)
-    x_bytes.append(0x60); x_bytes.append(0x2d); x_bytes.append(0x56); x_bytes.append(0xc9)
-    x_bytes.append(0xb2); x_bytes.append(0xa7); x_bytes.append(0x25); x_bytes.append(0x95)
-    x_bytes.append(0x60); x_bytes.append(0xc7); x_bytes.append(0x2c); x_bytes.append(0x69)
-    x_bytes.append(0x5c); x_bytes.append(0xdc); x_bytes.append(0xd6); x_bytes.append(0xfd)
-    x_bytes.append(0x31); x_bytes.append(0xe2); x_bytes.append(0xa4); x_bytes.append(0xc0)
-    x_bytes.append(0xfe); x_bytes.append(0x53); x_bytes.append(0x6e); x_bytes.append(0xcd)
-    x_bytes.append(0xd3); x_bytes.append(0x36); x_bytes.append(0x69); x_bytes.append(0x21)
-    var x_span = Span[UInt8, ...](x_bytes)
-    var X = fe_from_bytes(x_span)
-    _ = x_bytes
-    var y_bytes = List[UInt8](capacity=32)
-    y_bytes.append(0x58); y_bytes.append(0x66); y_bytes.append(0x66); y_bytes.append(0x66)
-    y_bytes.append(0x66); y_bytes.append(0x66); y_bytes.append(0x66); y_bytes.append(0x66)
-    y_bytes.append(0x66); y_bytes.append(0x66); y_bytes.append(0x66); y_bytes.append(0x66)
-    y_bytes.append(0x66); y_bytes.append(0x66); y_bytes.append(0x66); y_bytes.append(0x66)
-    y_bytes.append(0x66); y_bytes.append(0x66); y_bytes.append(0x66); y_bytes.append(0x66)
-    y_bytes.append(0x66); y_bytes.append(0x66); y_bytes.append(0x66); y_bytes.append(0x66)
-    y_bytes.append(0x66); y_bytes.append(0x66); y_bytes.append(0x66); y_bytes.append(0x66)
-    y_bytes.append(0x66); y_bytes.append(0x66); y_bytes.append(0x66); y_bytes.append(0x66)
-    var y_span = Span[UInt8, ...](y_bytes)
-    var Y = fe_from_bytes(y_span)
-    _ = y_bytes
-    var T = X * Y
-    return EdwardsPoint(X, Y, FieldElement51.ONE(), T)
+    var X_bytes: List[UInt8] = [
+        0x1a, 0xd5, 0x25, 0x8f, 0x60, 0x2d, 0x56, 0xc9,
+        0xb2, 0xa7, 0x25, 0x95, 0x60, 0xc7, 0x2c, 0x69,
+        0x5c, 0xdc, 0xd6, 0xfd, 0x31, 0xe2, 0xa4, 0xc0,
+        0xfe, 0x53, 0x6e, 0xcd, 0xd3, 0x36, 0x69, 0x21
+    ]
+    var X = fe_from_bytes(Span[UInt8, ...](X_bytes))
+    var Y_bytes: List[UInt8] = [
+        0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+        0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+        0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+        0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66
+    ]
+    var Y = fe_from_bytes(Span[UInt8, ...](Y_bytes))
+    return EdwardsPoint(X, Y, FieldElement51.ONE(), X * Y)
 
 
 struct Scalar(Movable, Copyable, ImplicitlyCopyable):
@@ -177,6 +174,16 @@ struct Scalar(Movable, Copyable, ImplicitlyCopyable):
     def from_bytes_wide(bytes: Span[UInt8, ...]) -> Scalar:
         var limbs = _from_512_raw(bytes)
         return Scalar(limbs)
+
+    @staticmethod
+    def from_bytes_clamped(bytes: Span[UInt8, ...]) -> Scalar:
+        var s = List[UInt8](capacity=32)
+        for i in range(32):
+            s.append(bytes[i])
+        s[0] &= 0xF8
+        s[31] &= 0x7F
+        s[31] |= 0x40
+        return Scalar.from_bytes(Span[UInt8, ...](s))
 
     def __add__(self, other: Scalar) -> Scalar:
         comptime MASK = (UInt64(1) << 52) - 1
@@ -271,35 +278,30 @@ struct EdwardsPoint(Movable, Copyable, ImplicitlyCopyable):
     def __moveinit__(out self, deinit take: Self):
         self.X = take.X^; self.Y = take.Y^; self.Z = take.Z^; self.T = take.T^
 
+struct DecodeResult(Movable, Copyable, ImplicitlyCopyable):
+    var ok: Bool
+    var p: EdwardsPoint
+
+    @always_inline
+    def __init__(out self):
+        self.ok = False
+        self.p = EdwardsPoint()
+
+    @always_inline
+    def __init__(out self, ok: Bool, p: EdwardsPoint):
+        self.ok = ok
+        self.p = p
 
 def edwards_add(p: EdwardsPoint, q: EdwardsPoint) -> EdwardsPoint:
     var d2 = FieldElement51(ED25519_D2_LIMBS)
-    var A = (p.Y - p.X) * (q.Y - q.X)
-    var B = (p.Y + p.X) * (q.Y + q.X)
-    var C = p.T * q.T * d2
-    var D = p.Z * q.Z * FieldElement51(2, 0, 0, 0, 0)
-    var E = B - A
-    var F = D - C
-    var G = D + C
-    var H = B + A
-    return EdwardsPoint(E * F, G * H, F * G, E * H)
+    return _edwards_add_d2(p, q, d2)
 
 def edwards_double(p: EdwardsPoint) -> EdwardsPoint:
-    var A = p.X.square()
-    var B = p.Y.square()
-    var C = p.Z.square() * FieldElement51(2, 0, 0, 0, 0)
-    var H = A + B
-    var E = H - (p.X + p.Y).square()
-    var G = A - B
-    var F = C + G
-    return EdwardsPoint(E * F, G * H, F * G, E * H)
+    return _edwards_double_standalone(p)
 
 def edwards_negate(p: EdwardsPoint) -> EdwardsPoint:
     return EdwardsPoint(FieldElement51.ZERO() - p.X, p.Y, p.Z, FieldElement51.ZERO() - p.T)
 
-# stack aliasing bug on ARM64 that occurs when ed25519_d2()
-# is called inside a loop that also modifies EdwardsPoint values.
-# COMPILER-BUG (will never sort)
 @no_inline
 def _edwards_add_d2(p: EdwardsPoint, q: EdwardsPoint, d2: FieldElement51) -> EdwardsPoint:
     var A = (p.Y - p.X) * (q.Y - q.X)
@@ -373,7 +375,10 @@ def fe_to_bytes(fe: FieldElement51) -> List[UInt8]:
 @no_inline
 def fe_from_bytes(bytes: Span[UInt8, ...]) -> FieldElement51:
     def load8(ptr: UnsafePointer[UInt8, _]) -> UInt64:
-        return ptr.bitcast[UInt64]().load()
+        var v: UInt64 = 0
+        for j in range(8):
+            v |= UInt64(ptr[j]) << UInt64(j * 8)
+        return v
     var ptr = bytes.unsafe_ptr()
     var MASK = UInt64(0x7FFFFFFFFFFFF)
     var l0 = load8(ptr) & MASK
@@ -395,97 +400,145 @@ def edwards_encode(p: EdwardsPoint) -> List[UInt8]:
     return out^
 
 @no_inline
-def edwards_decode(data: Span[UInt8, ...]) -> EdwardsPoint:
+def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
     var y_bytes = List[UInt8](capacity=32)
     for i in range(32):
         y_bytes.append(data[i])
-    y_bytes[31] = y_bytes[31] & 0x7F
-    var y_span = Span[UInt8, ...](y_bytes)
-    var y = fe_from_bytes(y_span)
-    _ = y_bytes
+    var sign = (y_bytes[31] >> 7) & 1
+    y_bytes[31] &= 0x7F
+    var y = fe_from_bytes(Span[UInt8, ...](y_bytes))
+
     var y2 = y.square()
     var u = y2 - FieldElement51.ONE()
     var v = y2 * ed25519_d() + FieldElement51.ONE()
-    var x = sqrt_ratio(u, v)
-    var x_bytes = x.to_bytes()
-    var sign = (data[31] >> 7) & 1
-    if (x_bytes[0] & 1) != sign:
-        x = FieldElement51.ZERO() - x
-    var t = x * y
-    return EdwardsPoint(x, y, FieldElement51.ONE(), t)
+
+    var x_opt = sqrt_ratio_checked(u, v)
+    if not x_opt:
+        return DecodeResult(False, EdwardsPoint())
+    var x = x_opt.value()
+
+    var x_try = x
+    if (x_try.to_bytes()[0] & 1) != sign:
+        x_try = FieldElement51.ZERO() - x_try
+
+    var chk = x_try.square() * v - u
+    var chk_bytes = chk.to_bytes()
+    var ok = True
+    for i in range(32):
+        if chk_bytes[i] != 0:
+            ok = False
+
+    if ok:
+        return DecodeResult(True, EdwardsPoint(x_try, y, FieldElement51.ONE(), x_try * y))
+
+    if not strict:
+        var x_alt = FieldElement51.ZERO() - x_try
+        var chk2 = x_alt.square() * v - u
+        var chk2_bytes = chk2.to_bytes()
+        var ok2 = True
+        for i in range(32):
+            if chk2_bytes[i] != 0:
+                ok2 = False
+        if ok2:
+            return DecodeResult(True, EdwardsPoint(x_alt, y, FieldElement51.ONE(), x_alt * y))
+
+    return DecodeResult(False, EdwardsPoint())
 
 @no_inline
-def sqrt_ratio(u: FieldElement51, v: FieldElement51) -> FieldElement51:
-    var v_sq = v.square()
-    var v3 = v_sq * v
-    var v4 = v_sq.square()
-    var v7 = v4 * v3
-    var c = u * v7
-    var t = c.square()
-    t = t * c
-    t = t.square()
-    var tv = t * c
-    t = tv.pow2k(3)
-    t = t * tv
-    t = t.square()
-    tv = t * c
-    t = tv.pow2k(7)
-    t = t * tv
-    t = t.square()
-    tv = t * c
-    t = tv.pow2k(15)
-    t = t * tv
-    t = t.square()
-    tv = t * c
-    t = tv.pow2k(31)
-    tv = t * tv
-    t = tv.pow2k(62)
-    t = t * tv
-    t = t.square()
-    tv = t * c
-    t = tv.pow2k(125)
-    t = t * tv
-    t = t.square()
-    t = t.square()
-    t = t * c
-    var x = t * u
-    x = x * v3
-    var diff = x.square() * v - u
+def edwards_decode_checked(data: Span[UInt8, ...]) -> DecodeResult:
+    return edwards_decode(data, strict=True)
+
+def edwards_decode_verify_compatible(data: Span[UInt8, ...]) -> DecodeResult:
+    return edwards_decode(data, strict=False)
+
+@no_inline
+def edwards_decode_canonical(data: Span[UInt8, ...]) -> EdwardsPoint:
+    var p = edwards_decode_checked(data)
+    if p.ok:
+        return p.p
+    return EdwardsPoint()
+
+@no_inline
+def sqrt_ratio_checked(u: FieldElement51, v: FieldElement51) -> Optional[FieldElement51]:
+    @always_inline
+    def _pow_p58(a: FieldElement51) -> FieldElement51:
+        var acc = FieldElement51.ONE()
+        for i in range(251, -1, -1):
+            acc = acc.square()
+            var bit = True
+            if i == 1:
+                bit = False
+            if bit:
+                acc = acc * a
+        return acc
+
+    var v2 = v.square()
+    var v3 = v2 * v
+    var v7 = v3 * v2.square()
+    var r = u * v7
+    var z = _pow_p58(r)
+
+    var x = u * v3 * z
+    var vx2 = x.square() * v
+    var diff = vx2 - u
+    var diff2 = vx2 + u
     var diff_bytes = diff.to_bytes()
+    var diff2_bytes = diff2.to_bytes()
     var is_zero = True
+    var is_zero2 = True
     for i in range(32):
         if diff_bytes[i] != 0:
             is_zero = False
+        if diff2_bytes[i] != 0:
+            is_zero2 = False
     if is_zero:
-        return x
-    var sqrtm1 = FieldElement51(
-        1718705420411056, 234908883556509,
-        2233514472574048, 2117202627021982, 765476049583133)
-    x = x * sqrtm1
-    return x
+        return Optional[FieldElement51](x)
+    if is_zero2:
+        var sqrtm1 = FieldElement51(
+            1718705420411056, 234908883556509,
+            2233514472574048, 2117202627021982, 765476049583133)
+        return Optional[FieldElement51](x * sqrtm1)
+    return None
 
+@no_inline
+def sqrt_ratio(u: FieldElement51, v: FieldElement51) -> FieldElement51:
+    var x = sqrt_ratio_checked(u, v)
+    if x:
+        return x.value()
+    return FieldElement51.ZERO()
 
 @no_inline
 def _scalar_mult(k: Span[UInt8, ...], p: EdwardsPoint) -> EdwardsPoint:
-	# ARM COMPILER-BUG
-    # ed25519_d2() inside the loop corrupts the accumulator r.
-	# two _scalar_mult_base calls corrupt each other.
+    # ARM64 COMPILER BUG: Group homomorphism fails under composition.
+    # 8*SB != 8*(R + kA) (affine equivalence fails)
+    # Decoding and isolated ops pass. Composition corrupts.
     var d2 = ed25519_d() * FieldElement51(2, 0, 0, 0, 0)
-    var bX = FieldElement51(p.X.limbs)
-    var bY = FieldElement51(p.Y.limbs)
-    var bZ = FieldElement51(p.Z.limbs)
-    var bT = FieldElement51(p.T.limbs)
+    var base = EdwardsPoint(
+        FieldElement51(p.X.limbs),
+        FieldElement51(p.Y.limbs),
+        FieldElement51(p.Z.limbs),
+        FieldElement51(p.T.limbs),
+    )
     var r = EdwardsPoint()
+    @always_inline
+    def _bit_at(bytes: Span[UInt8, ...], bit_index: Int) -> UInt8:
+        if bit_index < 0:
+            return 0
+        var byte_idx = bit_index // 8
+        if byte_idx < 0 or byte_idx >= len(bytes):
+            return 0
+        var shift = bit_index % 8
+        if shift < 0:
+            return 0
+        if shift > 7:
+            shift = 7
+        var byte_val: UInt8 = bytes[byte_idx]
+        return (byte_val >> UInt8(shift)) & UInt8(1)
+
     for i in range(255, -1, -1):
         r = _edwards_double_standalone(r)
-        if (Int(k[i // 8]) >> (i % 8)) & 1:
-            var q = EdwardsPoint(
-                FieldElement51(bX.limbs),
-                FieldElement51(bY.limbs),
-                FieldElement51(bZ.limbs),
-                FieldElement51(bT.limbs),
-            )
-            r = _edwards_add_d2(r, q, FieldElement51(d2.limbs))
+        if _bit_at(k, i) == 1:
+            r = _edwards_add_d2(r, base, FieldElement51(d2.limbs))
     return r
 
 def _scalar_mult_base(k: Span[UInt8, ...]) -> EdwardsPoint:
@@ -494,42 +547,25 @@ def _scalar_mult_base(k: Span[UInt8, ...]) -> EdwardsPoint:
 
 def ed25519_generate_public_key(private_key: Span[UInt8, ...]) -> List[UInt8]:
     var hash = sha512_hash(private_key)
-    var s = List[UInt8](capacity=32)
-    for i in range(32):
-        s.append(hash[i])
-    s[0] = s[0] & 0xF8
-    s[31] = s[31] & 0x7F
-    s[31] = s[31] | 0x40
-    var s_span = Span[UInt8, ...](s)
-    var pub_point = _scalar_mult_base(s_span)
-    _ = s
+    var s = Scalar.from_bytes_clamped(Span[UInt8, ...](hash))
+    var pub_point = _scalar_mult_base(s.to_bytes())
     return edwards_encode(pub_point)
 
 def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...]) -> List[UInt8]:
     var hash = sha512_hash(private_key)
-
-    var s = List[UInt8](capacity=32)
-    for i in range(32):
-        s.append(hash[i])
-    s[0] = s[0] & 0xF8; s[31] = s[31] & 0x7F; s[31] = s[31] | 0x40
+    var s_scalar = Scalar.from_bytes_clamped(Span[UInt8, ...](hash))
 
     var prefix = List[UInt8](capacity=32)
     for i in range(32):
         prefix.append(hash[32 + i])
 
-    var s_span = Span[UInt8, ...](s)
-    var A_point = _scalar_mult_base(s_span)
-    _ = s_span
+    var A_point = _scalar_mult_base(s_scalar.to_bytes())
     var A_enc = edwards_encode(A_point)
 
     var r_in = List[UInt8](capacity=32 + len(message))
-    for i in range(32):
-        r_in.append(prefix[i])
-    for i in range(len(message)):
-        r_in.append(message[i])
-    var r_in_span = Span[UInt8, ...](r_in)
-    var r_hash = sha512_hash(r_in_span)
-    _ = r_in
+    r_in.extend(prefix.copy())
+    r_in.extend(message)
+    var r_hash = sha512_hash(Span[UInt8, ...](r_in))
 
     var r_hash_span = Span[UInt8, ...](r_hash)
     var r_scalar = Scalar.from_bytes_wide(r_hash_span)
@@ -543,24 +579,14 @@ def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...]) -> Li
     var R_enc = edwards_encode(R_point)
 
     var k_in = List[UInt8](capacity=64 + len(message))
-    for i in range(32): k_in.append(R_enc[i])
-    for i in range(32): k_in.append(A_enc[i])
-    for i in range(len(message)): k_in.append(message[i])
-    var k_in_span = Span[UInt8, ...](k_in)
-    var k_hash = sha512_hash(k_in_span)
-    _ = k_in
+    k_in.extend(R_enc.copy())
+    k_in.extend(A_enc.copy())
+    k_in.extend(message)
+    var k_hash = sha512_hash(Span[UInt8, ...](k_in))
 
     var k_hash_span = Span[UInt8, ...](k_hash)
     var k_scalar = Scalar.from_bytes_wide(k_hash_span)
     _ = k_hash
-
-    var s2 = List[UInt8](capacity=32)
-    for i in range(32):
-        s2.append(hash[i])
-    s2[0] = s2[0] & 0xF8; s2[31] = s2[31] & 0x7F; s2[31] = s2[31] | 0x40
-    var s2_span = Span[UInt8, ...](s2)
-    var s_scalar = Scalar.from_bytes(s2_span)
-    _ = s2
 
     var S_scalar = r_scalar + k_scalar * s_scalar
     var S_bytes = S_scalar.to_bytes()
@@ -571,7 +597,12 @@ def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...]) -> Li
     return sig^
 
 def ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], signature: Span[UInt8, ...]) -> Bool:
-    var A = edwards_decode(public_key)
+    if len(public_key) != 32 or len(signature) != 64:
+        return False
+    var A_res = edwards_decode_verify_compatible(public_key)
+    if not A_res.ok:
+        return False
+    var A = A_res.p
 
     var R_enc = List[UInt8](capacity=32)
     for i in range(32): R_enc.append(signature[i])
@@ -580,20 +611,20 @@ def ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], sign
 
     var S_bytes = List[UInt8](capacity=32)
     for i in range(32): S_bytes.append(signature[32 + i])
+    var S_bytes_span = Span[UInt8, ...](S_bytes)
+    if not _s_lt_l(S_bytes_span):
+        return False
 
     var k_in = List[UInt8](capacity=64 + len(message))
-    for i in range(32): k_in.append(R_enc[i])
-    for i in range(32): k_in.append(public_key[i])
-    for i in range(len(message)): k_in.append(message[i])
-    var k_in_span = Span[UInt8, ...](k_in)
-    var k_hash = sha512_hash(k_in_span)
-    _ = k_in
+    k_in.extend(R_enc.copy())
+    k_in.extend(public_key)
+    k_in.extend(message)
+    var k_hash = sha512_hash(Span[UInt8, ...](k_in))
 
     var k_hash_span = Span[UInt8, ...](k_hash)
     var k_scalar = Scalar.from_bytes_wide(k_hash_span)
     _ = k_hash
 
-    var S_bytes_span = Span[UInt8, ...](S_bytes)
     var SB = _scalar_mult(S_bytes_span, ed25519_base_point())
     _ = S_bytes
 
@@ -603,8 +634,17 @@ def ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], sign
     _ = k_bytes
 
     var P = edwards_add(SB, edwards_negate(kA))
+    for _ in range(3):
+        P = _edwards_double_standalone(P)
     var P_enc = edwards_encode(P)
+    var R_res = edwards_decode_verify_compatible(Span[UInt8, ...](R_enc))
+    if not R_res.ok:
+        return False
+    var R_point = R_res.p
+    for _ in range(3):
+        R_point = _edwards_double_standalone(R_point)
+    var R8_enc = edwards_encode(R_point)
     for i in range(32):
-        if P_enc[i] != R_enc[i]:
+        if P_enc[i] != R8_enc[i]:
             return False
     return True

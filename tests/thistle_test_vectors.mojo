@@ -15,7 +15,6 @@ from thistle.aes import cpu_aes_encrypt, expand_key_128
 from thistle.aes_ni import aes_encrypt, has_aes_ni, has_x86_aes_ni
 from thistle.sha_ni import sha256ni_hash, has_sha_ni
 
-
 def hex_char_to_val(c: Int) -> UInt8:
     if c <= 57:
         return UInt8(c - 48)
@@ -351,7 +350,6 @@ def test_aes_cpu(data: PythonObject, py: PythonObject) raises -> TestResult:
         pt_ptr.free()
     return TestResult(passed, failed, failures^)
 
-
 def test_aes_ni(data: PythonObject, py: PythonObject) raises -> TestResult:
     var passed, failed = 0, 0
     var failures = List[String]()
@@ -383,7 +381,6 @@ def test_aes_ni(data: PythonObject, py: PythonObject) raises -> TestResult:
         round_keys.free()
         pt_ptr.free()
     return TestResult(passed, failed, failures^)
-
 
 def test_sha_ni(data: PythonObject, py: PythonObject) raises -> TestResult:
     var passed, failed = 0, 0

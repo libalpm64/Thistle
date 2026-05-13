@@ -3,12 +3,28 @@
 
 """
 By Libalpm64
-Non-Production code
-Some test cases are not handled in Wycheproof.
+X25519 implementation.
 """
 from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
 from std.collections import List
+
+@always_inline
+def _u128_shr(x: UInt128, shift: Int) -> UInt128:
+    if shift <= 0:
+        return x
+    if shift >= 128:
+        return UInt128(0)
+    var lo = x.cast[DType.uint64]()
+    var hi = (x >> UInt128(64)).cast[DType.uint64]()
+    if shift < 64:
+        var out_lo = (lo >> UInt64(shift)) | (hi << UInt64(64 - shift))
+        var out_hi = hi >> UInt64(shift)
+        return (UInt128(out_hi) << UInt128(64)) | UInt128(out_lo)
+    if shift == 64:
+        return UInt128(hi)
+    var s = shift - 64
+    return UInt128(hi >> UInt64(s))
 
 struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
     var limbs: SIMD[DType.uint64, 5]
@@ -72,19 +88,8 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         limbs[3] += limbs[2] >> 51; limbs[2] &= MASK
         limbs[4] += limbs[3] >> 51; limbs[3] &= MASK
         limbs[4] &= MASK
-		# DEBUG NOTES:
-        # RV -> l0 + l1*2^51 + l2*2^102 + l3*2^153 + l4*2^204.
-        # Limb fits in 51 bits. The total <= 255 bits (< p < 2^255).
-        # 64-bit signed Int, only values < 2^63 are exact.
-        # OK for small field elements.
-        # For 255-bit values to_bytes() would work instead.
         var v: UInt64 = limbs[0]
-        v |= limbs[1] << 51    
-		# DEBUG NOTES:
-		# bits 51-101
-        # limbs[2] << 102 overflows UInt64, so bits >= 64 are trunk here.
-        # For the debug just for SVs in tests, limbs[1..4] should be 0 anyway.
-		# Which should fix deep problems.
+        v |= limbs[1] << 51
         return Int(v)
 
     @staticmethod
@@ -294,39 +299,39 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
     def _carry_reduce(self, var c0: UInt128, var c1: UInt128, var c2: UInt128, var c3: UInt128, var c4: UInt128) -> FieldElement51:
         var MASK = UInt64(0x7FFFFFFFFFFFF)
         
-        c1 += c0 >> 51
+        c1 += _u128_shr(c0, 51)
         var l0 = (c0.cast[DType.uint64]()) & MASK
-        c2 += c1 >> 51
+        c2 += _u128_shr(c1, 51)
         var l1 = (c1.cast[DType.uint64]()) & MASK
-        c3 += c2 >> 51
+        c3 += _u128_shr(c2, 51)
         var l2 = (c2.cast[DType.uint64]()) & MASK
-        c4 += c3 >> 51
+        c4 += _u128_shr(c3, 51)
         var l3 = (c3.cast[DType.uint64]()) & MASK
         
         # C4 becomes UInt128, we need do carry propagation from it
-        var q4 = c4 >> 51
+        var q4 = _u128_shr(c4, 51)
         var l4 = (c4.cast[DType.uint64]()) & MASK
         
         # q4*19 back to l0
         var l0_2 = UInt128(l0) + q4 * 19
         
 		# Guard Check make sure everything is 51 bits otherwise Mojo will collapse if its a shuffle over 64 bits and return 0.
-        var l1_2 = UInt128(l1) + (l0_2 >> 51)
+        var l1_2 = UInt128(l1) + _u128_shr(l0_2, 51)
         var l0_final = (l0_2.cast[DType.uint64]()) & MASK
         
-        var l2_2 = UInt128(l2) + (l1_2 >> 51)
+        var l2_2 = UInt128(l2) + _u128_shr(l1_2, 51)
         var l1_final = (l1_2.cast[DType.uint64]()) & MASK
         
-        var l3_2 = UInt128(l3) + (l2_2 >> 51)
+        var l3_2 = UInt128(l3) + _u128_shr(l2_2, 51)
         var l2_final = (l2_2.cast[DType.uint64]()) & MASK
         
-        var l4_2 = UInt128(l4) + (l3_2 >> 51)
+        var l4_2 = UInt128(l4) + _u128_shr(l3_2, 51)
         var l3_final = (l3_2.cast[DType.uint64]()) & MASK
         
-        var l0_final_2 = UInt128(l0_final) + (l4_2 >> 51) * 19
+        var l0_final_2 = UInt128(l0_final) + _u128_shr(l4_2, 51) * 19
         var l4_final = (l4_2.cast[DType.uint64]()) & MASK
         
-        var carry = l0_final_2 >> 51
+        var carry = _u128_shr(l0_final_2, 51)
         var l0_out = (l0_final_2.cast[DType.uint64]()) & MASK
         var l1_out = UInt64(l1_final) + carry.cast[DType.uint64]()
         
@@ -348,7 +353,10 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
     @staticmethod
     def from_bytes(bytes: List[UInt8]) -> FieldElement51:
         def load8(ptr: UnsafePointer[UInt8, _]) -> UInt64:
-            return ptr.bitcast[UInt64]().load()
+            var v: UInt64 = 0
+            for j in range(8):
+                v |= UInt64(ptr[j]) << UInt64(j * 8)
+            return v
 
         var ptr = bytes.unsafe_ptr()
         var MASK = UInt64(0x7FFFFFFFFFFFF)

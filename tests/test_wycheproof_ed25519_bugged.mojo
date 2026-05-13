@@ -1,129 +1,296 @@
-
 from std.collections import List
-from thistle.ed25519 import ed25519_verify
+from std.python import Python
+from thistle.ed25519 import (
+    ed25519_verify,
+    edwards_decode_verify_compatible,
+    ed25519_d,
+    edwards_encode,
+    fe_from_bytes,
+    fe_to_bytes,
+    sqrt_ratio_checked,
+    FieldElement51,
+    EdwardsPoint,
+    _scalar_mult,
+    ed25519_base_point,
+    _edwards_double_standalone,
+    edwards_add,
+    edwards_negate,
+    _s_lt_l,
+    Scalar
+)
+from thistle.sha2 import sha512_hash
+
+def bytes_to_hex(bytes: List[UInt8]) -> String:
+    var r = String(capacity=len(bytes)*2)
+    for i in range(len(bytes)):
+        var hi = Int(bytes[i] >> 4)
+        var lo = Int(bytes[i] & 15)
+        r += chr(hi + 48 if hi < 10 else hi - 10 + 97)
+        r += chr(lo + 48 if lo < 10 else lo - 10 + 97)
+    return r
+
+def edwards_decode_decision_trace(data: Span[UInt8, ...]) -> String:
+    var y_bytes = List[UInt8](capacity=32)
+    for i in range(32):
+        y_bytes.append(data[i])
+    var sign = (y_bytes[31] >> 7) & 1
+    y_bytes[31] = y_bytes[31] & 0x7F
+    var y = fe_from_bytes(Span[UInt8, ...](y_bytes))
+    var y_round = fe_to_bytes(y)
+
+    var y2 = y.square()
+    var u = y2 - FieldElement51.ONE()
+    var v = y2 * ed25519_d() + FieldElement51.ONE()
+    var x_opt = sqrt_ratio_checked(u, v)
+
+    var out = String()
+    out += "sign=" + String(Int(sign)) + "\n"
+    out += "y_round=" + bytes_to_hex(y_round) + "\n"
+    if not x_opt:
+        out += "x_opt=none\n"
+        out += "ok=0\n"
+        return out
+
+    var x = x_opt.value()
+    out += "x_opt=some\n"
+    out += "x_parity_raw=" + String(Int(x.to_bytes()[0] & 1)) + "\n"
+
+    var x_try = x
+    var flipped = False
+    if (x_try.to_bytes()[0] & 1) != sign:
+        x_try = FieldElement51.ZERO() - x_try
+        flipped = True
+    out += "flipped=" + ( "1" if flipped else "0" ) + "\n"
+    out += "x_parity_try=" + String(Int(x_try.to_bytes()[0] & 1)) + "\n"
+
+    var chk = x_try.square() * v - u
+    var chk_bytes = chk.to_bytes()
+    var ok = True
+    for i in range(32):
+        if chk_bytes[i] != 0:
+            ok = False
+    out += "chk_try_zero=" + ( "1" if ok else "0" ) + "\n"
+
+    var x_final = x_try
+    if not ok:
+        var x_alt = FieldElement51.ZERO() - x_try
+        var chk2 = x_alt.square() * v - u
+        var chk2_bytes = chk2.to_bytes()
+        var ok2 = True
+        for i in range(32):
+            if chk2_bytes[i] != 0:
+                ok2 = False
+        out += "chk_alt_zero=" + ( "1" if ok2 else "0" ) + "\n"
+        if ok2:
+            x_final = x_alt
+            ok = True
+        else:
+            ok = False
+    else:
+        out += "chk_alt_zero=na\n"
+
+    if not ok:
+        out += "ok=0\n"
+        return out
+
+    var p = EdwardsPoint(x_final, y, FieldElement51.ONE(), x_final * y)
+    var enc = edwards_encode(p)
+    out += "x_final_parity=" + String(Int(x_final.to_bytes()[0] & 1)) + "\n"
+    out += "enc_round=" + bytes_to_hex(enc) + "\n"
+    out += "ok=1\n"
+    return out
+
+def edwards_decode_diagnostics(data: Span[UInt8, ...]) -> String:
+    var y_bytes = List[UInt8](capacity=32)
+    for i in range(32):
+        y_bytes.append(data[i])
+    var sign = (y_bytes[31] >> 7) & 1
+    y_bytes[31] = y_bytes[31] & 0x7F
+    var y = fe_from_bytes(Span[UInt8, ...](y_bytes))
+
+    var y2 = y.square()
+    var u = y2 - FieldElement51.ONE()
+    var v = y2 * ed25519_d() + FieldElement51.ONE()
+
+    var x_opt = sqrt_ratio_checked(u, v)
+    var out = String()
+    out += "sign=" + String(Int(sign)) + "\n"
+    out += "u=" + bytes_to_hex(u.to_bytes()) + "\n"
+    out += "v=" + bytes_to_hex(v.to_bytes()) + "\n"
+    if not x_opt:
+        out += "sqrt_ok=0\n"
+        return out
+
+    var x = x_opt.value()
+    var vx2 = x.square() * v
+    var d1 = vx2 - u
+    var d2 = vx2 + u
+    out += "sqrt_ok=1\n"
+    out += "x=" + bytes_to_hex(x.to_bytes()) + "\n"
+    out += "vx2-u=" + bytes_to_hex(d1.to_bytes()) + "\n"
+    out += "vx2+u=" + bytes_to_hex(d2.to_bytes()) + "\n"
+    out += "x_parity_before=" + String(Int(x.to_bytes()[0] & 1)) + "\n"
+    if (x.to_bytes()[0] & 1) != sign:
+        out += "parity_flip=1\n"
+    else:
+        out += "parity_flip=0\n"
+    return out
+
+def ed25519_verify_debug(public_key: Span[UInt8, ...], message: Span[UInt8, ...], signature: Span[UInt8, ...]) -> String:
+    if len(public_key) != 32 or len(signature) != 64:
+        return "len"
+    var A_res = edwards_decode_verify_compatible(public_key)
+    if not A_res.ok:
+        return "decode-a"
+    var A = A_res.p
+
+    var R_enc = List[UInt8](capacity=32)
+    for i in range(32): R_enc.append(signature[i])
+
+    var S_bytes = List[UInt8](capacity=32)
+    for i in range(32): S_bytes.append(signature[32 + i])
+    var S_bytes_span = Span[UInt8, ...](S_bytes)
+    if not _s_lt_l(S_bytes_span):
+        return "s-range"
+
+    var k_in = List[UInt8](capacity=64 + len(message))
+    for i in range(32): k_in.append(R_enc[i])
+    for i in range(32): k_in.append(public_key[i])
+    for i in range(len(message)): k_in.append(message[i])
+    var k_hash = sha512_hash(Span[UInt8, ...](k_in))
+
+    var k_scalar = Scalar.from_bytes_wide(Span[UInt8, ...](k_hash))
+
+    var SB = _scalar_mult(S_bytes_span, ed25519_base_point())
+    var kA = _scalar_mult(Span[UInt8, ...](k_scalar.to_bytes()), A)
+
+    var P = edwards_add(SB, edwards_negate(kA))
+    for _ in range(3):
+        P = _edwards_double_standalone(P)
+    var P_enc = edwards_encode(P)
+    var R_res = edwards_decode_verify_compatible(Span[UInt8, ...](R_enc))
+    if not R_res.ok:
+        return "decode-r"
+    var R_point = R_res.p
+    for _ in range(3):
+        R_point = _edwards_double_standalone(R_point)
+    var R8_enc = edwards_encode(R_point)
+    for i in range(32):
+        if P_enc[i] != R8_enc[i]:
+            return "eq"
+    return "ok"
+
+def ed25519_verify_equation_diagnostics(public_key: Span[UInt8, ...], message: Span[UInt8, ...], signature: Span[UInt8, ...]) -> String:
+    if len(public_key) != 32 or len(signature) != 64:
+        return "len"
+    var A_res = edwards_decode_verify_compatible(public_key)
+    if not A_res.ok:
+        return "decode-a"
+    var A = A_res.p
+
+    var R_enc = List[UInt8](capacity=32)
+    for i in range(32): R_enc.append(signature[i])
+
+    var S_bytes = List[UInt8](capacity=32)
+    for i in range(32): S_bytes.append(signature[32 + i])
+    var S_bytes_span = Span[UInt8, ...](S_bytes)
+    if not _s_lt_l(S_bytes_span):
+        return "s-range"
+
+    var k_in = List[UInt8](capacity=64 + len(message))
+    for i in range(32): k_in.append(R_enc[i])
+    for i in range(32): k_in.append(public_key[i])
+    for i in range(len(message)): k_in.append(message[i])
+    var k_hash = sha512_hash(Span[UInt8, ...](k_in))
+    var k_scalar = Scalar.from_bytes_wide(Span[UInt8, ...](k_hash))
+
+    var SB = _scalar_mult(S_bytes_span, ed25519_base_point())
+    var kA = _scalar_mult(Span[UInt8, ...](k_scalar.to_bytes()), A)
+
+    var P = edwards_add(SB, edwards_negate(kA))
+    for _ in range(3):
+        P = _edwards_double_standalone(P)
+    var P_enc = edwards_encode(P)
+
+    var R_res = edwards_decode_verify_compatible(Span[UInt8, ...](R_enc))
+    if not R_res.ok:
+        return "decode-r"
+    var R_point = R_res.p
+    for _ in range(3):
+        R_point = _edwards_double_standalone(R_point)
+    var R8_enc = edwards_encode(R_point)
+
+    var out = String()
+    out += "P8=" + bytes_to_hex(P_enc) + "\n"
+    out += "R8=" + bytes_to_hex(R8_enc) + "\n"
+    var first_diff = -1
+    for i in range(32):
+        if P_enc[i] != R8_enc[i]:
+            first_diff = i
+            break
+    out += "first_diff=" + String(first_diff) + "\n"
+    return out
+
 
 def hex_to_bytes(s: String) -> List[UInt8]:
     var r = List[UInt8]()
     var b = s.as_bytes()
-    for i in range(0, len(s), 2):
-        var hi = UInt8((b[i] - 48) - (39 if b[i] > 96 else (7 if b[i] > 64 else 0)))
-        var lo = UInt8((b[i+1] - 48) - (39 if b[i+1] > 96 else (7 if b[i+1] > 64 else 0)))
+    var n = s.byte_length()
+    for i in range(0, n, 2):
+        var hi_off = 39 if b[i] > 96 else (7 if b[i] > 64 else 0)
+        var lo_off = 39 if b[i + 1] > 96 else (7 if b[i + 1] > 64 else 0)
+        var hi = UInt8((b[i] - 48) - UInt8(hi_off))
+        var lo = UInt8((b[i + 1] - 48) - UInt8(lo_off))
         r.append((hi << 4) | lo)
     return r^
 
+
+def run_case(tc_id: String, pk_hex: String, msg_hex: String, sig_hex: String, expected_valid: Bool) -> Bool:
+    var pk = hex_to_bytes(pk_hex)
+    var msg = hex_to_bytes(msg_hex)
+    var sig = hex_to_bytes(sig_hex)
+    var got = ed25519_verify(Span[UInt8, ...](pk), Span[UInt8, ...](msg), Span[UInt8, ...](sig))
+    if got != expected_valid:
+        print("Test ", tc_id, " mismatch: expected=", expected_valid, " got=", got)
+        if tc_id == "1" or tc_id == "71" or tc_id == "85":
+            var reason = ed25519_verify_debug(Span[UInt8, ...](pk), Span[UInt8, ...](msg), Span[UInt8, ...](sig))
+            print("  debug stage: ", reason)
+            if reason == "decode-a":
+                print("  decode-a diagnostics:")
+                print(edwards_decode_diagnostics(Span[UInt8, ...](pk)))
+            if reason == "eq":
+                print("  equation diagnostics:")
+                print(ed25519_verify_equation_diagnostics(Span[UInt8, ...](pk), Span[UInt8, ...](msg), Span[UInt8, ...](sig)))
+        return False
+    return True
+
+
 def main() raises:
+    print("Wycheproof Ed25519")
+    var py = Python.import_module("json")
+    var builtins = Python.import_module("builtins")
+
+    var fh = builtins.open("tests/Wycheproof/ed25519_test.json", "r")
+    var root = py.load(fh)
+    fh.close()
+
+    var groups = root["testGroups"]
     var ok_count = 0
     var fail_count = 0
 
-    # Test 1
-    if ed25519_verify(
-        Span[UInt8, ...](hex_to_bytes("7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa")),
-        Span[UInt8, ...](hex_to_bytes("")),
-        Span[UInt8, ...](hex_to_bytes("d4fbdb52bfa726b44d1786a8c0d171c3e62ca83c9e5bbe63de0bb2483f8fd6cc1429ab72cafc41ab56af02ff8fcc43b99bfe4c7ae940f60f38ebaa9d311c4007"))
-    ):
-        ok_count += 1
-    else:
-        print("Test 1 FAILED")
-        fail_count += 1
+    for g in groups:
+        var pk_hex = String(g["publicKey"]["pk"])
+        for t in g["tests"]:
+            var tc_id = String(t["tcId"])
+            var msg_hex = String(t["msg"])
+            var sig_hex = String(t["sig"])
+            var result = String(t["result"])
+            var expected_valid = result == "valid"
 
-    # Test 2
-    if ed25519_verify(
-        Span[UInt8, ...](hex_to_bytes("7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa")),
-        Span[UInt8, ...](hex_to_bytes("78")),
-        Span[UInt8, ...](hex_to_bytes("d80737358ede548acb173ef7e0399f83392fe8125b2ce877de7975d8b726ef5b1e76632280ee38afad12125ea44b961bf92f1178c9fa819d020869975bcbe109"))
-    ):
-        ok_count += 1
-    else:
-        print("Test 2 FAILED")
-        fail_count += 1
-
-    # Test 3
-    if ed25519_verify(
-        Span[UInt8, ...](hex_to_bytes("7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa")),
-        Span[UInt8, ...](hex_to_bytes("54657374")),
-        Span[UInt8, ...](hex_to_bytes("7c38e026f29e14aabd059a0f2db8b0cd783040609a8be684db12f82a27774ab07a9155711ecfaf7f99f277bad0c6ae7e39d4eef676573336a5c51eb6f946b30d"))
-    ):
-        ok_count += 1
-    else:
-        print("Test 3 FAILED")
-        fail_count += 1
-
-    # Test 4
-    if ed25519_verify(
-        Span[UInt8, ...](hex_to_bytes("7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa")),
-        Span[UInt8, ...](hex_to_bytes("48656c6c6f")),
-        Span[UInt8, ...](hex_to_bytes("1c1ad976cbaae3b31dee07971cf92c928ce2091a85f5899f5e11ecec90fc9f8e93df18c5037ec9b29c07195ad284e63d548cd0a6fe358cc775bd6c1608d2c905"))
-    ):
-        ok_count += 1
-    else:
-        print("Test 4 FAILED")
-        fail_count += 1
-
-    # Test 5
-    if ed25519_verify(
-        Span[UInt8, ...](hex_to_bytes("7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa")),
-        Span[UInt8, ...](hex_to_bytes("313233343030")),
-        Span[UInt8, ...](hex_to_bytes("657c1492402ab5ce03e2c3a7f0384d051b9cf3570f1207fc78c1bcc98c281c2bf0cf5b3a289976458a1be6277a5055545253b45b07dcc1abd96c8b989c00f301"))
-    ):
-        ok_count += 1
-    else:
-        print("Test 5 FAILED")
-        fail_count += 1
-
-    # Test 6
-    if ed25519_verify(
-        Span[UInt8, ...](hex_to_bytes("7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa")),
-        Span[UInt8, ...](hex_to_bytes("000000000000000000000000")),
-        Span[UInt8, ...](hex_to_bytes("d46543bfb892f84ec124dcdfc847034c19363bf3fc2fa89b1267833a14856e52e60736918783f950b6f1dd8d40dc343247cd43ce054c2d68ef974f7ed0f3c60f"))
-    ):
-        ok_count += 1
-    else:
-        print("Test 6 FAILED")
-        fail_count += 1
-
-    # Test 7
-    if ed25519_verify(
-        Span[UInt8, ...](hex_to_bytes("7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa")),
-        Span[UInt8, ...](hex_to_bytes("6161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161")),
-        Span[UInt8, ...](hex_to_bytes("879350045543bc14ed2c08939b68c30d22251d83e018cacbaf0c9d7a48db577e80bdf76ce99e5926762bc13b7b3483260a5ef63d07e34b58eb9c14621ac92f00"))
-    ):
-        ok_count += 1
-    else:
-        print("Test 7 FAILED")
-        fail_count += 1
-
-    # Test 8
-    if ed25519_verify(
-        Span[UInt8, ...](hex_to_bytes("7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa")),
-        Span[UInt8, ...](hex_to_bytes("202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f60")),
-        Span[UInt8, ...](hex_to_bytes("7bdc3f9919a05f1d5db4a3ada896094f6871c1f37afc75db82ec3147d84d6f237b7e5ecc26b59cfea0c7eaf1052dc427b0f724615be9c3d3e01356c65b9b5109"))
-    ):
-        ok_count += 1
-    else:
-        print("Test 8 FAILED")
-        fail_count += 1
-
-    # Test 9
-    if ed25519_verify(
-        Span[UInt8, ...](hex_to_bytes("7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa")),
-        Span[UInt8, ...](hex_to_bytes("ffffffffffffffffffffffffffffffff")),
-        Span[UInt8, ...](hex_to_bytes("5dbd7360e55aa38e855d6ad48c34bd35b7871628508906861a7c4776765ed7d1e13d910faabd689ec8618b78295c8ab8f0e19c8b4b43eb8685778499e943ae04"))
-    ):
-        ok_count += 1
-    else:
-        print("Test 9 FAILED")
-        fail_count += 1
-
-    # Test 71
-    if ed25519_verify(
-        Span[UInt8, ...](hex_to_bytes("a12c2beb77265f2aac953b5009349d94155a03ada416aad451319480e983ca4c")),
-        Span[UInt8, ...](hex_to_bytes("")),
-        Span[UInt8, ...](hex_to_bytes("5056325d2ab440bf30bbf0f7173199aa8b4e6fbc091cf3eb6bc6cf87cd73d992ffc216c85e4ab5b8a0bbc7e9a6e9f8d33b7f6e5ac0ffdc22d9fcaf784af84302"))
-    ):
-        ok_count += 1
-    else:
-        print("Test 71 FAILED")
-        fail_count += 1
+            if run_case(tc_id, pk_hex, msg_hex, sig_hex, expected_valid):
+                ok_count += 1
+            else:
+                fail_count += 1
 
     print("Wycheproof results: ", ok_count, " OK, ", fail_count, " FAIL")
     if fail_count > 0:

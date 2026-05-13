@@ -27,7 +27,7 @@ Thistle was written to avoid the **150x performance drops** when Mojo has to cal
 * **AES-NI** (XTS/CBC/ECB/CTR/GCM/ECB/CTR)
 * **AES-Software** (XTS/CBC/ECB/CTR/GCM/ECB/CTR)
 * **ED25519** (Semi-working, experimental)
-* **X25519** (Working, experimental)
+* **X25519**
 
 ### Build:
 
