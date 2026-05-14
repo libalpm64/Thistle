@@ -3,7 +3,7 @@ from std.collections import List
 from std.memory import alloc
 from std.memory.unsafe_pointer import UnsafePointer
 from std.builtin.type_aliases import MutExternalOrigin
-from thistle.sha2 import bytes_to_hex, sha224_hash, sha256_hash, sha384_hash, sha512_hash
+from thistle.sha2 import bytes_to_hex, string_to_bytes, sha224_hash_bits, sha256_hash_bits, sha384_hash_bits
 from thistle.argon2 import Argon2id
 from thistle.blake2b import Blake2b
 from thistle.blake3 import blake3_parallel_hash
@@ -96,14 +96,16 @@ def test_argon2(data: PythonObject, py: PythonObject) raises -> TestResult:
     for i in range(Int(py=data.__len__())):
         var v = data[i]
         var name = String(v["name"])
-        var password = String(v["password"]).as_bytes()
-        var salt = String(v["salt"]).as_bytes()
-        var argon2 = Argon2id(salt,
+        var pass_str = String(v["password"])
+        var salt_str = String(v["salt"])
+        var pass_bytes = string_to_bytes(pass_str)
+        var salt_bytes = string_to_bytes(salt_str)
+        var argon2 = Argon2id(salt_bytes,
             parallelism=Int(py=v["parallelism"]), tag_length=Int(py=v["tag_length"]),
             memory_size_kb=Int(py=v["memory_size_kb"]), iterations=Int(py=v["iterations"]),
             version=Int(py=v["version"]),
         )
-        var got = bytes_to_hex(argon2.hash(password))
+        var got = bytes_to_hex(argon2.hash(Span[UInt8, ...](pass_bytes)))
         var expected = String(v["hash"])
         if got == expected:
             passed += 1
@@ -228,7 +230,7 @@ def _test_pbkdf2_sha256(data: PythonObject, py: PythonObject) raises -> TestResu
     var failures = List[String]()
     for i in range(Int(py=data.__len__())):
         var v = data[i]
-        var password = String(v["password_ascii"]).as_bytes()
+        var password = hex_to_bytes(String(v["password"]))
         var salt = hex_to_bytes(String(v["salt"]))
         var got = bytes_to_hex(pbkdf2_hmac_sha256(password, Span[UInt8, ...](salt), Int(py=v["iterations"]), Int(py=v["dklen"])))
         var expected = String(v["derived_key"])
@@ -244,7 +246,7 @@ def _test_pbkdf2_sha512(data: PythonObject, py: PythonObject) raises -> TestResu
     var failures = List[String]()
     for i in range(Int(py=data.__len__())):
         var v = data[i]
-        var password = String(v["password_ascii"]).as_bytes()
+        var password = hex_to_bytes(String(v["password"]))
         var salt = hex_to_bytes(String(v["salt"]))
         var got = bytes_to_hex(pbkdf2_hmac_sha512(password, Span[UInt8, ...](salt), Int(py=v["iterations"]), Int(py=v["dklen"])))
         var expected = String(v["derived_key"])
@@ -271,7 +273,7 @@ def _test_sha224(data: PythonObject, py: PythonObject) raises -> TestResult:
         var v = data[i]
         var bit_len = Int(py=v["len"])
         var msg = hex_to_bytes(String(v["msg"])) if bit_len > 0 else List[UInt8]()
-        var got = bytes_to_hex(sha224_hash(Span[UInt8, ...](msg)))
+        var got = bytes_to_hex(sha224_hash_bits(Span[UInt8, ...](msg), bit_len))
         var expected = String(v["md"])
         if got == expected:
             passed += 1
@@ -287,7 +289,7 @@ def _test_sha256(data: PythonObject, py: PythonObject) raises -> TestResult:
         var v = data[i]
         var bit_len = Int(py=v["len"])
         var msg = hex_to_bytes(String(v["msg"])) if bit_len > 0 else List[UInt8]()
-        var got = bytes_to_hex(sha256_hash(Span[UInt8, ...](msg)))
+        var got = bytes_to_hex(sha256_hash_bits(Span[UInt8, ...](msg), bit_len))
         var expected = String(v["md"])
         if got == expected:
             passed += 1
@@ -303,7 +305,7 @@ def _test_sha384(data: PythonObject, py: PythonObject) raises -> TestResult:
         var v = data[i]
         var bit_len = Int(py=v["len"])
         var msg = hex_to_bytes(String(v["msg"])) if bit_len > 0 else List[UInt8]()
-        var got = bytes_to_hex(sha384_hash(Span[UInt8, ...](msg)))
+        var got = bytes_to_hex(sha384_hash_bits(Span[UInt8, ...](msg), bit_len))
         var expected = String(v["md"])
         if got == expected:
             passed += 1

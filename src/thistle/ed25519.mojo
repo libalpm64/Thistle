@@ -3,8 +3,7 @@
 
 """
 By Libalpm64
-Non-Production code
-Do note use on ARM Verification fails because group homomorphism is broken.
+Broken code for now.
 """
 from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
@@ -69,7 +68,6 @@ comptime L_BYTES = SIMD[DType.uint8, 32](
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
 )
-
 
 @always_inline
 def _s_lt_l(s: Span[UInt8, ...]) -> Bool:
@@ -319,10 +317,11 @@ def _edwards_double_standalone(p: EdwardsPoint) -> EdwardsPoint:
     var A = p.X.square()
     var B = p.Y.square()
     var C = p.Z.square() * FieldElement51(2, 0, 0, 0, 0)
-    var H = A + B
-    var E = H - (p.X + p.Y).square()
-    var G = A - B
-    var F = C + G
+    var D = FieldElement51.ZERO() - A
+    var E = (p.X + p.Y).square() - A - B
+    var G = D + B
+    var F = G - C
+    var H = D - B
     return EdwardsPoint(E * F, G * H, F * G, E * H)
 
 
