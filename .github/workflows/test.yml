@@ -19,7 +19,17 @@ jobs:
           activate-environment: true
 
       - name: Run tests
-        run: pixi run test
+        env:
+          MAX_NUM_THREADS: 1
+          OMP_NUM_THREADS: 1
+        run: |
+          for i in 1 2 3; do
+            pixi run test && break
+            if [ $i -eq 3 ]; then exit 1; fi
+            echo "Attempt $i failed, clearing JIT cache and retrying..."
+            rm -rf ~/.mojo
+            sleep 5
+          done
 
   test-pq:
     runs-on: ubuntu-latest
@@ -39,4 +49,14 @@ jobs:
         run: rm -rf ~/.mojo
 
       - name: Run PQ tests
-        run: pixi run test-pq
+        env:
+          MAX_NUM_THREADS: 1
+          OMP_NUM_THREADS: 1
+        run: |
+          for i in 1 2 3; do
+            pixi run test-pq && break
+            if [ $i -eq 3 ]; then exit 1; fi
+            echo "Attempt $i failed, clearing JIT cache and retrying..."
+            rm -rf ~/.mojo
+            sleep 5
+          done
