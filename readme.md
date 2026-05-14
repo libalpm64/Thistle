@@ -6,9 +6,7 @@ Thistle was written to avoid the **150x performance drops** when Mojo has to cal
 
 > [!IMPORTANT]
 > Currently, Thistle is an experimental library.
-> 
-> MacOS broken for Argon2, SHA, Blake3 (Compiler/ Cascading Runtime Issue), ED25519 (Stack aliasing bug)
----
+
 
 ### Currently supported Algorithms:
 
