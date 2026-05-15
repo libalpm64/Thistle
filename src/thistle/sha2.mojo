@@ -5,10 +5,6 @@
 SHA-2 (SHA-256/SHA-512) Implementation in Mojo
 RFC 6234 / FIPS 180-4 / CAVP validated
 By Libalpm64, Attribute not required.
-
-Todo:
-- Add NI support for SHA-NI Hardware acceleration (~5x speedup, currently Mojo lacks proper inline assembly support)
-- Note: It's limited to SHA-1 and SHA-256
 """
 
 from std.collections import List
