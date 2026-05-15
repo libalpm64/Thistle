@@ -2,12 +2,11 @@
 # Copyright (c) 2026 Libalpm64, Lostlab Technologies.
 
 """
+Curve25519 implementation
 By Libalpm64
-X25519 implementation.
 """
 from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
-from std.collections import List
 
 @always_inline
 def _u128_shr(x: UInt128, shift: Int) -> UInt128:
@@ -351,7 +350,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return FieldElement51(l)
 
     @staticmethod
-    def from_bytes(bytes: List[UInt8]) -> FieldElement51:
+    def from_bytes_span(bytes: Span[UInt8, ...]) -> FieldElement51:
         def load8(ptr: UnsafePointer[UInt8, _]) -> UInt64:
             var v: UInt64 = 0
             for j in range(8):
@@ -369,57 +368,54 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         
         return FieldElement51(l0, l1, l2, l3, l4)
 
-    def to_bytes(self) -> List[UInt8]:
+    def to_bytes_into(self, output: UnsafePointer[UInt8, MutAnyOrigin]):
         var res = self._reduce(self.limbs)
         var limbs = res.limbs
-        
+
         var q = (limbs[0] + 19) >> 51
         q = (limbs[1] + q) >> 51
         q = (limbs[2] + q) >> 51
         q = (limbs[3] + q) >> 51
         q = (limbs[4] + q) >> 51
-        
+
         limbs[0] += 19 * q
-        
+
         var MASK = UInt64(0x7FFFFFFFFFFFF)
         limbs[1] += limbs[0] >> 51; limbs[0] &= MASK
         limbs[2] += limbs[1] >> 51; limbs[1] &= MASK
         limbs[3] += limbs[2] >> 51; limbs[2] &= MASK
         limbs[4] += limbs[3] >> 51; limbs[3] &= MASK
         limbs[4] &= MASK
-        
-        var bytes = List[UInt8](capacity=32)
-        bytes.append(UInt8(limbs[0] & 0xFF))
-        bytes.append(UInt8((limbs[0] >> 8) & 0xFF))
-        bytes.append(UInt8((limbs[0] >> 16) & 0xFF))
-        bytes.append(UInt8((limbs[0] >> 24) & 0xFF))
-        bytes.append(UInt8((limbs[0] >> 32) & 0xFF))
-        bytes.append(UInt8((limbs[0] >> 40) & 0xFF))
-        bytes.append(UInt8(((limbs[0] >> 48) | (limbs[1] << 3)) & 0xFF))
-        bytes.append(UInt8((limbs[1] >> 5) & 0xFF))
-        bytes.append(UInt8((limbs[1] >> 13) & 0xFF))
-        bytes.append(UInt8((limbs[1] >> 21) & 0xFF))
-        bytes.append(UInt8((limbs[1] >> 29) & 0xFF))
-        bytes.append(UInt8((limbs[1] >> 37) & 0xFF))
-        bytes.append(UInt8(((limbs[1] >> 45) | (limbs[2] << 6)) & 0xFF))
-        bytes.append(UInt8((limbs[2] >> 2) & 0xFF))
-        bytes.append(UInt8((limbs[2] >> 10) & 0xFF))
-        bytes.append(UInt8((limbs[2] >> 18) & 0xFF))
-        bytes.append(UInt8((limbs[2] >> 26) & 0xFF))
-        bytes.append(UInt8((limbs[2] >> 34) & 0xFF))
-        bytes.append(UInt8((limbs[2] >> 42) & 0xFF))
-        bytes.append(UInt8(((limbs[2] >> 50) | (limbs[3] << 1)) & 0xFF))
-        bytes.append(UInt8((limbs[3] >> 7) & 0xFF))
-        bytes.append(UInt8((limbs[3] >> 15) & 0xFF))
-        bytes.append(UInt8((limbs[3] >> 23) & 0xFF))
-        bytes.append(UInt8((limbs[3] >> 31) & 0xFF))
-        bytes.append(UInt8((limbs[3] >> 39) & 0xFF))
-        bytes.append(UInt8(((limbs[3] >> 47) | (limbs[4] << 4)) & 0xFF))
-        bytes.append(UInt8((limbs[4] >> 4) & 0xFF))
-        bytes.append(UInt8((limbs[4] >> 12) & 0xFF))
-        bytes.append(UInt8((limbs[4] >> 20) & 0xFF))
-        bytes.append(UInt8((limbs[4] >> 28) & 0xFF))
-        bytes.append(UInt8((limbs[4] >> 36) & 0xFF))
-        bytes.append(UInt8((limbs[4] >> 44) & 0xFF))
-        
-        return bytes^
+
+        output[0] = UInt8(limbs[0] & 0xFF)
+        output[1] = UInt8((limbs[0] >> 8) & 0xFF)
+        output[2] = UInt8((limbs[0] >> 16) & 0xFF)
+        output[3] = UInt8((limbs[0] >> 24) & 0xFF)
+        output[4] = UInt8((limbs[0] >> 32) & 0xFF)
+        output[5] = UInt8((limbs[0] >> 40) & 0xFF)
+        output[6] = UInt8(((limbs[0] >> 48) | (limbs[1] << 3)) & 0xFF)
+        output[7] = UInt8((limbs[1] >> 5) & 0xFF)
+        output[8] = UInt8((limbs[1] >> 13) & 0xFF)
+        output[9] = UInt8((limbs[1] >> 21) & 0xFF)
+        output[10] = UInt8((limbs[1] >> 29) & 0xFF)
+        output[11] = UInt8((limbs[1] >> 37) & 0xFF)
+        output[12] = UInt8(((limbs[1] >> 45) | (limbs[2] << 6)) & 0xFF)
+        output[13] = UInt8((limbs[2] >> 2) & 0xFF)
+        output[14] = UInt8((limbs[2] >> 10) & 0xFF)
+        output[15] = UInt8((limbs[2] >> 18) & 0xFF)
+        output[16] = UInt8((limbs[2] >> 26) & 0xFF)
+        output[17] = UInt8((limbs[2] >> 34) & 0xFF)
+        output[18] = UInt8((limbs[2] >> 42) & 0xFF)
+        output[19] = UInt8(((limbs[2] >> 50) | (limbs[3] << 1)) & 0xFF)
+        output[20] = UInt8((limbs[3] >> 7) & 0xFF)
+        output[21] = UInt8((limbs[3] >> 15) & 0xFF)
+        output[22] = UInt8((limbs[3] >> 23) & 0xFF)
+        output[23] = UInt8((limbs[3] >> 31) & 0xFF)
+        output[24] = UInt8((limbs[3] >> 39) & 0xFF)
+        output[25] = UInt8(((limbs[3] >> 47) | (limbs[4] << 4)) & 0xFF)
+        output[26] = UInt8((limbs[4] >> 4) & 0xFF)
+        output[27] = UInt8((limbs[4] >> 12) & 0xFF)
+        output[28] = UInt8((limbs[4] >> 20) & 0xFF)
+        output[29] = UInt8((limbs[4] >> 28) & 0xFF)
+        output[30] = UInt8((limbs[4] >> 36) & 0xFF)
+        output[31] = UInt8((limbs[4] >> 44) & 0xFF)

@@ -6,7 +6,6 @@ from std.memory import UnsafePointer
 from std.collections import List
 from std.python import Python
 
-
 def _get_lib_path(lib_name: String) raises -> String:
     var os_mod = Python.import_module("os")
     var sys_mod = Python.import_module("sys")
