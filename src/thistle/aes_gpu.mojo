@@ -12,6 +12,23 @@ from std.memory import AddressSpace
 from std.memory.unsafe_pointer import UnsafePointer
 from std.utils import StaticTuple
 
+@always_inline
+def gpu_gf_mul2(a: UInt8) -> UInt8:
+    return (a << UInt8(1)) ^ (UInt8(0x1b) & (UInt8(0) - (a >> UInt8(7))))
+
+@always_inline
+def add_counter_offset(mut counter: StaticTuple[UInt8, 16], offset: Int) -> None:
+    var carry = offset
+    for i in range(15, -1, -1):
+        if carry == 0:
+            break
+        var old = counter[i]
+        var addend = UInt8(carry & 0xff)
+        var new_val = old + addend
+        counter[i] = new_val
+        carry = carry >> 8
+        if new_val < old:
+            carry += 1
 
 @always_inline
 def aes_encrypt_block[rounds: Int](
@@ -44,7 +61,7 @@ def aes_encrypt_block[rounds: Int](
     s12 ^= UInt8((w3 >> 24) & 0xff); s13 ^= UInt8((w3 >> 16) & 0xff)
     s14 ^= UInt8((w3 >> 8)  & 0xff); s15 ^= UInt8(w3 & 0xff)
 
-    for r in range(1, rounds):
+    comptime for r in range(1, rounds):
         var rk_base = r * 4
 
         s0  = sbox_buffer[Int(s0)];  s1  = sbox_buffer[Int(s1)]
@@ -62,72 +79,40 @@ def aes_encrypt_block[rounds: Int](
         var t15 = s15; s15 = s11; s11 = s7; s7 = s3; s3 = t15
 
         var a00 = s0;  var a01 = s1;  var a02 = s2;  var a03 = s3
-        var m200 = (a00 << 1) & UInt8(0xff)
-        if (a00 & 0x80) != 0:
-            m200 ^= 0x1b
-        var m201 = (a01 << 1) & UInt8(0xff)
-        if (a01 & 0x80) != 0:
-            m201 ^= 0x1b
-        var m202 = (a02 << 1) & UInt8(0xff)
-        if (a02 & 0x80) != 0:
-            m202 ^= 0x1b
-        var m203 = (a03 << 1) & UInt8(0xff)
-        if (a03 & 0x80) != 0:
-            m203 ^= 0x1b
+        var m200 = gpu_gf_mul2(a00)
+        var m201 = gpu_gf_mul2(a01)
+        var m202 = gpu_gf_mul2(a02)
+        var m203 = gpu_gf_mul2(a03)
         s0 = m200 ^ (a01 ^ m201) ^ a02 ^ a03
         s1 = a00 ^ m201 ^ (a02 ^ m202) ^ a03
         s2 = a00 ^ a01 ^ m202 ^ (a03 ^ m203)
         s3 = (a00 ^ m200) ^ a01 ^ a02 ^ m203
 
         var a10 = s4;  var a11 = s5;  var a12 = s6;  var a13 = s7
-        var m210 = (a10 << 1) & UInt8(0xff)
-        if (a10 & 0x80) != 0:
-            m210 ^= 0x1b
-        var m211 = (a11 << 1) & UInt8(0xff)
-        if (a11 & 0x80) != 0:
-            m211 ^= 0x1b
-        var m212 = (a12 << 1) & UInt8(0xff)
-        if (a12 & 0x80) != 0:
-            m212 ^= 0x1b
-        var m213 = (a13 << 1) & UInt8(0xff)
-        if (a13 & 0x80) != 0:
-            m213 ^= 0x1b
+        var m210 = gpu_gf_mul2(a10)
+        var m211 = gpu_gf_mul2(a11)
+        var m212 = gpu_gf_mul2(a12)
+        var m213 = gpu_gf_mul2(a13)
         s4 = m210 ^ (a11 ^ m211) ^ a12 ^ a13
         s5 = a10 ^ m211 ^ (a12 ^ m212) ^ a13
         s6 = a10 ^ a11 ^ m212 ^ (a13 ^ m213)
         s7 = (a10 ^ m210) ^ a11 ^ a12 ^ m213
 
         var a20 = s8;  var a21 = s9;  var a22 = s10; var a23 = s11
-        var m220 = (a20 << 1) & UInt8(0xff)
-        if (a20 & 0x80) != 0:
-            m220 ^= 0x1b
-        var m221 = (a21 << 1) & UInt8(0xff)
-        if (a21 & 0x80) != 0:
-            m221 ^= 0x1b
-        var m222 = (a22 << 1) & UInt8(0xff)
-        if (a22 & 0x80) != 0:
-            m222 ^= 0x1b
-        var m223 = (a23 << 1) & UInt8(0xff)
-        if (a23 & 0x80) != 0:
-            m223 ^= 0x1b
+        var m220 = gpu_gf_mul2(a20)
+        var m221 = gpu_gf_mul2(a21)
+        var m222 = gpu_gf_mul2(a22)
+        var m223 = gpu_gf_mul2(a23)
         s8  = m220 ^ (a21 ^ m221) ^ a22 ^ a23
         s9  = a20 ^ m221 ^ (a22 ^ m222) ^ a23
         s10 = a20 ^ a21 ^ m222 ^ (a23 ^ m223)
         s11 = (a20 ^ m220) ^ a21 ^ a22 ^ m223
 
         var a30 = s12; var a31 = s13; var a32 = s14; var a33 = s15
-        var m230 = (a30 << 1) & UInt8(0xff)
-        if (a30 & 0x80) != 0:
-            m230 ^= 0x1b
-        var m231 = (a31 << 1) & UInt8(0xff)
-        if (a31 & 0x80) != 0:
-            m231 ^= 0x1b
-        var m232 = (a32 << 1) & UInt8(0xff)
-        if (a32 & 0x80) != 0:
-            m232 ^= 0x1b
-        var m233 = (a33 << 1) & UInt8(0xff)
-        if (a33 & 0x80) != 0:
-            m233 ^= 0x1b
+        var m230 = gpu_gf_mul2(a30)
+        var m231 = gpu_gf_mul2(a31)
+        var m232 = gpu_gf_mul2(a32)
+        var m233 = gpu_gf_mul2(a33)
         s12 = m230 ^ (a31 ^ m231) ^ a32 ^ a33
         s13 = a30 ^ m231 ^ (a32 ^ m232) ^ a33
         s14 = a30 ^ a31 ^ m232 ^ (a33 ^ m233)
@@ -186,7 +171,6 @@ def aes_encrypt_block[rounds: Int](
     output_ptr[8]  = s8;  output_ptr[9]  = s9;  output_ptr[10] = s10; output_ptr[11] = s11
     output_ptr[12] = s12; output_ptr[13] = s13; output_ptr[14] = s14; output_ptr[15] = s15
 
-
 @always_inline
 def aes_encrypt_ecb[rounds: Int](
     input_data: UnsafePointer[UInt8, MutAnyOrigin],
@@ -203,40 +187,6 @@ def aes_encrypt_ecb[rounds: Int](
             ip[8], ip[9], ip[10], ip[11], ip[12], ip[13], ip[14], ip[15],
             round_keys_data, sbox_buffer, op,
         )
-
-
-@always_inline
-def aes_encrypt_cbc[rounds: Int](
-    input_data: UnsafePointer[UInt8, MutAnyOrigin],
-    output_data: UnsafePointer[UInt8, MutAnyOrigin],
-    round_keys_data: UnsafePointer[UInt32, MutAnyOrigin],
-    sbox_buffer: UnsafePointer[UInt8, MutAnyOrigin],
-    num_blocks: Int,
-    iv: UnsafePointer[UInt8, MutAnyOrigin],
-) -> None:
-    var prev = StaticTuple[UInt8, 16]()
-    for i in range(16):
-        prev[i] = iv[i]
-
-    for i in range(num_blocks):
-        var ip = input_data + i * 16
-        var op = output_data + i * 16
-
-        var xored = StaticTuple[UInt8, 16]()
-        for j in range(16):
-            xored[j] = ip[j] ^ prev[j]
-
-        aes_encrypt_block[rounds](
-            xored[0], xored[1], xored[2],  xored[3],
-            xored[4], xored[5], xored[6],  xored[7],
-            xored[8], xored[9], xored[10], xored[11],
-            xored[12],xored[13],xored[14], xored[15],
-            round_keys_data, sbox_buffer, op,
-        )
-
-        for j in range(16):
-            prev[j] = op[j]
-
 
 @always_inline
 def aes_encrypt_ctr[rounds: Int](
@@ -329,15 +279,12 @@ def incr_counter(mut counter: StaticTuple[UInt8, 16]) -> None:
             break
 
 def xts_mul_alpha(tweak: UnsafePointer[UInt8, MutAnyOrigin]) -> None:
-    var high_bit = (tweak[0] & 0x80) != 0
-    for i in range(16):
-        var new_val = tweak[i] << 1
-        if i > 0 and (tweak[i - 1] & 0x80) != 0:
-            new_val = new_val | 1
-        tweak[i] = new_val
+    var high_bit = (tweak[15] & 0x80) != 0
+    for i in range(15, 0, -1):
+        tweak[i] = (tweak[i] << UInt8(1)) | (tweak[i - 1] >> UInt8(7))
+    tweak[0] = tweak[0] << UInt8(1)
     if high_bit:
-        tweak[15] = tweak[15] ^ 0x87
-
+        tweak[0] = tweak[0] ^ UInt8(0x87)
 
 @always_inline
 def aes_gpu_kernel_ecb(
@@ -360,30 +307,6 @@ def aes_gpu_kernel_ecb(
     else:
         aes_encrypt_ecb[14](bp, op, round_keys_data, sbox_buffer, 1)
 
-
-@always_inline
-def aes_gpu_kernel_cbc(
-    input_data: UnsafePointer[UInt8, MutAnyOrigin],
-    output_data: UnsafePointer[UInt8, MutAnyOrigin],
-    round_keys_data: UnsafePointer[UInt32, MutAnyOrigin],
-    sbox_buffer: UnsafePointer[UInt8, MutAnyOrigin],
-    n: Int,
-    iv: UnsafePointer[UInt8, MutAnyOrigin],
-    rounds: Int,
-) -> None:
-    var tid = global_idx.x
-    if tid >= n:
-        return
-    var bp = input_data + tid * 16
-    var op = output_data + tid * 16
-    if rounds == 10:
-        aes_encrypt_cbc[10](bp, op, round_keys_data, sbox_buffer, 1, iv)
-    elif rounds == 12:
-        aes_encrypt_cbc[12](bp, op, round_keys_data, sbox_buffer, 1, iv)
-    else:
-        aes_encrypt_cbc[14](bp, op, round_keys_data, sbox_buffer, 1, iv)
-
-
 @always_inline
 def aes_gpu_kernel_ctr(
     input_data: UnsafePointer[UInt8, MutAnyOrigin],
@@ -403,13 +326,7 @@ def aes_gpu_kernel_ctr(
     var counter = StaticTuple[UInt8, 16]()
     for i in range(16):
         counter[i] = nonce[i]
-    var carry = tid
-    for i in range(15, -1, -1):
-        var new_val = counter[i] + UInt8(carry & 0xFF)
-        counter[i] = new_val
-        carry = carry >> 8
-        if carry == 0:
-            break
+    add_counter_offset(counter, tid)
 
     var scratch = stack_allocation[16, UInt8, address_space=AddressSpace.LOCAL]()
 
@@ -419,7 +336,6 @@ def aes_gpu_kernel_ctr(
         aes_encrypt_ctr[12](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch.address_space_cast[AddressSpace.GENERIC]())
     else:
         aes_encrypt_ctr[14](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch.address_space_cast[AddressSpace.GENERIC]())
-
 
 @always_inline
 def aes_gpu_kernel_gcm(
@@ -431,21 +347,30 @@ def aes_gpu_kernel_gcm(
     nonce: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int,
 ) -> None:
+    # CTR encryption part of GCM only. GHASH/tag generation is not done here.
     var tid = global_idx.x
     if tid >= n:
         return
     var bp = input_data + tid * 16
     var op = output_data + tid * 16
 
+    var counter = StaticTuple[UInt8, 16]()
+    for i in range(12):
+        counter[i] = nonce[i]
+    counter[12] = 0
+    counter[13] = 0
+    counter[14] = 0
+    counter[15] = 2
+    add_counter_offset(counter, tid)
+
     var scratch = stack_allocation[16, UInt8, address_space=AddressSpace.LOCAL]()
 
     if rounds == 10:
-        aes_encrypt_gcm[10](bp, op, round_keys_data, sbox_buffer, 1, nonce, scratch.address_space_cast[AddressSpace.GENERIC]())
+        aes_encrypt_ctr[10](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch.address_space_cast[AddressSpace.GENERIC]())
     elif rounds == 12:
-        aes_encrypt_gcm[12](bp, op, round_keys_data, sbox_buffer, 1, nonce, scratch.address_space_cast[AddressSpace.GENERIC]())
+        aes_encrypt_ctr[12](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch.address_space_cast[AddressSpace.GENERIC]())
     else:
-        aes_encrypt_gcm[14](bp, op, round_keys_data, sbox_buffer, 1, nonce, scratch.address_space_cast[AddressSpace.GENERIC]())
-
+        aes_encrypt_ctr[14](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch.address_space_cast[AddressSpace.GENERIC]())
 
 @always_inline
 def aes_gpu_kernel_xts(
@@ -471,6 +396,10 @@ def aes_gpu_kernel_xts(
         aes_encrypt_ecb[12](tweak, enc_tweak.address_space_cast[AddressSpace.GENERIC](), round_keys_data2, sbox_buffer, 1)
     else:
         aes_encrypt_ecb[14](tweak, enc_tweak.address_space_cast[AddressSpace.GENERIC](), round_keys_data2, sbox_buffer, 1)
+
+    var enc_tweak_generic = enc_tweak.address_space_cast[AddressSpace.GENERIC]()
+    for _ in range(tid):
+        xts_mul_alpha(enc_tweak_generic)
 
     var tmp = stack_allocation[16, UInt8, address_space=AddressSpace.LOCAL]()
     for j in range(16):

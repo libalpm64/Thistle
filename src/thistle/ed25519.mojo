@@ -3,7 +3,7 @@
 
 """
 Ed25519 implementation
-By Libalpm64
+By Libalpm64, no attribution required.
 """
 from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
@@ -69,7 +69,8 @@ comptime FIELD_P_BYTES = SIMD[DType.uint8, 32](
 
 @always_inline
 def _s_lt_l(s: Span[UInt8, ...]) -> Bool:
-    # Little endian lexicographic compare from MSB
+    # RFC 8032 5.1.7 / 8.4: verification requires S < L; this prevents
+    # scalar malleability from S + n*L.
     for i in range(31, -1, -1):
         var li = L_BYTES[i]
         if s[i] < li:
@@ -80,6 +81,8 @@ def _s_lt_l(s: Span[UInt8, ...]) -> Bool:
 
 @always_inline
 def _encoded_y_lt_p(y: Span[UInt8, ...]) -> Bool:
+    # RFC 8032 5.1.3: strict decoding rejects y >= p.
+    # Caller must clear the x-parity bit before this check.
     var lt: UInt8 = 0
     var gt: UInt8 = 0
     for i in range(31, -1, -1):
@@ -102,7 +105,8 @@ def _pack_limbs_into(limbs: SIMD[DType.uint64, 5], output: UnsafePointer[UInt8, 
         output[i] = bytes[i]
 
 def _unpack_limbs(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 5]:
-    var words = bytes.unsafe_ptr().bitcast[UInt64]().load[width=4]()
+    # Input may be byte-aligned; use alignment=1 for the UInt64 wide load.
+    var words = bytes.unsafe_ptr().bitcast[UInt64]().load[width=4, alignment=1]()
     comptime MASK = (UInt64(1) << 52) - 1
     comptime TOP_MASK = (UInt64(1) << 48) - 1
     var s = SIMD[DType.uint64, 5](0, 0, 0, 0, 0)
@@ -114,6 +118,7 @@ def _unpack_limbs(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 5]:
     return s
 
 def _from_512_raw(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 5]:
+    # RFC 8032 5.1.6: reduce 64-byte SHA-512 output modulo L.
     var ptr = bytes.unsafe_ptr()
     var lo_span = Span[UInt8, ...](ptr=ptr, length=32)
     var hi_span = Span[UInt8, ...](ptr=ptr + 32, length=32)
@@ -164,6 +169,8 @@ struct Scalar(Movable, Copyable, ImplicitlyCopyable):
 
     @staticmethod
     def from_bytes(bytes: Span[UInt8, ...]) -> Scalar:
+        # Reduces input modulo L. Callers requiring canonical encodings must
+        # range-check first.
         var raw = _unpack_limbs(bytes)
         return Scalar(raw)._montgomery_mul(Scalar(RR_LIMBS))
 
@@ -178,6 +185,7 @@ struct Scalar(Movable, Copyable, ImplicitlyCopyable):
 
     @staticmethod
     def from_bytes_clamped(bytes: Span[UInt8, ...]) -> Scalar:
+        # RFC 8032 5.1.5: prune SHA512(secret)[0..31] into the secret scalar.
         var s = StackInlineArray[UInt8, 32](uninitialized=True)
         for i in range(32):
             s[i] = bytes[i]
@@ -231,26 +239,26 @@ struct Scalar(Movable, Copyable, ImplicitlyCopyable):
         return r
 
     def _montgomery_mul(self, other: Scalar) -> Scalar:
+        # Montgomery multiplication modulo L.
         var r = Scalar._montgomery_mul_raw(self.limbs, other.limbs)
         return Scalar(r)._sub(Scalar(L_LIMBS))
 
     def _sub(self, other: Scalar) -> Scalar:
+        # Branchless subtract modulo L; used on secret scalar paths.
         comptime MASK = (UInt64(1) << 52) - 1
         var diff = SIMD[DType.uint64, 5](0, 0, 0, 0, 0)
         var borrow: UInt64 = 0
         for i in range(5):
             var x = other.limbs[i] + borrow
-            if self.limbs[i] < x:
-                diff[i] = (self.limbs[i] + (UInt64(1) << 52)) - x
-                borrow = 1
-            else:
-                diff[i] = self.limbs[i] - x
-                borrow = 0
-        if borrow != 0:
-            var carry: UInt64 = 0
-            for i in range(5):
-                carry = diff[i] + L_LIMBS[i] + (carry >> 52)
-                diff[i] = carry & MASK
+            var underflow = UInt64((self.limbs[i] < x).__bool__())
+            diff[i] = (self.limbs[i] + (underflow << 52)) - x
+            borrow = underflow
+
+        var add_mask = UInt64(0) - borrow
+        var carry: UInt64 = 0
+        for i in range(5):
+            carry = diff[i] + (L_LIMBS[i] & add_mask) + (carry >> 52)
+            diff[i] = carry & MASK
         return Scalar(diff)
 
 
@@ -305,6 +313,8 @@ def edwards_negate(p: EdwardsPoint) -> EdwardsPoint:
 
 @always_inline
 def _ct_select_fe(a: FieldElement51, b: FieldElement51, choice: UInt8) -> FieldElement51:
+    # Constant-time select: returns choice ? b : a using XOR/mask.
+    # Verify optimized backend code for release targets.
     var mask = UInt64(0) - UInt64(choice)
     var limbs = SIMD[DType.uint64, 5](0, 0, 0, 0, 0)
     for i in range(5):
@@ -322,6 +332,7 @@ def _ct_select_point(a: EdwardsPoint, b: EdwardsPoint, choice: UInt8) -> Edwards
 
 @no_inline
 def _edwards_add_d2(p: EdwardsPoint, q: EdwardsPoint, d2: FieldElement51) -> EdwardsPoint:
+    # RFC 8032 5.1.4: complete extended Edwards addition, a = -1.
     var A = (p.Y - p.X) * (q.Y - q.X)
     var B = (p.Y + p.X) * (q.Y + q.X)
     var C = p.T * q.T * d2
@@ -334,6 +345,7 @@ def _edwards_add_d2(p: EdwardsPoint, q: EdwardsPoint, d2: FieldElement51) -> Edw
 
 @no_inline
 def _edwards_double_standalone(p: EdwardsPoint) -> EdwardsPoint:
+    # RFC 8032 5.1.4: extended Edwards doubling.
     var A = p.X.square()
     var B = p.Y.square()
     var C = p.Z.square() * FieldElement51(2, 0, 0, 0, 0)
@@ -347,6 +359,7 @@ def _edwards_double_standalone(p: EdwardsPoint) -> EdwardsPoint:
 
 @no_inline
 def fe_from_bytes(bytes: Span[UInt8, ...]) -> FieldElement51:
+    # Decode 255-bit little-endian field element; caller clears x-parity bit.
     def load8(ptr: UnsafePointer[UInt8, _]) -> UInt64:
         var v: UInt64 = 0
         for j in range(8):
@@ -363,6 +376,7 @@ def fe_from_bytes(bytes: Span[UInt8, ...]) -> FieldElement51:
 
 @no_inline
 def edwards_encode_into(p: EdwardsPoint, output: UnsafePointer[UInt8, MutAnyOrigin]):
+    # RFC 8032 5.1.2: encode y and store x parity in bit 255.
     var z_inv = p.Z.invert()
     var x = p.X * z_inv
     var y = p.Y * z_inv
@@ -374,6 +388,8 @@ def edwards_encode_into(p: EdwardsPoint, output: UnsafePointer[UInt8, MutAnyOrig
 
 @no_inline
 def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
+    # RFC 8032 5.1.3: strict point decoding.
+    # Reject y >= p, invalid square roots, and x == 0 with sign bit set.
     var y_bytes = StackInlineArray[UInt8, 32](uninitialized=True)
     for i in range(32):
         y_bytes[i] = data[i]
@@ -390,12 +406,23 @@ def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
     var x_opt = sqrt_ratio_checked(u, v)
     if not x_opt:
         return DecodeResult(False, EdwardsPoint())
-    var x = x_opt.value()
+    var x = x_opt.unsafe_value()
+
+    # x = 0 has no odd/negative alternate root.
+    var x_zero_bytes = StackInlineArray[UInt8, 32](uninitialized=True)
+    x.to_bytes_into(x_zero_bytes.unsafe_ptr())
+    var x_is_zero = True
+    for i in range(32):
+        if x_zero_bytes[i] != 0:
+            x_is_zero = False
+    if x_is_zero and sign == 1:
+        return DecodeResult(False, EdwardsPoint())
 
     var x_try = x
     var x_try_bytes = StackInlineArray[UInt8, 32](uninitialized=True)
     x_try.to_bytes_into(x_try_bytes.unsafe_ptr())
     if (x_try_bytes[0] & 1) != sign:
+        # Choose the root matching the encoded x parity.
         x_try = FieldElement51.ZERO() - x_try
 
     var chk = x_try.square() * v - u
@@ -409,18 +436,6 @@ def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
     if ok:
         return DecodeResult(True, EdwardsPoint(x_try, y, FieldElement51.ONE(), x_try * y))
 
-    if not strict:
-        var x_alt = FieldElement51.ZERO() - x_try
-        var chk2 = x_alt.square() * v - u
-        var chk2_bytes = StackInlineArray[UInt8, 32](uninitialized=True)
-        chk2.to_bytes_into(chk2_bytes.unsafe_ptr())
-        var ok2 = True
-        for i in range(32):
-            if chk2_bytes[i] != 0:
-                ok2 = False
-        if ok2:
-            return DecodeResult(True, EdwardsPoint(x_alt, y, FieldElement51.ONE(), x_alt * y))
-
     return DecodeResult(False, EdwardsPoint())
 
 @no_inline
@@ -428,7 +443,8 @@ def edwards_decode_checked(data: Span[UInt8, ...]) -> DecodeResult:
     return edwards_decode(data, strict=True)
 
 def edwards_decode_verify_compatible(data: Span[UInt8, ...]) -> DecodeResult:
-    return edwards_decode(data, strict=False)
+    # RFC verification decode, no ZIP-215 decoding (relaxed decoding not allowed under RFC strictnes).
+    return edwards_decode(data, strict=True)
 
 @no_inline
 def edwards_decode_canonical(data: Span[UInt8, ...]) -> EdwardsPoint:
@@ -439,6 +455,9 @@ def edwards_decode_canonical(data: Span[UInt8, ...]) -> EdwardsPoint:
 
 @no_inline
 def sqrt_ratio_checked(u: FieldElement51, v: FieldElement51) -> Optional[FieldElement51]:
+    # RFC 8032 5.1.3: compute sqrt(u/v) using
+    # x = u*v^3*(u*v^7)^((p-5)/8). Public decoding only.
+    # Branches on validity; do not use for secret-dependent values.
     @always_inline
     def _pow_p58(a: FieldElement51) -> FieldElement51:
         var acc = FieldElement51.ONE()
@@ -485,11 +504,12 @@ def sqrt_ratio_checked(u: FieldElement51, v: FieldElement51) -> Optional[FieldEl
 def sqrt_ratio(u: FieldElement51, v: FieldElement51) -> FieldElement51:
     var x = sqrt_ratio_checked(u, v)
     if x:
-        return x.value()
+        return x.unsafe_value()
     return FieldElement51.ZERO()
 
 @no_inline
 def _scalar_mult(k: Span[UInt8, ...], p: EdwardsPoint) -> EdwardsPoint:
+    # Secret-scalar loop: always double/add/select; no scalar-bit branch.
     var d2 = ed25519_d2()
     var base = EdwardsPoint(
         FieldElement51(p.X.limbs),
@@ -500,18 +520,7 @@ def _scalar_mult(k: Span[UInt8, ...], p: EdwardsPoint) -> EdwardsPoint:
     var r = EdwardsPoint()
     @always_inline
     def _bit_at(bytes: Span[UInt8, ...], bit_index: Int) -> UInt8:
-        if bit_index < 0:
-            return 0
-        var byte_idx = bit_index // 8
-        if byte_idx < 0 or byte_idx >= len(bytes):
-            return 0
-        var shift = bit_index % 8
-        if shift < 0:
-            return 0
-        if shift > 7:
-            shift = 7
-        var byte_val: UInt8 = bytes[byte_idx]
-        return (byte_val >> UInt8(shift)) & UInt8(1)
+        return (bytes[bit_index >> 3] >> UInt8(bit_index & 7)) & UInt8(1)
 
     for i in range(255, -1, -1):
         r = _edwards_double_standalone(r)
@@ -524,6 +533,7 @@ def _scalar_mult_base(k: Span[UInt8, ...]) -> EdwardsPoint:
     return _scalar_mult(k, bp)
 
 def ed25519_generate_public_key(private_key: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]):
+    # RFC 8032 5.1.5: public key A = [pruned SHA512(secret)]B.
     var hash = StackInlineArray[UInt8, 64](uninitialized=True)
     var ctx = SHA512Context()
     sha512_update(ctx, private_key)
@@ -535,6 +545,9 @@ def ed25519_generate_public_key(private_key: Span[UInt8, ...], output: UnsafePoi
     edwards_encode_into(pub_point, output)
 
 def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]):
+    # RFC 8032 5.1.6 pure Ed25519:
+    # r = SHA512(prefix || M), R = [r]B,
+    # k = SHA512(R || A || M), S = r + k*s mod L.
     var hash = StackInlineArray[UInt8, 64](uninitialized=True)
     var ctx = SHA512Context()
     sha512_update(ctx, private_key)
@@ -576,6 +589,9 @@ def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...], outpu
     for i in range(32): output[32 + i] = S_bytes[i]
 
 def ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], signature: Span[UInt8, ...]) -> Bool:
+    # RFC 8032 5.1.7 strict Ed25519 verification.
+    # Requires canonical A/R, S < L, and checks [S]B == R + [k]A.
+    # Not ZIP-215-compatible.
     if len(public_key) != 32 or len(signature) != 64:
         return False
     var A_res = edwards_decode_verify_compatible(public_key)

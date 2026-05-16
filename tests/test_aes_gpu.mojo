@@ -4,7 +4,7 @@ from std.collections import List
 from std.sys import has_accelerator
 from thistle.sha2 import bytes_to_hex
 from thistle.aes import SBOX, expand_key_128, expand_key_192, expand_key_256
-from thistle.aes_gpu import aes_gpu_kernel_ecb, aes_gpu_kernel_ctr, aes_gpu_kernel_cbc, aes_gpu_kernel_gcm, aes_gpu_kernel_xts
+from thistle.aes_gpu import aes_gpu_kernel_ecb, aes_gpu_kernel_ctr, aes_gpu_kernel_gcm, aes_gpu_kernel_xts
 from std.memory import alloc
 from std.gpu.host import DeviceContext
 from std.memory.unsafe_pointer import UnsafePointer
@@ -114,14 +114,14 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
             ctx.synchronize()
             
             var block_dim = 1
-            var grid_dim = 1
+            var grid_dim = 4
             
             ctx.enqueue_function[aes_gpu_kernel_ecb, aes_gpu_kernel_ecb](
                 input_buffer.unsafe_ptr(),
                 output_buffer.unsafe_ptr(),
                 round_keys_buffer.unsafe_ptr(),
                 sbox_buffer.unsafe_ptr(),
-                1,
+                4,
                 10,
                 grid_dim=grid_dim,
                 block_dim=block_dim,
@@ -134,12 +134,15 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
             var correct = True
             var expected = String(v["ciphertext"])
             var all_passed = True
-            for j in range(16):
-                var expected_byte = hex_char_to_val(Int(expected.as_bytes()[j * 2])) << 4
-                expected_byte |= hex_char_to_val(Int(expected.as_bytes()[j * 2 + 1]))
-                var actual_byte = output_host[j]
-                if actual_byte != expected_byte:
-                    all_passed = False
+            for block in range(4):
+                for j in range(16):
+                    var expected_byte = hex_char_to_val(Int(expected.as_bytes()[j * 2])) << 4
+                    expected_byte |= hex_char_to_val(Int(expected.as_bytes()[j * 2 + 1]))
+                    var actual_byte = output_host[block * 16 + j]
+                    if actual_byte != expected_byte:
+                        all_passed = False
+                        break
+                if not all_passed:
                     break
             
             if all_passed:
@@ -215,21 +218,23 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
                 round_keys_size = 60
                 round_keys = expand_key_256(key_ptr)
         
-        var pt_ptr = alloc[UInt8](16)
-        for j in range(16):
+        var total_bytes = len(pt_bytes)
+        var n_blocks = total_bytes // 16
+        var pt_ptr = alloc[UInt8](total_bytes)
+        for j in range(total_bytes):
             pt_ptr.store(j, pt_bytes[j])
         
-        var ct_ptr = alloc[UInt8](16)
+        var ct_ptr = alloc[UInt8](total_bytes)
         
-        var input_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
-        var output_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
+        var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
+        var output_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
         var round_keys_buffer = ctx.enqueue_create_buffer[DType.uint32](round_keys_size)
         
         ctx.enqueue_copy(input_buffer, pt_ptr)
         ctx.enqueue_copy(round_keys_buffer, round_keys)
         ctx.synchronize()
         
-        var grid_dim = 1
+        var grid_dim = n_blocks
         var block_dim = 1
         
         var rounds: Int
@@ -246,31 +251,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
                 output_buffer.unsafe_ptr(),
                 round_keys_buffer.unsafe_ptr(),
                 sbox_buffer.unsafe_ptr(),
-                1,
-                rounds,
-                grid_dim=grid_dim,
-                block_dim=block_dim,
-            )
-        elif "CBC" in mode:
-            var iv_ptr = alloc[UInt8](16)
-            var iv_hex = String(tv.get("iv", PythonObject()))
-            if iv_hex.byte_length() == 0:
-                for j in range(16):
-                    iv_ptr[j] = 0
-            else:
-                var iv_bytes = hex_to_bytes(iv_hex)
-                for j in range(16):
-                    iv_ptr.store(j, iv_bytes[j])
-            
-            var iv_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
-            ctx.enqueue_copy(iv_buffer, iv_ptr)
-            ctx.enqueue_function[aes_gpu_kernel_cbc, aes_gpu_kernel_cbc](
-                input_buffer.unsafe_ptr(),
-                output_buffer.unsafe_ptr(),
-                round_keys_buffer.unsafe_ptr(),
-                sbox_buffer.unsafe_ptr(),
-                1,
-                iv_buffer.unsafe_ptr(),
+                n_blocks,
                 rounds,
                 grid_dim=grid_dim,
                 block_dim=block_dim,
@@ -293,7 +274,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
                 output_buffer.unsafe_ptr(),
                 round_keys_buffer.unsafe_ptr(),
                 sbox_buffer.unsafe_ptr(),
-                1,
+                n_blocks,
                 nonce_buffer.unsafe_ptr(),
                 rounds,
                 grid_dim=grid_dim,
@@ -317,7 +298,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
                 output_buffer.unsafe_ptr(),
                 round_keys_buffer.unsafe_ptr(),
                 sbox_buffer.unsafe_ptr(),
-                1,
+                n_blocks,
                 nonce_buffer.unsafe_ptr(),
                 rounds,
                 grid_dim=grid_dim,
@@ -373,7 +354,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
                 round_keys1_buffer.unsafe_ptr(),
                 round_keys2_buffer.unsafe_ptr(),
                 sbox_buffer.unsafe_ptr(),
-                1,
+                n_blocks,
                 tweak_buffer.unsafe_ptr(),
                 xts_rounds,
                 grid_dim=grid_dim,
@@ -389,7 +370,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
                 output_buffer.unsafe_ptr(),
                 round_keys_buffer.unsafe_ptr(),
                 sbox_buffer.unsafe_ptr(),
-                1,
+                n_blocks,
                 rounds,
                 grid_dim=grid_dim,
                 block_dim=block_dim,
@@ -400,19 +381,23 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
         ctx.synchronize()
         
         var correct = True
-        for j in range(16):
-            var expected_byte = hex_char_to_val(Int(expected_ct.as_bytes()[j * 2])) << 4
-            expected_byte = expected_byte | hex_char_to_val(Int(expected_ct.as_bytes()[j * 2 + 1]))
-            if ct_ptr.load(j) != expected_byte:
-                correct = False
-                break
+        var expected_len = expected_ct.byte_length() // 2
+        if expected_len != total_bytes:
+            correct = False
+        else:
+            for j in range(total_bytes):
+                var expected_byte = hex_char_to_val(Int(expected_ct.as_bytes()[j * 2])) << 4
+                expected_byte = expected_byte | hex_char_to_val(Int(expected_ct.as_bytes()[j * 2 + 1]))
+                if ct_ptr.load(j) != expected_byte:
+                    correct = False
+                    break
         
         if correct:
             passed += 1
         else:
             failed += 1
             var got_hex = String("")
-            for j in range(16):
+            for j in range(total_bytes):
                 got_hex += byte_to_hex(ct_ptr.load(j))
             failures.append(mode + " " + String(i) + ": expected " + expected_ct + ", got " + got_hex)
         
@@ -458,7 +443,6 @@ def main() raises:
         print("Loading AES mode vectors...")
         var json_data = load_json("tests/vectors/aes_test_vectors.json", py)
         var modes = ["AES-128-ECB", "AES-192-ECB", "AES-256-ECB", 
-                     "AES-128-CBC", "AES-192-CBC", "AES-256-CBC",
                      "AES-128-CTR", "AES-192-CTR", "AES-256-CTR",
                      "AES-128-GCM", "AES-192-GCM", "AES-256-GCM",
                      "AES-128-XTS", "AES-256-XTS"]

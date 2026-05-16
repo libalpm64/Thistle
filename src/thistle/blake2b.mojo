@@ -8,7 +8,7 @@ By Libalpm64, Attribute not required.
 """
 
 from std.collections import List
-from std.memory import UnsafePointer, alloc, memcpy
+from std.memory import UnsafePointer, alloc, memcpy, memset_zero
 
 comptime BLAKE2B_IV = SIMD[DType.uint64, 8](
     0x6A09E667F3BCC908,
@@ -80,8 +80,7 @@ def round_fn[r: Int](
 
 @always_inline
 def zero_buffer(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
-    for i in range(len):
-        ptr[i] = 0
+    memset_zero(ptr, len)
 
 @always_inline
 def zero_and_free(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
@@ -223,7 +222,7 @@ struct Blake2b(Movable):
             self.buffer_len += to_copy
             i += to_copy
 
-    def finalize(mut self) -> List[UInt8]:
+    def finalize_into(mut self, output: UnsafePointer[UInt8, MutAnyOrigin]):
         var old_low = self.t_low
         self.t_low += UInt64(self.buffer_len)
         if self.t_low < old_low:
@@ -235,13 +234,17 @@ struct Blake2b(Movable):
 
         self.compress(True)
 
-        var output = List[UInt8](capacity=self.out_len)
         for i in range(self.out_len):
             var word_idx = i // 8
             var byte_idx = i % 8
             var word = self.h[word_idx]
-            output.append(UInt8((word >> UInt64(byte_idx * 8)) & 0xFF))
+            output[i] = UInt8((word >> UInt64(byte_idx * 8)) & 0xFF)
 
+    def finalize(mut self) -> List[UInt8]:
+        var output = List[UInt8](capacity=self.out_len)
+        for i in range(self.out_len):
+            output.append(0)
+        self.finalize_into(output.unsafe_ptr())
         return output^
 
 

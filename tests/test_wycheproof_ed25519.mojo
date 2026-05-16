@@ -3,7 +3,7 @@
 
 """
 Wycheproof Ed25519 test suite
-By Libalpm64
+By Libalpm64, no attribution required.
 """
 
 from std.collections import List

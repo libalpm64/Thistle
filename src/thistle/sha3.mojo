@@ -67,7 +67,7 @@ def keccak_f1600(state: UnsafePointer[UInt64, MutAnyOrigin]):
     var a23 = state[23]
     var a24 = state[24]
 
-    for round in range(24):
+    comptime for round in range(24):
         var c0 = a0 ^ a5 ^ a10 ^ a15 ^ a20
         var c1 = a1 ^ a6 ^ a11 ^ a16 ^ a21
         var c2 = a2 ^ a7 ^ a12 ^ a17 ^ a22
@@ -198,26 +198,10 @@ def nibble_to_hex_char(nibble: UInt8) -> UInt8:
 @always_inline
 def bytes_to_hex_simd(data: UnsafePointer[UInt8, ImmutAnyOrigin], len: Int) -> String:
     var result = String(capacity=len * 2)
-    var i = 0
-    while i + 16 <= len:
-        var chunk = SIMD[DType.uint8, 16].load(data.offset(i))
-        var high = (chunk >> 4) & SIMD[DType.uint8, 16](0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F)
-        var low = chunk & SIMD[DType.uint8, 16](0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F)
-        var high_idx = high.cast[DType.uint32]()
-        var low_idx = low.cast[DType.uint32]()
-        for j in range(16):
-            var hi = Int(high_idx[j])
-            var lo = Int(low_idx[j])
-            result += chr(Int(HEX_CHARS[hi]))
-            result += chr(Int(HEX_CHARS[lo]))
-        i += 16
-    while i < len:
+    for i in range(len):
         var b = data[i]
-        var high = (b >> 4) & 0x0F
-        var low = b & 0x0F
-        result += chr(Int(nibble_to_hex_char(high)))
-        result += chr(Int(nibble_to_hex_char(low)))
-        i += 1
+        result += chr(Int(nibble_to_hex_char((b >> 4) & 0x0F)))
+        result += chr(Int(nibble_to_hex_char(b & 0x0F)))
     return result
 
 
@@ -226,8 +210,8 @@ def bytes_to_hex(data: List[UInt8]) -> String:
 
 
 def string_to_bytes(s: String) -> List[UInt8]:
-    var data = List[UInt8]()
     var bytes = s.as_bytes()
+    var data = List[UInt8](capacity=len(bytes))
     for i in range(len(bytes)):
         data.append(bytes[i])
     return data^
@@ -257,10 +241,9 @@ struct SHA3Context(Movable):
 
 @always_inline
 def sha3_absorb_block(state: UnsafePointer[UInt64, MutAnyOrigin], block: UnsafePointer[UInt8, ImmutAnyOrigin], rate_bytes: Int):
-    var block_u64 = block.bitcast[UInt64]()
     var full_lanes = rate_bytes // 8
     for i in range(full_lanes):
-        state[i] ^= block_u64[i]
+        state[i] ^= (block + i * 8).bitcast[UInt64]().load[width=1, alignment=1]()
     keccak_f1600(state)
 
 
@@ -306,28 +289,31 @@ def sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
     ctx.buffer[ctx.buffer_len] = 0x06
     ctx.buffer_len += 1
 
-    while ctx.buffer_len < ctx.rate_bytes:
-        ctx.buffer[ctx.buffer_len] = 0
-        ctx.buffer_len += 1
+    var pad_len = ctx.rate_bytes - ctx.buffer_len
+    if pad_len > 0:
+        memset_zero(ctx.buffer.ptr() + ctx.buffer_len, pad_len)
+        ctx.buffer_len = ctx.rate_bytes
 
     ctx.buffer[ctx.rate_bytes - 1] |= 0x80
-
     sha3_absorb_block(ctx.state.ptr(), ctx.buffer.ptr(), ctx.rate_bytes)
 
     var output = List[UInt8](capacity=output_len_bytes)
-    var offset = 0
+    for _ in range(output_len_bytes):
+        output.append(0)
 
+    var offset = 0
     while offset < output_len_bytes:
         var limit = ctx.rate_bytes
         if output_len_bytes - offset < limit:
             limit = output_len_bytes - offset
 
-        var state_bytes = ctx.state.ptr().bitcast[UInt8]()
-        for i in range(limit):
-            output.append(state_bytes[i])
+        memcpy(
+            dest=output.unsafe_ptr() + offset,
+            src=ctx.state.ptr().bitcast[UInt8](),
+            count=limit,
+        )
 
         offset += limit
-
         if offset < output_len_bytes:
             keccak_f1600(ctx.state.ptr())
 
@@ -385,26 +371,38 @@ def sha3_512_hash_string(s: String) -> String:
 def shake_hash(rate_bits: Int, data: Span[UInt8, ...], output_len: Int) -> List[UInt8]:
     var ctx = SHA3Context(rate_bits)
     sha3_update(ctx, data)
+
     ctx.buffer[ctx.buffer_len] = 0x1F
     ctx.buffer_len += 1
-    while ctx.buffer_len < ctx.rate_bytes:
-        ctx.buffer[ctx.buffer_len] = 0
-        ctx.buffer_len += 1
+
+    var pad_len = ctx.rate_bytes - ctx.buffer_len
+    if pad_len > 0:
+        memset_zero(ctx.buffer.ptr() + ctx.buffer_len, pad_len)
+        ctx.buffer_len = ctx.rate_bytes
+
     ctx.buffer[ctx.rate_bytes - 1] |= 0x80
     sha3_absorb_block(ctx.state.ptr(), ctx.buffer.ptr(), ctx.rate_bytes)
-    
+
     var output = List[UInt8](capacity=output_len)
+    for _ in range(output_len):
+        output.append(0)
+
     var offset = 0
     while offset < output_len:
         var limit = ctx.rate_bytes
         if output_len - offset < limit:
             limit = output_len - offset
-        var state_bytes = ctx.state.ptr().bitcast[UInt8]()
-        for i in range(limit):
-            output.append(state_bytes[i])
+
+        memcpy(
+            dest=output.unsafe_ptr() + offset,
+            src=ctx.state.ptr().bitcast[UInt8](),
+            count=limit,
+        )
+
         offset += limit
         if offset < output_len:
             keccak_f1600(ctx.state.ptr())
+
     return output^
 
 

@@ -150,18 +150,14 @@ def compress_internal[
         ]
         # fmt: on
 
-    comptime for _ in range(7):
-        round()
+    round()
+    comptime for _ in range(6):
         transform()
+        round()
 
     out_ptr.bitcast[UInt32]().store(
         v.unsafe_ptr().bitcast[UInt32]().load[width=w * 16]()
     )
-
-@always_inline
-def rot[n: Int](v: SIMD[DType.uint32, 8]) -> SIMD[DType.uint32, 8]:
-    var shift = SIMD[DType.uint32, 8](n)
-    return (v >> shift) | (v << (SIMD[DType.uint32, 8](32) - shift))
 
 @always_inline
 def g_vertical(
@@ -173,13 +169,13 @@ def g_vertical(
     y: SIMD[DType.uint32, 8],
 ):
     a = a + b + x
-    d = rot[16](d ^ a)
+    d = bit_rotr[16, 8](d ^ a)
     c = c + d
-    b = rot[12](b ^ c)
+    b = bit_rotr[12, 8](b ^ c)
     a = a + b + y
-    d = rot[8](d ^ a)
+    d = bit_rotr[8, 8](d ^ a)
     c = c + d
-    b = rot[7](b ^ c)
+    b = bit_rotr[7, 8](b ^ c)
 
 @always_inline
 def compress_core(
@@ -255,9 +251,10 @@ def compress_internal_16way(
         ]
         # fmt: on
 
-    comptime for _ in range(7):
-        round()
+    round()
+    comptime for _ in range(6):
         transform()
+        round()
 
     out_ptr[0] = v[0] ^ v[8]
     out_ptr[1] = v[1] ^ v[9]
@@ -489,7 +486,7 @@ struct Hasher:
     ):
         var new_total = total_chunks + 1
         var new_cv = cv_in
-        var num_merges = count_trailing_zeros(new_total.cast[DType.int]())
+        var num_merges = count_trailing_zeros(new_total)
         for _ in range(num_merges):
             if self.stack_len == 0:
                 break
@@ -526,9 +523,10 @@ struct Hasher:
         out_buf = {unsafe_uninit_length=out_len}
         var temp_buf = StackInlineArray[UInt8, 64](uninitialized=True)
 
-        comptime
         for i in range(64):
-            temp_buf[i] = self.buf[i] if i < self.buf_len else UInt8(0)
+            temp_buf.unsafe_set(i, 0)
+        for i in range(self.buf_len):
+            temp_buf.unsafe_set(i, self.buf[i])
 
         var blk = temp_buf.unsafe_ptr().bitcast[UInt32]().load[width=16]()
 
@@ -726,7 +724,7 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) -> List[UIn
                 })
                 # fmt: on
 
-        for j in {32, 16, 8, 4, 2, 1}:
+        for j in [32, 16, 8, 4, 2, 1]:
             for i in range(j):
                 var left = local_cvs.unsafe_get(i * 2)
                 var right = local_cvs.unsafe_get(i * 2 + 1)

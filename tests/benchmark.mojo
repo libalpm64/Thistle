@@ -329,94 +329,6 @@ def benchmark_aes_gpu_ecb() raises -> String:
         return "aes-128-gpu-ecb | throughput: " + String(gbps)[byte=:6] + " gb/s, iterations: " + String(iterations)
 
 
-def benchmark_aes_gpu_cbc() raises -> String:
-    comptime
-    if not has_accelerator():
-        return "aes-128-gpu-cbc | (GPU not available)"
-    
-    from std.gpu.host import DeviceContext
-    from thistle.aes_gpu import aes_gpu_kernel_cbc
-    
-    var key_ptr = alloc[UInt8](16)
-    for i in range(16):
-        key_ptr.store(i, TEST_KEY[i])
-    var round_keys = expand_key_128(key_ptr)
-    var num_blocks = 131072
-    var total_bytes = num_blocks * 16
-
-    var input_host = alloc[Scalar[DType.uint8]](total_bytes)
-    var output_host = alloc[Scalar[DType.uint8]](total_bytes)
-    var iv_host = alloc[Scalar[DType.uint8]](16)
-
-    for i in range(total_bytes):
-        input_host[i] = TEST_PT[i % 16]
-    for i in range(16):
-        iv_host[i] = 0
-
-    with DeviceContext() as ctx:
-        var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
-        var output_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
-        var round_keys_buffer = ctx.enqueue_create_buffer[DType.uint32](44)
-        var iv_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
-        
-        var sbox_host = alloc[Scalar[DType.uint8]](256)
-        for i in range(256):
-            sbox_host[i] = SBOX[i]
-        var sbox_buffer = ctx.enqueue_create_buffer[DType.uint8](256)
-
-        ctx.enqueue_copy(input_buffer, input_host)
-        ctx.enqueue_copy(round_keys_buffer, round_keys)
-        ctx.enqueue_copy(sbox_buffer, sbox_host)
-        ctx.enqueue_copy(iv_buffer, iv_host)
-        ctx.synchronize()
-
-        var block_dim = 256
-        var grid_dim = ceildiv(num_blocks, block_dim)
-        
-        ctx.enqueue_function[aes_gpu_kernel_cbc, aes_gpu_kernel_cbc](
-            input_buffer.unsafe_ptr(),
-            output_buffer.unsafe_ptr(),
-            round_keys_buffer.unsafe_ptr(),
-            sbox_buffer.unsafe_ptr(),
-            num_blocks,
-            iv_buffer.unsafe_ptr(),
-            10,
-            grid_dim=grid_dim,
-            block_dim=block_dim,
-        )
-        ctx.synchronize()
-
-        var iterations = 50
-        var start = perf_counter()
-        for _ in range(iterations):
-            ctx.enqueue_function[aes_gpu_kernel_cbc, aes_gpu_kernel_cbc](
-                input_buffer.unsafe_ptr(),
-                output_buffer.unsafe_ptr(),
-                round_keys_buffer.unsafe_ptr(),
-                sbox_buffer.unsafe_ptr(),
-                num_blocks,
-                iv_buffer.unsafe_ptr(),
-                10,
-                grid_dim=grid_dim,
-                block_dim=block_dim,
-            )
-            ctx.synchronize()
-        var end = perf_counter()
-        var duration = end - start
-
-        var total_gb = Float64(iterations * total_bytes) / 1024.0 / 1024.0 / 1024.0
-        var gbps = total_gb / duration
-        
-        input_host.free()
-        output_host.free()
-        iv_host.free()
-        sbox_host.free()
-        round_keys.free()
-        key_ptr.free()
-        
-        return "aes-128-gpu-cbc | throughput: " + String(gbps)[byte=:6] + " gb/s, iterations: " + String(iterations)
-
-
 def benchmark_aes_gpu_ctr() raises -> String:
     comptime
     if not has_accelerator():
@@ -526,7 +438,6 @@ def main() raises:
     print(benchmark_kcipher2(1024 * 1024, duration))
     print(benchmark_aes_cpu(duration))
     print(benchmark_aes_gpu_ecb())
-    print(benchmark_aes_gpu_cbc())
     print(benchmark_aes_gpu_ctr())
     print(benchmark_argon2(duration))
     

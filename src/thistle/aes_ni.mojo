@@ -4,7 +4,6 @@
 """
 AES-NI implementation
 By Libalpm64 no attribution required.
-Work in progress
 """
 
 from std.sys import llvm_intrinsic, CompilationTarget
@@ -16,31 +15,27 @@ from .utils import StackBuffer
 comptime SIMD16 = SIMD[DType.uint8, 16]
 comptime SIMD128 = SIMD[DType.uint64, 2]
 
-
 @always_inline
 def _aese(lhs: SIMD16, rhs: SIMD16) -> SIMD16:
-    comptime if CompilationTarget.has_neon():
+    comptime if CompilationTarget._has_feature["crypto"]() or CompilationTarget._has_feature["aes"]():
         return llvm_intrinsic["llvm.aarch64.crypto.aese", SIMD16, has_side_effect=False](
             lhs, rhs
         )
     else:
         return SIMD16(0)
 
-
 @always_inline
 def _aesmc(state: SIMD16) -> SIMD16:
-    comptime if CompilationTarget.has_neon():
+    comptime if CompilationTarget._has_feature["crypto"]() or CompilationTarget._has_feature["aes"]():
         return llvm_intrinsic["llvm.aarch64.crypto.aesmc", SIMD16, has_side_effect=False](
             state
         )
     else:
         return SIMD16(0)
 
-
 @always_inline
 def has_arm_crypto() -> Bool:
-    return CompilationTarget.has_neon()
-
+    return CompilationTarget._has_feature["crypto"]() or CompilationTarget._has_feature["aes"]()
 
 @always_inline
 def _mm_aesenc_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
@@ -51,7 +46,6 @@ def _mm_aesenc_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
     else:
         return SIMD128(0)
 
-
 @always_inline
 def _mm_aesenclast_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
     comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
@@ -60,7 +54,6 @@ def _mm_aesenclast_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
         )
     else:
         return SIMD128(0)
-
 
 @always_inline
 def _mm_aeskeygenassist_si128(v: SIMD128, imm8: Int) -> SIMD128:
@@ -73,7 +66,6 @@ def _mm_aeskeygenassist_si128(v: SIMD128, imm8: Int) -> SIMD128:
     else:
         return SIMD128(0)
 
-
 @always_inline
 def has_x86_aes_ni() -> Bool:
     return CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]()
@@ -81,20 +73,49 @@ def has_x86_aes_ni() -> Bool:
 
 @always_inline
 def _mm_loadu_si128(ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> SIMD128:
-    var bytes = SIMD[DType.uint8, 16](
-        ptr[0], ptr[1], ptr[2], ptr[3],
-        ptr[4], ptr[5], ptr[6], ptr[7],
-        ptr[8], ptr[9], ptr[10], ptr[11],
-        ptr[12], ptr[13], ptr[14], ptr[15]
-    )
-    return bitcast[DType.uint64, 2](bytes.to_bits())
-
+    return ptr.bitcast[UInt64]().load[width=2, alignment=1]()
 
 @always_inline
 def _mm_storeu_si128(ptr: UnsafePointer[UInt8, MutAnyOrigin], data: SIMD128) -> None:
     var bytes: SIMD[DType.uint8, 16] = bitcast[DType.uint8, 16](data)
-    ptr.store[width=16](0, bytes)
+    ptr.store[width=16, alignment=1](0, bytes)
 
+@always_inline
+def _write_counter_be32(
+    counter_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    nonce_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    block_index: Int,
+) -> None:
+    for j in range(16):
+        counter_ptr.store(j, nonce_ptr.load(j))
+
+    var carry = block_index
+    var pos = 15
+    while pos >= 12:
+        var sum = Int(counter_ptr.load(pos)) + (carry & 0xFF)
+        counter_ptr.store(pos, UInt8(sum & 0xFF))
+        carry = (carry >> 8) + (sum >> 8)
+        pos -= 1
+
+@always_inline
+def _write_gcm_counter(
+    counter_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    nonce_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    block_index: Int,
+) -> None:
+    for j in range(12):
+        counter_ptr.store(j, nonce_ptr.load(j))
+    counter_ptr.store(12, 0)
+    counter_ptr.store(13, 0)
+    counter_ptr.store(14, 0)
+    counter_ptr.store(15, 0)
+
+    var carry = block_index + 2
+    var pos = 15
+    while pos >= 12:
+        counter_ptr.store(pos, UInt8(carry & 0xFF))
+        carry = carry >> 8
+        pos -= 1
 
 @always_inline
 def _load_round_key(idx: Int, round_keys: UnsafePointer[UInt32, MutAnyOrigin]) -> SIMD128:
@@ -137,21 +158,19 @@ def x86_aes_encrypt_256(
     x86_aes_encrypt_256_direct(state, round_keys)
     _mm_storeu_si128(pt, state)
 
-
 @always_inline
 def x86_aes_encrypt_128_direct(
     mut state: SIMD128,
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
 ) -> None:
     var keys = StaticTuple[SIMD128, 11]()
-    for i in range(11):
+    comptime for i in range(11):
         keys[i] = _load_round_key(i, round_keys)
 
     state = state ^ keys[0]
-    for i in range(1, 10):
+    comptime for i in range(1, 10):
         state = _mm_aesenc_si128(state, keys[i])
     state = _mm_aesenclast_si128(state, keys[10])
-
 
 @always_inline
 def x86_aes_encrypt_192_direct(
@@ -159,14 +178,13 @@ def x86_aes_encrypt_192_direct(
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
 ) -> None:
     var keys = StaticTuple[SIMD128, 13]()
-    for i in range(13):
+    comptime for i in range(13):
         keys[i] = _load_round_key(i, round_keys)
 
     state = state ^ keys[0]
-    for i in range(1, 12):
+    comptime for i in range(1, 12):
         state = _mm_aesenc_si128(state, keys[i])
     state = _mm_aesenclast_si128(state, keys[12])
-
 
 @always_inline
 def x86_aes_encrypt_256_direct(
@@ -174,11 +192,11 @@ def x86_aes_encrypt_256_direct(
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
 ) -> None:
     var keys = StaticTuple[SIMD128, 15]()
-    for i in range(15):
+    comptime for i in range(15):
         keys[i] = _load_round_key(i, round_keys)
 
     state = state ^ keys[0]
-    for i in range(1, 14):
+    comptime for i in range(1, 14):
         state = _mm_aesenc_si128(state, keys[i])
     state = _mm_aesenclast_si128(state, keys[14])
 
@@ -208,7 +226,7 @@ def arm_aes_encrypt_128(
         SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     )
     
-    for i in range(11):
+    comptime for i in range(11):
         var w0 = round_keys.load(i * 4)
         var w1 = round_keys.load(i * 4 + 1)
         var w2 = round_keys.load(i * 4 + 2)
@@ -294,7 +312,7 @@ def arm_aes_encrypt_192(
         SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     )
     
-    for i in range(13):
+    comptime for i in range(13):
         var w0 = round_keys.load(i * 4)
         var w1 = round_keys.load(i * 4 + 1)
         var w2 = round_keys.load(i * 4 + 2)
@@ -356,7 +374,6 @@ def arm_aes_encrypt_192(
     pt.store(14, result[14])
     pt.store(15, result[15])
 
-
 def arm_aes_encrypt_256(
     pt: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
@@ -386,7 +403,7 @@ def arm_aes_encrypt_256(
         SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     )
     
-    for i in range(15):
+    comptime for i in range(15):
         var w0 = round_keys.load(i * 4)
         var w1 = round_keys.load(i * 4 + 1)
         var w2 = round_keys.load(i * 4 + 2)
@@ -452,7 +469,6 @@ def arm_aes_encrypt_256(
     pt.store(14, result[14])
     pt.store(15, result[15])
 
-
 @always_inline
 def arm_aes_ecb_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
@@ -461,23 +477,28 @@ def arm_aes_ecb_kernel(
     num_blocks: Int,
     rounds: Int
 ) -> None:
+    var temp_block = StackBuffer[UInt8, 16]()
+    var tp = temp_block.ptr()
+
     var i = 0
     while i < num_blocks:
         var block_ptr = input_ptr + i * 16
         var out_ptr = output_ptr + i * 16
-        
-        if rounds == 10:
-            arm_aes_encrypt_128(block_ptr, round_keys)
-        elif rounds == 12:
-            arm_aes_encrypt_192(block_ptr, round_keys)
-        else:
-            arm_aes_encrypt_256(block_ptr, round_keys)
-        
-        for j in range(16):
-            out_ptr.store(j, block_ptr.load(j))
-        
-        i += 1
 
+        for j in range(16):
+            tp.store(j, block_ptr.load(j))
+
+        if rounds == 10:
+            arm_aes_encrypt_128(tp, round_keys)
+        elif rounds == 12:
+            arm_aes_encrypt_192(tp, round_keys)
+        else:
+            arm_aes_encrypt_256(tp, round_keys)
+
+        for j in range(16):
+            out_ptr.store(j, tp.load(j))
+
+        i += 1
 
 @always_inline
 def arm_aes_cbc_kernel(
@@ -494,39 +515,30 @@ def arm_aes_cbc_kernel(
         iv_ptr[8], iv_ptr[9], iv_ptr[10], iv_ptr[11],
         iv_ptr[12], iv_ptr[13], iv_ptr[14], iv_ptr[15]
     )
-    
+    var temp_block = StackBuffer[UInt8, 16]()
+    var tp = temp_block.ptr()
+
     var i = 0
     while i < num_blocks:
         var block_ptr = input_ptr + i * 16
         var out_ptr = output_ptr + i * 16
-        
-        var xored = StaticTuple[UInt8, 16](
-            block_ptr[0] ^ prev_block[0], block_ptr[1] ^ prev_block[1],
-            block_ptr[2] ^ prev_block[2], block_ptr[3] ^ prev_block[3],
-            block_ptr[4] ^ prev_block[4], block_ptr[5] ^ prev_block[5],
-            block_ptr[6] ^ prev_block[6], block_ptr[7] ^ prev_block[7],
-            block_ptr[8] ^ prev_block[8], block_ptr[9] ^ prev_block[9],
-            block_ptr[10] ^ prev_block[10], block_ptr[11] ^ prev_block[11],
-            block_ptr[12] ^ prev_block[12], block_ptr[13] ^ prev_block[13],
-            block_ptr[14] ^ prev_block[14], block_ptr[15] ^ prev_block[15]
-        )
-        
-        for j in range(16):
-            block_ptr.store(j, xored[j])
-        
-        if rounds == 10:
-            arm_aes_encrypt_128(block_ptr, round_keys)
-        elif rounds == 12:
-            arm_aes_encrypt_192(block_ptr, round_keys)
-        else:
-            arm_aes_encrypt_256(block_ptr, round_keys)
-        
-        for j in range(16):
-            out_ptr.store(j, block_ptr.load(j))
-            prev_block[j] = block_ptr.load(j)
-        
-        i += 1
 
+        for j in range(16):
+            tp.store(j, block_ptr.load(j) ^ prev_block[j])
+
+        if rounds == 10:
+            arm_aes_encrypt_128(tp, round_keys)
+        elif rounds == 12:
+            arm_aes_encrypt_192(tp, round_keys)
+        else:
+            arm_aes_encrypt_256(tp, round_keys)
+
+        for j in range(16):
+            var c = tp.load(j)
+            out_ptr.store(j, c)
+            prev_block[j] = c
+
+        i += 1
 
 @always_inline
 def arm_aes_ctr_kernel(
@@ -537,39 +549,26 @@ def arm_aes_ctr_kernel(
     nonce_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int
 ) -> None:
+    var counter_block = StackBuffer[UInt8, 16]()
+    var tp = counter_block.ptr()
+
     var i = 0
     while i < num_blocks:
-        var counter = StaticTuple[UInt8, 16](
-            nonce_ptr[0], nonce_ptr[1], nonce_ptr[2], nonce_ptr[3],
-            nonce_ptr[4], nonce_ptr[5], nonce_ptr[6], nonce_ptr[7],
-            nonce_ptr[8], nonce_ptr[9], nonce_ptr[10], nonce_ptr[11],
-            nonce_ptr[12], nonce_ptr[13], nonce_ptr[14], nonce_ptr[15]
-        )
-        
-        counter[12] = counter[12] ^ UInt8((i >> 24) & 0xff)
-        counter[13] = counter[13] ^ UInt8((i >> 16) & 0xff)
-        counter[14] = counter[14] ^ UInt8((i >> 8) & 0xff)
-        counter[15] = counter[15] ^ UInt8(i & 0xff)
-        
-        var temp_block = StackBuffer[UInt8, 16]()
-        var tp = temp_block.ptr()
-        for j in range(16):
-            tp.store(j, counter[j])
-        
+        _write_counter_be32(tp, nonce_ptr, i)
+
         if rounds == 10:
             arm_aes_encrypt_128(tp, round_keys)
         elif rounds == 12:
             arm_aes_encrypt_192(tp, round_keys)
         else:
             arm_aes_encrypt_256(tp, round_keys)
-        
+
         var in_block = input_ptr + i * 16
         var out_block = output_ptr + i * 16
         for j in range(16):
             out_block.store(j, in_block.load(j) ^ tp.load(j))
-        
-        i += 1
 
+        i += 1
 
 def gf_mul2(x: UInt8) -> UInt8:
     var result = x << 1
@@ -577,7 +576,6 @@ def gf_mul2(x: UInt8) -> UInt8:
     if hi_bit == 1:
         result = result ^ 0x1b
     return result
-
 
 @always_inline
 def arm_aes_gcm_kernel(
@@ -588,44 +586,32 @@ def arm_aes_gcm_kernel(
     nonce_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int
 ) -> None:
-    var counter = StaticTuple[UInt8, 16](
-        nonce_ptr[0], nonce_ptr[1], nonce_ptr[2], nonce_ptr[3],
-        nonce_ptr[4], nonce_ptr[5], nonce_ptr[6], nonce_ptr[7],
-        nonce_ptr[8], nonce_ptr[9], nonce_ptr[10], nonce_ptr[11],
-        0, 0, 0, 2
-    )
-    
+    var counter_block = StackBuffer[UInt8, 16]()
+    var cp = counter_block.ptr()
+
     var i = 0
     while i < num_blocks:
-        counter[15] = UInt8((2 + i) & 0xff)
-        counter[14] = UInt8(((2 + i) >> 8) & 0xff)
-        
-        var counter_block = StackBuffer[UInt8, 16]()
-        var cp = counter_block.ptr()
-        for j in range(16):
-            cp.store(j, counter[j])
-        
+        _write_gcm_counter(cp, nonce_ptr, i)
+
         if rounds == 10:
             arm_aes_encrypt_128(cp, round_keys)
         elif rounds == 12:
             arm_aes_encrypt_192(cp, round_keys)
         else:
             arm_aes_encrypt_256(cp, round_keys)
-        
+
         var in_block = input_ptr + i * 16
         var out_block = output_ptr + i * 16
         for j in range(16):
             out_block.store(j, in_block.load(j) ^ cp.load(j))
-        
-        i += 1
 
+        i += 1
 
 def gf_mul2_xts(val: UInt8) -> UInt8:
     var result = val << 1
     if (val & 0x80) != 0:
         result = result ^ 0x87
     return result
-
 
 def compute_xts_tweak(tweak_bytes: List[UInt8]) -> List[UInt8]:
     var result = List[UInt8](capacity=16)
@@ -642,22 +628,20 @@ def compute_xts_tweak(tweak_bytes: List[UInt8]) -> List[UInt8]:
     
     return result^
 
-
 def compute_xts_tweak_list(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> StackBuffer[UInt8, 16]:
     var result = StackBuffer[UInt8, 16]()
-    for i in range(16):
-        result[i] = tweak_ptr.load(i)
-    
-    var carry = False
-    for i in range(16):
-        var new_carry = (result[i] & 0x80) != 0
-        result[i] = gf_mul2_xts(result[i])
-        if carry:
-            result[i] = result[i] ^ 1
-        carry = new_carry
-    
-    return result
+    var carry = UInt8(0)
 
+    for i in range(16):
+        var b = tweak_ptr.load(i)
+        var next_carry = b >> 7
+        result[i] = (b << 1) | carry
+        carry = next_carry
+
+    if carry != 0:
+        result[0] = result[0] ^ 0x87
+
+    return result
 
 @always_inline
 def arm_aes_xts_kernel(
@@ -703,7 +687,6 @@ def arm_aes_xts_kernel(
         
         i += 1
 
-
 @always_inline
 def x86_aes_ecb_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
@@ -725,7 +708,6 @@ def x86_aes_ecb_kernel(
         
         _mm_storeu_si128(output_ptr + i * 16, block)
         i += 1
-
 
 @always_inline
 def x86_aes_cbc_kernel(
@@ -754,7 +736,6 @@ def x86_aes_cbc_kernel(
         prev_block = block
         i += 1
 
-
 @always_inline
 def x86_aes_ctr_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
@@ -764,27 +745,26 @@ def x86_aes_ctr_kernel(
     nonce_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int
 ) -> None:
-    var base_counter = _mm_loadu_si128(nonce_ptr)
-    
+    var counter_block = StackBuffer[UInt8, 16]()
+    var cp = counter_block.ptr()
+
     var i = 0
     while i < num_blocks:
-        var counter = base_counter
-        var incr = SIMD[DType.uint64, 2](0, UInt64(i))
-        counter = counter + bitcast[DType.uint8, 16](incr)
-        
+        _write_counter_be32(cp, nonce_ptr, i)
+        var counter = _mm_loadu_si128(cp)
+
         if rounds == 10:
             x86_aes_encrypt_128_direct(counter, round_keys)
         elif rounds == 12:
             x86_aes_encrypt_192_direct(counter, round_keys)
         else:
             x86_aes_encrypt_256_direct(counter, round_keys)
-        
+
         var in_block = _mm_loadu_si128(input_ptr + i * 16)
         var result = in_block ^ counter
         _mm_storeu_si128(output_ptr + i * 16, result)
-        
-        i += 1
 
+        i += 1
 
 @always_inline
 def x86_aes_gcm_kernel(
@@ -795,36 +775,34 @@ def x86_aes_gcm_kernel(
     nonce_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int
 ) -> None:
-    var base_counter = _mm_loadu_si128(nonce_ptr)
-    base_counter = base_counter & SIMD[DType.uint64, 2](0xFFFFFFFFFFFFFFFF, 0)
-    base_counter = base_counter | SIMD[DType.uint64, 2](0, 2)
-    
+    var counter_block = StackBuffer[UInt8, 16]()
+    var cp = counter_block.ptr()
+
     var i = 0
     while i < num_blocks:
-        var counter = base_counter
-        var incr = SIMD[DType.uint64, 2](0, UInt64(i + 2))
-        counter = counter + bitcast[DType.uint8, 16](incr)
-        
+        _write_gcm_counter(cp, nonce_ptr, i)
+        var counter = _mm_loadu_si128(cp)
+
         if rounds == 10:
             x86_aes_encrypt_128_direct(counter, round_keys)
         elif rounds == 12:
             x86_aes_encrypt_192_direct(counter, round_keys)
         else:
             x86_aes_encrypt_256_direct(counter, round_keys)
-        
+
         var in_block = _mm_loadu_si128(input_ptr + i * 16)
         var result = in_block ^ counter
         _mm_storeu_si128(output_ptr + i * 16, result)
-        
+
         i += 1
-
-
+       
 @always_inline
 def _gf_mul2_xts_simd(val: SIMD128) -> SIMD128:
-    var shifted = val << 1
-    var carry = (val >> 63) & SIMD[DType.uint64, 2](0x87, 0x87)
-    return shifted ^ carry
-
+    var carry_lo_to_hi = val[0] >> 63
+    var msb = val[1] >> 63
+    var shifted_lo = val[0] << 1
+    var shifted_hi = (val[1] << 1) | carry_lo_to_hi
+    return SIMD128(shifted_lo ^ (msb * UInt64(0x87)), shifted_hi)
 
 @always_inline
 def x86_aes_xts_kernel(
@@ -859,7 +837,6 @@ def x86_aes_xts_kernel(
         tweak = _gf_mul2_xts_simd(tweak)
         i += 1
 
-
 @always_inline
 def aes_encrypt(
     pt: UnsafePointer[UInt8, MutAnyOrigin],
@@ -867,27 +844,27 @@ def aes_encrypt(
     rounds: Int = 10
 ) -> None:
     """Unified AES encryption function.
-    
+
     Uses X86 AES-NI or ARM Crypto Extensions on supported hardware, falls back to
     software implementation otherwise.
     """
-    if has_x86_aes_ni():
+    comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
         if rounds == 10:
             x86_aes_encrypt_128(pt, round_keys)
         elif rounds == 12:
             x86_aes_encrypt_192(pt, round_keys)
         else:
             x86_aes_encrypt_256(pt, round_keys)
-    elif has_arm_crypto():
-        if rounds == 10:
-            arm_aes_encrypt_128(pt, round_keys)
-        elif rounds == 12:
-            arm_aes_encrypt_192(pt, round_keys)
-        else:
-            arm_aes_encrypt_256(pt, round_keys)
     else:
-        cpu_aes_encrypt(pt, round_keys, rounds)
-
+        comptime if CompilationTarget._has_feature["crypto"]() or CompilationTarget._has_feature["aes"]():
+            if rounds == 10:
+                arm_aes_encrypt_128(pt, round_keys)
+            elif rounds == 12:
+                arm_aes_encrypt_192(pt, round_keys)
+            else:
+                arm_aes_encrypt_256(pt, round_keys)
+        else:
+            cpu_aes_encrypt(pt, round_keys, rounds)
 
 @always_inline
 def has_aes_ni() -> Bool:

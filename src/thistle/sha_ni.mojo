@@ -192,6 +192,5 @@ def sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]:
 
     return output^
 
-
 def has_sha_ni() -> Bool:
     return has_x86_sha_ni()

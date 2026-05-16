@@ -6,38 +6,51 @@ Curve25519 implementation
 By Libalpm64
 """
 from std.builtin.dtype import DType
-from std.builtin.simd import SIMD
+from std.collections import InlineArray
 
 @always_inline
-def _u128_shr(x: UInt128, shift: Int) -> UInt128:
-    if shift <= 0:
+def _u128_shr[shift: Int](x: UInt128) -> UInt128:
+    comptime if shift <= 0:
         return x
-    if shift >= 128:
-        return UInt128(0)
-    var lo = x.cast[DType.uint64]()
-    var hi = (x >> UInt128(64)).cast[DType.uint64]()
-    if shift < 64:
-        var out_lo = (lo >> UInt64(shift)) | (hi << UInt64(64 - shift))
-        var out_hi = hi >> UInt64(shift)
-        return (UInt128(out_hi) << UInt128(64)) | UInt128(out_lo)
-    if shift == 64:
-        return UInt128(hi)
-    var s = shift - 64
-    return UInt128(hi >> UInt64(s))
+    else:
+        comptime if shift >= 128:
+            return UInt128(0)
+        else:
+            var lo = x.cast[DType.uint64]()
+            var hi = (x >> UInt128(64)).cast[DType.uint64]()
+            comptime if shift < 64:
+                var out_lo = (lo >> UInt64(shift)) | (hi << UInt64(64 - shift))
+                var out_hi = hi >> UInt64(shift)
+                return (UInt128(out_hi) << UInt128(64)) | UInt128(out_lo)
+            else:
+                comptime if shift == 64:
+                    return UInt128(hi)
+                else:
+                    return UInt128(hi >> UInt64(shift - 64))
 
 struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
-    var limbs: SIMD[DType.uint64, 5]
+    var limbs: InlineArray[UInt64, 5]
 
     @always_inline
     def __init__(out self):
-        self.limbs = SIMD[DType.uint64, 5](0, 0, 0, 0, 0)
+        self.limbs = InlineArray[UInt64, 5](uninitialized=True)
+        self.limbs[0] = 0
+        self.limbs[1] = 0
+        self.limbs[2] = 0
+        self.limbs[3] = 0
+        self.limbs[4] = 0
 
     @always_inline
     def __init__(out self, l0: UInt64, l1: UInt64, l2: UInt64, l3: UInt64, l4: UInt64):
-        self.limbs = SIMD[DType.uint64, 5](l0, l1, l2, l3, l4)
+        self.limbs = InlineArray[UInt64, 5](uninitialized=True)
+        self.limbs[0] = l0
+        self.limbs[1] = l1
+        self.limbs[2] = l2
+        self.limbs[3] = l3
+        self.limbs[4] = l4
 
     @always_inline
-    def __init__(out self, limbs: SIMD[DType.uint64, 5]):
+    def __init__(out self, limbs: InlineArray[UInt64, 5]):
         self.limbs = limbs
 
     @always_inline
@@ -68,8 +81,6 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
 
     @always_inline
     def to_int(self) -> Int:
-        # Producer must use a canonical form first.
-		# Note: this is the same reduction is the same as with bytes so interpept this to the same as as_bytes.
         var res = self._reduce(self.limbs)
         var limbs = res.limbs
 
@@ -87,9 +98,13 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         limbs[3] += limbs[2] >> 51; limbs[2] &= MASK
         limbs[4] += limbs[3] >> 51; limbs[3] &= MASK
         limbs[4] &= MASK
-        var v: UInt64 = limbs[0]
-        v |= limbs[1] << 51
-        return Int(v)
+
+        var value = Int(limbs[0])
+        value += Int(limbs[1]) * 2251799813685248
+        value += Int(limbs[2]) * 5070602400912917605986812821504
+        value += Int(limbs[3]) * 11417981541647679048466287755595961091061972992
+        value += Int(limbs[4]) * 25711008708143844408671393477458601640355247900524685364822016
+        return value
 
     @staticmethod
     def from_int(x: Int) -> FieldElement51:
@@ -170,7 +185,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
 
     @always_inline
     def __sub__(self, other: FieldElement51) -> FieldElement51:
-        var l = SIMD[DType.uint64, 5]()
+        var l = InlineArray[UInt64, 5](uninitialized=True)
         # Add 2*p to ensure results are positive
         # p_limbs = [2^51-19, 2^51-1, 2^51-1, 2^51-1, 2^51-1]
         # 2*p_limbs = [2^52-38, 2^52-2, 2^52-2, 2^52-2, 2^52-2]
@@ -182,7 +197,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return self._carry_reduce_from_limbs(l)
 
     @always_inline
-    def _carry_reduce_from_limbs(self, limbs: SIMD[DType.uint64, 5]) -> FieldElement51:
+    def _carry_reduce_from_limbs(self, limbs: InlineArray[UInt64, 5]) -> FieldElement51:
         var l = limbs
         var MASK = UInt64(0x7FFFFFFFFFFFF)
         
@@ -266,31 +281,32 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
     @always_inline
     def invert(self) -> FieldElement51:
         var t0 = self.square()
-        var t1 = t0.pow2k(2)
+        var t1 = t0.pow2k[2]()
         var t2 = self * t1
         var t3 = t0 * t2
         var t4 = t3.square()
         var t5 = t2 * t4
-        var t6 = t5.pow2k(5)
+        var t6 = t5.pow2k[5]()
         var t7 = t6 * t5
-        var t8 = t7.pow2k(10)
+        var t8 = t7.pow2k[10]()
         var t9 = t8 * t7
-        var t10 = t9.pow2k(20)
+        var t10 = t9.pow2k[20]()
         var t11 = t10 * t9
-        var t12 = t11.pow2k(10)
+        var t12 = t11.pow2k[10]()
         var t13 = t12 * t7
-        var t14 = t13.pow2k(50)
+        var t14 = t13.pow2k[50]()
         var t15 = t14 * t13
-        var t16 = t15.pow2k(100)
+        var t16 = t15.pow2k[100]()
         var t17 = t16 * t15
-        var t18 = t17.pow2k(50)
+        var t18 = t17.pow2k[50]()
         var t19 = t18 * t13
-        var t20 = t19.pow2k(5)
+        var t20 = t19.pow2k[5]()
         return t20 * t3
 
-    def pow2k(self, k: Int) -> FieldElement51:
+    @always_inline
+    def pow2k[exp: Int](self) -> FieldElement51:
         var res = self
-        for _ in range(k):
+        comptime for _ in range(exp):
             res = res.square()
         return res
 
@@ -298,39 +314,39 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
     def _carry_reduce(self, var c0: UInt128, var c1: UInt128, var c2: UInt128, var c3: UInt128, var c4: UInt128) -> FieldElement51:
         var MASK = UInt64(0x7FFFFFFFFFFFF)
         
-        c1 += _u128_shr(c0, 51)
+        c1 += _u128_shr[51](c0)
         var l0 = (c0.cast[DType.uint64]()) & MASK
-        c2 += _u128_shr(c1, 51)
+        c2 += _u128_shr[51](c1)
         var l1 = (c1.cast[DType.uint64]()) & MASK
-        c3 += _u128_shr(c2, 51)
+        c3 += _u128_shr[51](c2)
         var l2 = (c2.cast[DType.uint64]()) & MASK
-        c4 += _u128_shr(c3, 51)
+        c4 += _u128_shr[51](c3)
         var l3 = (c3.cast[DType.uint64]()) & MASK
         
         # C4 becomes UInt128, we need do carry propagation from it
-        var q4 = _u128_shr(c4, 51)
+        var q4 = _u128_shr[51](c4)
         var l4 = (c4.cast[DType.uint64]()) & MASK
         
         # q4*19 back to l0
         var l0_2 = UInt128(l0) + q4 * 19
         
-		# Guard Check make sure everything is 51 bits otherwise Mojo will collapse if its a shuffle over 64 bits and return 0.
-        var l1_2 = UInt128(l1) + _u128_shr(l0_2, 51)
+        # Guard Check make sure everything is 51 bits otherwise Mojo will collapse if its a shuffle over 64 bits and return 0.
+        var l1_2 = UInt128(l1) + _u128_shr[51](l0_2)
         var l0_final = (l0_2.cast[DType.uint64]()) & MASK
         
-        var l2_2 = UInt128(l2) + _u128_shr(l1_2, 51)
+        var l2_2 = UInt128(l2) + _u128_shr[51](l1_2)
         var l1_final = (l1_2.cast[DType.uint64]()) & MASK
         
-        var l3_2 = UInt128(l3) + _u128_shr(l2_2, 51)
+        var l3_2 = UInt128(l3) + _u128_shr[51](l2_2)
         var l2_final = (l2_2.cast[DType.uint64]()) & MASK
         
-        var l4_2 = UInt128(l4) + _u128_shr(l3_2, 51)
+        var l4_2 = UInt128(l4) + _u128_shr[51](l3_2)
         var l3_final = (l3_2.cast[DType.uint64]()) & MASK
         
-        var l0_final_2 = UInt128(l0_final) + _u128_shr(l4_2, 51) * 19
+        var l0_final_2 = UInt128(l0_final) + _u128_shr[51](l4_2) * 19
         var l4_final = (l4_2.cast[DType.uint64]()) & MASK
         
-        var carry = _u128_shr(l0_final_2, 51)
+        var carry = _u128_shr[51](l0_final_2)
         var l0_out = (l0_final_2.cast[DType.uint64]()) & MASK
         var l1_out = UInt64(l1_final) + carry.cast[DType.uint64]()
         
@@ -338,7 +354,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return raw._reduce(raw.limbs)
 
     @always_inline
-    def _reduce(self, limbs: SIMD[DType.uint64, 5]) -> FieldElement51:
+    def _reduce(self, limbs: InlineArray[UInt64, 5]) -> FieldElement51:
         var l = limbs
         var MASK = UInt64(0x7FFFFFFFFFFFF)
         for _ in range(5):
@@ -351,11 +367,9 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
 
     @staticmethod
     def from_bytes_span(bytes: Span[UInt8, ...]) -> FieldElement51:
+        @always_inline
         def load8(ptr: UnsafePointer[UInt8, _]) -> UInt64:
-            var v: UInt64 = 0
-            for j in range(8):
-                v |= UInt64(ptr[j]) << UInt64(j * 8)
-            return v
+            return ptr.bitcast[UInt64]().load[width=1, alignment=1]()
 
         var ptr = bytes.unsafe_ptr()
         var MASK = UInt64(0x7FFFFFFFFFFFF)
@@ -387,35 +401,12 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         limbs[4] += limbs[3] >> 51; limbs[3] &= MASK
         limbs[4] &= MASK
 
-        output[0] = UInt8(limbs[0] & 0xFF)
-        output[1] = UInt8((limbs[0] >> 8) & 0xFF)
-        output[2] = UInt8((limbs[0] >> 16) & 0xFF)
-        output[3] = UInt8((limbs[0] >> 24) & 0xFF)
-        output[4] = UInt8((limbs[0] >> 32) & 0xFF)
-        output[5] = UInt8((limbs[0] >> 40) & 0xFF)
-        output[6] = UInt8(((limbs[0] >> 48) | (limbs[1] << 3)) & 0xFF)
-        output[7] = UInt8((limbs[1] >> 5) & 0xFF)
-        output[8] = UInt8((limbs[1] >> 13) & 0xFF)
-        output[9] = UInt8((limbs[1] >> 21) & 0xFF)
-        output[10] = UInt8((limbs[1] >> 29) & 0xFF)
-        output[11] = UInt8((limbs[1] >> 37) & 0xFF)
-        output[12] = UInt8(((limbs[1] >> 45) | (limbs[2] << 6)) & 0xFF)
-        output[13] = UInt8((limbs[2] >> 2) & 0xFF)
-        output[14] = UInt8((limbs[2] >> 10) & 0xFF)
-        output[15] = UInt8((limbs[2] >> 18) & 0xFF)
-        output[16] = UInt8((limbs[2] >> 26) & 0xFF)
-        output[17] = UInt8((limbs[2] >> 34) & 0xFF)
-        output[18] = UInt8((limbs[2] >> 42) & 0xFF)
-        output[19] = UInt8(((limbs[2] >> 50) | (limbs[3] << 1)) & 0xFF)
-        output[20] = UInt8((limbs[3] >> 7) & 0xFF)
-        output[21] = UInt8((limbs[3] >> 15) & 0xFF)
-        output[22] = UInt8((limbs[3] >> 23) & 0xFF)
-        output[23] = UInt8((limbs[3] >> 31) & 0xFF)
-        output[24] = UInt8((limbs[3] >> 39) & 0xFF)
-        output[25] = UInt8(((limbs[3] >> 47) | (limbs[4] << 4)) & 0xFF)
-        output[26] = UInt8((limbs[4] >> 4) & 0xFF)
-        output[27] = UInt8((limbs[4] >> 12) & 0xFF)
-        output[28] = UInt8((limbs[4] >> 20) & 0xFF)
-        output[29] = UInt8((limbs[4] >> 28) & 0xFF)
-        output[30] = UInt8((limbs[4] >> 36) & 0xFF)
-        output[31] = UInt8((limbs[4] >> 44) & 0xFF)
+        var w0 = limbs[0] | (limbs[1] << 51)
+        var w1 = (limbs[1] >> 13) | (limbs[2] << 38)
+        var w2 = (limbs[2] >> 26) | (limbs[3] << 25)
+        var w3 = (limbs[3] >> 39) | (limbs[4] << 12)
+
+        (output + 0).bitcast[UInt64]().store[alignment=1](w0)
+        (output + 8).bitcast[UInt64]().store[alignment=1](w1)
+        (output + 16).bitcast[UInt64]().store[alignment=1](w2)
+        (output + 24).bitcast[UInt64]().store[alignment=1](w3)

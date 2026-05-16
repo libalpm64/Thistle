@@ -25,6 +25,7 @@ Thistle was written to avoid the **150x performance drops** when Mojo has to cal
 * **AES-NI** (XTS/CBC/ECB/CTR/GCM/ECB/CTR)
 * **AES-Software** (XTS/CBC/ECB/CTR/GCM/ECB/CTR)
 * **ECDSA** (ED25519/X25519)
+* **ECDH** (NIST P-256, P-384)
 
 ### Build:
 
@@ -40,7 +41,6 @@ Platforms supported: Linux, macOS
 ---
 
 ### Current Roadmap:
-* **ECDH** (NIST P-256, P-384)
 * **RSA** (PSS only)
 * Replace External SSL libraries and use Thistle for TLS 1.3 Crypto operations.
 * ML-KEM / ML-DSA implementation in Mojo.

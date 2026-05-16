@@ -7,41 +7,26 @@ By Libalpm64 no attribution required.
 Work in progress.
 """
 
-from std.memory import alloc, memset
+from std.memory import alloc
 from std.utils import StaticTuple
 from .utils import StackBuffer
 
-
 comptime AESError = Error
-
-
-struct AESConfig:
-    var num_rounds: Int
-    var block_size: Int
-    var key_size: Int
-
-    def __init__(out self):
-        self.num_rounds = 10
-        self.block_size = 16
-        self.key_size = 16
-
-
 comptime ROUNDS_128: Int = 10
 comptime BLOCK_SIZE: Int = 16
 
 @always_inline
 def gf_mul2(a: UInt8) -> UInt8:
-    return (a << UInt8(1)) ^ (UInt8(0x1b) if (a & 0x80) != 0 else UInt8(0))
+    return (a << UInt8(1)) ^ (UInt8(0x1b) & (UInt8(0) - (a >> UInt8(7))))
 
 @always_inline
-def gf_mul3(a: UInt8) -> UInt8:
-    return a ^ gf_mul2(a)
+def sbox_lookup(idx: UInt8) -> UInt8:
+    return SBOX._unsafe_ref(Int(idx))
 
 @always_inline
-def cpu_aes_encrypt(
+def _cpu_aes_encrypt[rounds: Int](
     pt_bytes: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
-    rounds: Int = ROUNDS_128
 ) -> None:
     var s0 = pt_bytes.load(0)
     var s1 = pt_bytes.load(1)
@@ -81,25 +66,25 @@ def cpu_aes_encrypt(
     s14 ^= UInt8((w3 >> 8) & 0xff)
     s15 ^= UInt8(w3 & 0xff)
 
-    for r in range(1, rounds):
+    comptime for r in range(1, rounds):
         var rk_ptr = round_keys + (r * 4)
 
-        s0 = SBOX[Int(s0)]
-        s1 = SBOX[Int(s1)]
-        s2 = SBOX[Int(s2)]
-        s3 = SBOX[Int(s3)]
-        s4 = SBOX[Int(s4)]
-        s5 = SBOX[Int(s5)]
-        s6 = SBOX[Int(s6)]
-        s7 = SBOX[Int(s7)]
-        s8 = SBOX[Int(s8)]
-        s9 = SBOX[Int(s9)]
-        s10 = SBOX[Int(s10)]
-        s11 = SBOX[Int(s11)]
-        s12 = SBOX[Int(s12)]
-        s13 = SBOX[Int(s13)]
-        s14 = SBOX[Int(s14)]
-        s15 = SBOX[Int(s15)]
+        s0 = sbox_lookup(s0)
+        s1 = sbox_lookup(s1)
+        s2 = sbox_lookup(s2)
+        s3 = sbox_lookup(s3)
+        s4 = sbox_lookup(s4)
+        s5 = sbox_lookup(s5)
+        s6 = sbox_lookup(s6)
+        s7 = sbox_lookup(s7)
+        s8 = sbox_lookup(s8)
+        s9 = sbox_lookup(s9)
+        s10 = sbox_lookup(s10)
+        s11 = sbox_lookup(s11)
+        s12 = sbox_lookup(s12)
+        s13 = sbox_lookup(s13)
+        s14 = sbox_lookup(s14)
+        s15 = sbox_lookup(s15)
 
         var t1 = s1
         s1 = s5
@@ -119,72 +104,40 @@ def cpu_aes_encrypt(
         s3 = t15
 
         var a00 = s0; var a01 = s1; var a02 = s2; var a03 = s3
-        var m200 = (a00 << 1) & UInt8(0xff)
-        if (a00 & 0x80) != 0:
-            m200 ^= 0x1b
-        var m201 = (a01 << 1) & UInt8(0xff)
-        if (a01 & 0x80) != 0:
-            m201 ^= 0x1b
-        var m202 = (a02 << 1) & UInt8(0xff)
-        if (a02 & 0x80) != 0:
-            m202 ^= 0x1b
-        var m203 = (a03 << 1) & UInt8(0xff)
-        if (a03 & 0x80) != 0:
-            m203 ^= 0x1b
+        var m200 = gf_mul2(a00)
+        var m201 = gf_mul2(a01)
+        var m202 = gf_mul2(a02)
+        var m203 = gf_mul2(a03)
         s0 = m200 ^ (a01 ^ m201) ^ a02 ^ a03
         s1 = a00 ^ m201 ^ (a02 ^ m202) ^ a03
         s2 = a00 ^ a01 ^ m202 ^ (a03 ^ m203)
         s3 = (a00 ^ m200) ^ a01 ^ a02 ^ m203
 
         a00 = s4; a01 = s5; a02 = s6; a03 = s7
-        m200 = (a00 << 1) & UInt8(0xff)
-        if (a00 & 0x80) != 0:
-            m200 ^= 0x1b
-        m201 = (a01 << 1) & UInt8(0xff)
-        if (a01 & 0x80) != 0:
-            m201 ^= 0x1b
-        m202 = (a02 << 1) & UInt8(0xff)
-        if (a02 & 0x80) != 0:
-            m202 ^= 0x1b
-        m203 = (a03 << 1) & UInt8(0xff)
-        if (a03 & 0x80) != 0:
-            m203 ^= 0x1b
+        m200 = gf_mul2(a00)
+        m201 = gf_mul2(a01)
+        m202 = gf_mul2(a02)
+        m203 = gf_mul2(a03)
         s4 = m200 ^ (a01 ^ m201) ^ a02 ^ a03
         s5 = a00 ^ m201 ^ (a02 ^ m202) ^ a03
         s6 = a00 ^ a01 ^ m202 ^ (a03 ^ m203)
         s7 = (a00 ^ m200) ^ a01 ^ a02 ^ m203
 
         a00 = s8; a01 = s9; a02 = s10; a03 = s11
-        m200 = (a00 << 1) & UInt8(0xff)
-        if (a00 & 0x80) != 0:
-            m200 ^= 0x1b
-        m201 = (a01 << 1) & UInt8(0xff)
-        if (a01 & 0x80) != 0:
-            m201 ^= 0x1b
-        m202 = (a02 << 1) & UInt8(0xff)
-        if (a02 & 0x80) != 0:
-            m202 ^= 0x1b
-        m203 = (a03 << 1) & UInt8(0xff)
-        if (a03 & 0x80) != 0:
-            m203 ^= 0x1b
+        m200 = gf_mul2(a00)
+        m201 = gf_mul2(a01)
+        m202 = gf_mul2(a02)
+        m203 = gf_mul2(a03)
         s8 = m200 ^ (a01 ^ m201) ^ a02 ^ a03
         s9 = a00 ^ m201 ^ (a02 ^ m202) ^ a03
         s10 = a00 ^ a01 ^ m202 ^ (a03 ^ m203)
         s11 = (a00 ^ m200) ^ a01 ^ a02 ^ m203
 
         a00 = s12; a01 = s13; a02 = s14; a03 = s15
-        m200 = (a00 << 1) & UInt8(0xff)
-        if (a00 & 0x80) != 0:
-            m200 ^= 0x1b
-        m201 = (a01 << 1) & UInt8(0xff)
-        if (a01 & 0x80) != 0:
-            m201 ^= 0x1b
-        m202 = (a02 << 1) & UInt8(0xff)
-        if (a02 & 0x80) != 0:
-            m202 ^= 0x1b
-        m203 = (a03 << 1) & UInt8(0xff)
-        if (a03 & 0x80) != 0:
-            m203 ^= 0x1b
+        m200 = gf_mul2(a00)
+        m201 = gf_mul2(a01)
+        m202 = gf_mul2(a02)
+        m203 = gf_mul2(a03)
         s12 = m200 ^ (a01 ^ m201) ^ a02 ^ a03
         s13 = a00 ^ m201 ^ (a02 ^ m202) ^ a03
         s14 = a00 ^ a01 ^ m202 ^ (a03 ^ m203)
@@ -212,22 +165,22 @@ def cpu_aes_encrypt(
         s15 ^= UInt8(w3 & 0xff)
 
     var final_rk = round_keys + (rounds * 4)
-    s0 = SBOX[Int(s0)]
-    s1 = SBOX[Int(s1)]
-    s2 = SBOX[Int(s2)]
-    s3 = SBOX[Int(s3)]
-    s4 = SBOX[Int(s4)]
-    s5 = SBOX[Int(s5)]
-    s6 = SBOX[Int(s6)]
-    s7 = SBOX[Int(s7)]
-    s8 = SBOX[Int(s8)]
-    s9 = SBOX[Int(s9)]
-    s10 = SBOX[Int(s10)]
-    s11 = SBOX[Int(s11)]
-    s12 = SBOX[Int(s12)]
-    s13 = SBOX[Int(s13)]
-    s14 = SBOX[Int(s14)]
-    s15 = SBOX[Int(s15)]
+    s0 = sbox_lookup(s0)
+    s1 = sbox_lookup(s1)
+    s2 = sbox_lookup(s2)
+    s3 = sbox_lookup(s3)
+    s4 = sbox_lookup(s4)
+    s5 = sbox_lookup(s5)
+    s6 = sbox_lookup(s6)
+    s7 = sbox_lookup(s7)
+    s8 = sbox_lookup(s8)
+    s9 = sbox_lookup(s9)
+    s10 = sbox_lookup(s10)
+    s11 = sbox_lookup(s11)
+    s12 = sbox_lookup(s12)
+    s13 = sbox_lookup(s13)
+    s14 = sbox_lookup(s14)
+    s15 = sbox_lookup(s15)
 
     var ft1 = s1
     s1 = s5
@@ -284,6 +237,25 @@ def cpu_aes_encrypt(
     pt_bytes.store(14, s14)
     pt_bytes.store(15, s15)
 
+@always_inline
+def cpu_aes_encrypt(
+    pt_bytes: UnsafePointer[UInt8, MutAnyOrigin],
+    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+) -> None:
+    _cpu_aes_encrypt[10](pt_bytes, round_keys)
+
+@always_inline
+def cpu_aes_encrypt(
+    pt_bytes: UnsafePointer[UInt8, MutAnyOrigin],
+    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    rounds: Int,
+) -> None:
+    if rounds == 10:
+        _cpu_aes_encrypt[10](pt_bytes, round_keys)
+    elif rounds == 12:
+        _cpu_aes_encrypt[12](pt_bytes, round_keys)
+    else:
+        _cpu_aes_encrypt[14](pt_bytes, round_keys)
 
 @always_inline
 def cpu_aes_ecb_kernel(
@@ -297,19 +269,18 @@ def cpu_aes_ecb_kernel(
     while i < num_blocks:
         var block_ptr = input_ptr + i * 16
         var out_ptr = output_ptr + i * 16
-        
-        if rounds == 10:
-            cpu_aes_encrypt(block_ptr, round_keys, 10)
-        elif rounds == 12:
-            cpu_aes_encrypt(block_ptr, round_keys, 12)
-        else:
-            cpu_aes_encrypt(block_ptr, round_keys, 14)
-        
+
         for j in range(16):
             out_ptr.store(j, block_ptr.load(j))
-        
-        i += 1
 
+        if rounds == 10:
+            _cpu_aes_encrypt[10](out_ptr, round_keys)
+        elif rounds == 12:
+            _cpu_aes_encrypt[12](out_ptr, round_keys)
+        else:
+            _cpu_aes_encrypt[14](out_ptr, round_keys)
+
+        i += 1
 
 @always_inline
 def cpu_aes_cbc_kernel(
@@ -326,39 +297,26 @@ def cpu_aes_cbc_kernel(
         iv_ptr[8], iv_ptr[9], iv_ptr[10], iv_ptr[11],
         iv_ptr[12], iv_ptr[13], iv_ptr[14], iv_ptr[15]
     )
-    
+
     var i = 0
     while i < num_blocks:
         var block_ptr = input_ptr + i * 16
         var out_ptr = output_ptr + i * 16
-        
-        var xored = StaticTuple[UInt8, 16](
-            block_ptr[0] ^ prev_block[0], block_ptr[1] ^ prev_block[1],
-            block_ptr[2] ^ prev_block[2], block_ptr[3] ^ prev_block[3],
-            block_ptr[4] ^ prev_block[4], block_ptr[5] ^ prev_block[5],
-            block_ptr[6] ^ prev_block[6], block_ptr[7] ^ prev_block[7],
-            block_ptr[8] ^ prev_block[8], block_ptr[9] ^ prev_block[9],
-            block_ptr[10] ^ prev_block[10], block_ptr[11] ^ prev_block[11],
-            block_ptr[12] ^ prev_block[12], block_ptr[13] ^ prev_block[13],
-            block_ptr[14] ^ prev_block[14], block_ptr[15] ^ prev_block[15]
-        )
-        
-        for j in range(16):
-            block_ptr.store(j, xored[j])
-        
-        if rounds == 10:
-            cpu_aes_encrypt(block_ptr, round_keys, 10)
-        elif rounds == 12:
-            cpu_aes_encrypt(block_ptr, round_keys, 12)
-        else:
-            cpu_aes_encrypt(block_ptr, round_keys, 14)
-        
-        for j in range(16):
-            out_ptr.store(j, block_ptr.load(j))
-            prev_block[j] = block_ptr.load(j)
-        
-        i += 1
 
+        for j in range(16):
+            out_ptr.store(j, block_ptr.load(j) ^ prev_block[j])
+
+        if rounds == 10:
+            _cpu_aes_encrypt[10](out_ptr, round_keys)
+        elif rounds == 12:
+            _cpu_aes_encrypt[12](out_ptr, round_keys)
+        else:
+            _cpu_aes_encrypt[14](out_ptr, round_keys)
+
+        for j in range(16):
+            prev_block[j] = out_ptr.load(j)
+
+        i += 1
 
 @always_inline
 def cpu_aes_ctr_kernel(
@@ -371,58 +329,45 @@ def cpu_aes_ctr_kernel(
 ) -> None:
     var i = 0
     while i < num_blocks:
-        var counter = StaticTuple[UInt8, 16](
-            nonce_ptr[0], nonce_ptr[1], nonce_ptr[2], nonce_ptr[3],
-            nonce_ptr[4], nonce_ptr[5], nonce_ptr[6], nonce_ptr[7],
-            nonce_ptr[8], nonce_ptr[9], nonce_ptr[10], nonce_ptr[11],
-            nonce_ptr[12], nonce_ptr[13], nonce_ptr[14], nonce_ptr[15]
-        )
-        
-        counter[12] = counter[12] ^ UInt8((i >> 24) & 0xff)
-        counter[13] = counter[13] ^ UInt8((i >> 16) & 0xff)
-        counter[14] = counter[14] ^ UInt8((i >> 8) & 0xff)
-        counter[15] = counter[15] ^ UInt8(i & 0xff)
-        
         var temp_block = StackBuffer[UInt8, 16]()
+        var tp = temp_block.ptr()
         for j in range(16):
-            temp_block.ptr().store(j, counter[j])
-        
+            tp.store(j, nonce_ptr[j])
+
+        var ctr = (
+            (UInt32(nonce_ptr[12]) << 24)
+            | (UInt32(nonce_ptr[13]) << 16)
+            | (UInt32(nonce_ptr[14]) << 8)
+            | UInt32(nonce_ptr[15])
+        ) + UInt32(i)
+
+        tp.store(12, UInt8((ctr >> 24) & 0xff))
+        tp.store(13, UInt8((ctr >> 16) & 0xff))
+        tp.store(14, UInt8((ctr >> 8) & 0xff))
+        tp.store(15, UInt8(ctr & 0xff))
+
         if rounds == 10:
-            cpu_aes_encrypt(temp_block.ptr(), round_keys, 10)
+            _cpu_aes_encrypt[10](tp, round_keys)
         elif rounds == 12:
-            cpu_aes_encrypt(temp_block.ptr(), round_keys, 12)
+            _cpu_aes_encrypt[12](tp, round_keys)
         else:
-            cpu_aes_encrypt(temp_block.ptr(), round_keys, 14)
-        
+            _cpu_aes_encrypt[14](tp, round_keys)
+
         var in_block = input_ptr + i * 16
         var out_block = output_ptr + i * 16
         for j in range(16):
-            out_block.store(j, in_block.load(j) ^ temp_block.ptr().load(j))
+            out_block.store(j, in_block.load(j) ^ tp.load(j))
         i += 1
 
-
-def cpu_gf_mul2_xts(val: UInt8) -> UInt8:
-    var result = val << 1
-    if (val & 0x80) != 0:
-        result = result ^ 0x87
-    return result
-
-
-def cpu_compute_xts_tweak_list(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> List[UInt8]:
-    var result = List[UInt8](capacity=16)
-    for i in range(16):
-        result.append(tweak_ptr.load(i))
-    
-    var carry = False
-    for i in range(16):
-        var new_carry = (result[i] & 0x80) != 0
-        result[i] = cpu_gf_mul2_xts(result[i])
-        if carry:
-            result[i] = result[i] ^ 1
-        carry = new_carry
-    
-    return result^
-
+@always_inline
+def cpu_xts_mul_alpha_inplace(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> None:
+    var carry = (tweak_ptr.load(15) & 0x80) != 0
+    for i in range(15, 0, -1):
+        tweak_ptr.store(i, (tweak_ptr.load(i) << UInt8(1)) | (tweak_ptr.load(i - 1) >> UInt8(7)))
+    var t0 = tweak_ptr.load(0) << UInt8(1)
+    if carry:
+        t0 = t0 ^ UInt8(0x87)
+    tweak_ptr.store(0, t0)
 
 @always_inline
 def cpu_aes_xts_kernel(
@@ -438,39 +383,36 @@ def cpu_aes_xts_kernel(
     var wp = tweak.ptr()
     for j in range(16):
         wp.store(j, tweak_ptr[j])
-    
-    cpu_aes_encrypt(wp, round_keys2, rounds)
-    
+
+    if rounds == 10:
+        _cpu_aes_encrypt[10](wp, round_keys2)
+    elif rounds == 12:
+        _cpu_aes_encrypt[12](wp, round_keys2)
+    else:
+        _cpu_aes_encrypt[14](wp, round_keys2)
+
     var i = 0
     while i < num_blocks:
         var in_block = input_ptr + i * 16
         var out_block = output_ptr + i * 16
-        
+
         var xored = StackBuffer[UInt8, 16]()
         var xp = xored.ptr()
         for j in range(16):
             xp.store(j, in_block.load(j) ^ wp.load(j))
-        
+
         if rounds == 10:
-            cpu_aes_encrypt(xp, round_keys1, 10)
+            _cpu_aes_encrypt[10](xp, round_keys1)
+        elif rounds == 12:
+            _cpu_aes_encrypt[12](xp, round_keys1)
         else:
-            cpu_aes_encrypt(xp, round_keys1, 14)
-        
+            _cpu_aes_encrypt[14](xp, round_keys1)
+
         for j in range(16):
             out_block.store(j, xp.load(j) ^ wp.load(j))
-        
-        
-        var next_tweak = cpu_compute_xts_tweak_list(wp)
-        for j in range(16):
-            wp.store(j, next_tweak[j])
-        
+
+        cpu_xts_mul_alpha_inplace(wp)
         i += 1
-
-
-
-@always_inline
-def sbox_lookup(idx: UInt8) -> UInt8:
-    return SBOX[idx]
 
 @always_inline
 def sub_word(w: UInt32) -> UInt32:
@@ -479,7 +421,6 @@ def sub_word(w: UInt32) -> UInt32:
     var b2 = UInt32(sbox_lookup(UInt8((w >> 8) & 0xff)))
     var b3 = UInt32(sbox_lookup(UInt8(w & 0xff)))
     return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
-
 
 comptime SBOX: StaticTuple[UInt8, 256] = StaticTuple[UInt8, 256](
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5,
@@ -520,35 +461,10 @@ comptime RCON: StaticTuple[UInt8, 11] = StaticTuple[UInt8, 11](
     0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36, 0x6c
 )
 
-
-def ttable0(x: UInt8) -> UInt32:
-    var s = SBOX[x]
-    var m2 = gf_mul2(s)
-    var m3 = gf_mul3(s)
-    return (UInt32(m2) << 24) | (UInt32(s) << 16) | (UInt32(s) << 8) | UInt32(m3)
-
-def ttable1(x: UInt8) -> UInt32:
-    var s = SBOX[x]
-    var m2 = gf_mul2(s)
-    var m3 = gf_mul3(s)
-    return (UInt32(m3) << 24) | (UInt32(m2) << 16) | (UInt32(s) << 8) | UInt32(s)
-
-def ttable2(x: UInt8) -> UInt32:
-    var s = SBOX[x]
-    var m2 = gf_mul2(s)
-    var m3 = gf_mul3(s)
-    return (UInt32(s) << 24) | (UInt32(m3) << 16) | (UInt32(m2) << 8) | UInt32(s)
-
-def ttable3(x: UInt8) -> UInt32:
-    var s = SBOX[x]
-    var m2 = gf_mul2(s)
-    var m3 = gf_mul3(s)
-    return (UInt32(s) << 24) | (UInt32(s) << 16) | (UInt32(m3) << 8) | UInt32(m2)
-
-
-def expand_key_128(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
-    var w = alloc[UInt32](44)
-    
+def expand_key_128_into(
+    key_bytes: UnsafePointer[UInt8, MutAnyOrigin],
+    w: UnsafePointer[UInt32, MutAnyOrigin],
+) raises -> None:
     for i in range(4):
         var key_val: UInt32 = 0
         for j in range(4):
@@ -559,14 +475,13 @@ def expand_key_128(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> Unsa
         if i % 4 == 0:
             var rotated = (temp >> 24) | ((temp << 8) & 0xffffffff)
             temp = sub_word(rotated)
-            temp ^= UInt32(RCON[i // 4 - 1]) << 24
+            temp ^= UInt32(RCON._unsafe_ref(i // 4 - 1)) << 24
         w.store(i, w.load(i - 4) ^ temp)
-    return w
 
-
-def expand_key_192(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
-    var w = alloc[UInt32](52)
-    
+def expand_key_192_into(
+    key_bytes: UnsafePointer[UInt8, MutAnyOrigin],
+    w: UnsafePointer[UInt32, MutAnyOrigin],
+) raises -> None:
     for i in range(6):
         var key_val: UInt32 = 0
         for j in range(4):
@@ -577,14 +492,13 @@ def expand_key_192(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> Unsa
         if i % 6 == 0:
             var rotated = (temp >> 24) | ((temp << 8) & 0xffffffff)
             temp = sub_word(rotated)
-            temp ^= UInt32(RCON[i // 6 - 1]) << 24
+            temp ^= UInt32(RCON._unsafe_ref(i // 6 - 1)) << 24
         w.store(i, w.load(i - 6) ^ temp)
-    return w
 
-
-def expand_key_256(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
-    var w = alloc[UInt32](60)
-    
+def expand_key_256_into(
+    key_bytes: UnsafePointer[UInt8, MutAnyOrigin],
+    w: UnsafePointer[UInt32, MutAnyOrigin],
+) raises -> None:
     for i in range(8):
         var key_val: UInt32 = 0
         for j in range(4):
@@ -595,12 +509,25 @@ def expand_key_256(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> Unsa
         if i % 8 == 0:
             var rotated = (temp >> 24) | ((temp << 8) & 0xffffffff)
             temp = sub_word(rotated)
-            temp ^= UInt32(RCON[i // 8 - 1]) << 24
+            temp ^= UInt32(RCON._unsafe_ref(i // 8 - 1)) << 24
         elif i % 8 == 4:
             temp = sub_word(temp)
         w.store(i, w.load(i - 8) ^ temp)
+
+def expand_key_128(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
+    var w = alloc[UInt32](44)
+    expand_key_128_into(key_bytes, w)
     return w
 
+def expand_key_192(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
+    var w = alloc[UInt32](52)
+    expand_key_192_into(key_bytes, w)
+    return w
+
+def expand_key_256(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
+    var w = alloc[UInt32](60)
+    expand_key_256_into(key_bytes, w)
+    return w
 
 struct AESKey:
     var _data: StackBuffer[UInt8, 16]
@@ -610,11 +537,8 @@ struct AESKey:
         self._data = StackBuffer[UInt8, 16]()
         for i in range(16):
             self._data.ptr().store(i, key[i])
-        var rk_ptr = expand_key_128(self._data.ptr())
         self._round_keys = StackBuffer[UInt32, 44]()
-        for i in range(44):
-            self._round_keys[i] = rk_ptr[i]
-        rk_ptr.free()
+        expand_key_128_into(self._data.ptr(), self._round_keys.ptr())
     
     def __del__(deinit self):
         pass
