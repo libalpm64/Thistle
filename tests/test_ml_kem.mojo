@@ -145,9 +145,11 @@ def test_mlkem_external_api() raises -> Tuple[Int, Int]:
 def load_json(path: String, py: PythonObject) raises -> PythonObject:
     var builtins = Python.import_module("builtins")
     var fh = builtins.open(path, "r")
-    var root = py.load(fh)
-    fh.close()
-    return root
+    try:
+        var root = py.load(fh)
+        return root
+    finally:
+        fh.close()
 
 
 def test_mlkem_core() raises -> Tuple[Int, Int]:
@@ -385,8 +387,7 @@ def main() raises:
     passed += result[0]
     failed += result[1]
 
-	# TODO: ML-DSA will use this same suite shape once the pure Mojo implementation is
-    # ready; keep the FFI PQ harness separate until we are finished cleaning up.
+    # ML-KEM vectors cover the pure Mojo implementation; PQ FFI tests remain separate.
     print("ML-KEM test suite: ", passed, " passed, ", failed, " failed")
     if failed > 0:
         raise Error("ML-KEM test suite failed")

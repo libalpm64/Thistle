@@ -197,7 +197,7 @@ def _ct_select_u32(false_value: UInt32, true_value: UInt32, choice: UInt32) -> U
 
 
 # Volatile stores are stronger cleanup than std.memory.memset_zero, which is ordinary stores.
-# Note: Still no formal garantee of safety.
+# Note: Still no formal guarantee of safety.
 def _zero_list_u8(mut data: List[UInt8]):
     var ptr = data.unsafe_ptr()
     for i in range(len(data)):
@@ -1062,14 +1062,13 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
             cs2.append(_inverse_ntt(product^))
 
         var z = List[List[UInt32]](capacity=p.l)
-        var rejected = False
         var rejected_flag = UInt32(0)
         for i in range(p.l):
             var zi = y[i].copy()
             _poly_add_into(zi, cs1[i])
             rejected_flag |= _ct_bool_to_u32(_coefficients_exceed_bound(zi, gamma1_beta))
             z.append(zi^)
-        rejected = rejected_flag != UInt32(0)
+        var rejected = rejected_flag != UInt32(0)
         if rejected:
             _zero_poly_vec_u32(y)
             _zero_poly_vec_u32(y_hat)

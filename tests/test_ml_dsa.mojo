@@ -62,9 +62,11 @@ def zero_random() -> List[UInt8]:
 def load_json(path: String, py: PythonObject) raises -> PythonObject:
     var builtins = Python.import_module("builtins")
     var fh = builtins.open(path, "r")
-    var root = py.load(fh)
-    fh.close()
-    return root
+    try:
+        var root = py.load(fh)
+        return root
+    finally:
+        fh.close()
 
 
 def has_field(obj: PythonObject, name: String) raises -> Bool:
@@ -77,12 +79,14 @@ def get_context(t: PythonObject) raises -> List[UInt8]:
     return List[UInt8]()
 
 
-def get_params(level: Int) -> MLDSAParams:
+def get_params(level: Int) raises -> MLDSAParams:
     if level == 44:
         return params44()
     if level == 65:
         return params65()
-    return params87()
+    if level == 87:
+        return params87()
+    raise Error("invalid ML-DSA level: " + String(level))
 
 
 def run_verify_file(path: String, level: Int, py: PythonObject) raises -> Tuple[Int, Int]:
@@ -107,7 +111,7 @@ def run_verify_file(path: String, level: Int, py: PythonObject) raises -> Tuple[
             var sig = hex_to_bytes(String(t["sig"]))
             var msg = hex_to_bytes(String(t["msg"]))
             var ctx = get_context(t)
-            var got = False
+            var got: Bool
             try:
                 got = mldsa_verify(pub, Span[UInt8, ...](msg), Span[UInt8, ...](sig), Span[UInt8, ...](ctx))
             except:
@@ -140,17 +144,16 @@ def run_sign_seed_file(path: String, level: Int, py: PythonObject) raises -> Tup
                 for t in g["tests"]:
                     var tc_id = String(t["tcId"])
                     var expected = String(t["result"]) == "valid"
-                    var got = False
-                    var sig = List[UInt8]()
+                    var got: Bool
                     try:
                         if has_field(t, "mu") and String(t["mu"]) != "":
                             var mu = hex_to_bytes(String(t["mu"]))
-                            sig = mldsa_sign_external_mu(priv, Span[UInt8, ...](mu), Span[UInt8, ...](rnd))
+                            var sig = mldsa_sign_external_mu(priv, Span[UInt8, ...](mu), Span[UInt8, ...](rnd))
                             got = matches_hex(sig, String(t["sig"]))
                         else:
                             var msg = hex_to_bytes(String(t["msg"]))
                             var ctx = get_context(t)
-                            sig = mldsa_sign(priv, Span[UInt8, ...](msg), Span[UInt8, ...](ctx), Span[UInt8, ...](rnd))
+                            var sig = mldsa_sign(priv, Span[UInt8, ...](msg), Span[UInt8, ...](ctx), Span[UInt8, ...](rnd))
                             got = matches_hex(sig, String(t["sig"]))
                     except:
                         got = False
@@ -161,12 +164,11 @@ def run_sign_seed_file(path: String, level: Int, py: PythonObject) raises -> Tup
                         passed += 1
                 continue
             except:
-                expected_key_valid = False
+                pass
         for t in g["tests"]:
             var tc_id = String(t["tcId"])
             var expected = String(t["result"]) == "valid"
             var got = False
-            got = False
             if got != expected:
                 print(path, " tcId=", tc_id, " sign-seed mismatch")
                 failed += 1
@@ -195,17 +197,16 @@ def run_sign_noseed_file(path: String, level: Int, py: PythonObject) raises -> T
                 for t in g["tests"]:
                     var tc_id = String(t["tcId"])
                     var expected = String(t["result"]) == "valid"
-                    var got = False
-                    var sig = List[UInt8]()
+                    var got: Bool
                     try:
                         if has_field(t, "mu") and String(t["mu"]) != "":
                             var mu = hex_to_bytes(String(t["mu"]))
-                            sig = mldsa_sign_external_mu(priv, Span[UInt8, ...](mu), Span[UInt8, ...](rnd))
+                            var sig = mldsa_sign_external_mu(priv, Span[UInt8, ...](mu), Span[UInt8, ...](rnd))
                             got = matches_hex(sig, String(t["sig"]))
                         else:
                             var msg = hex_to_bytes(String(t["msg"]))
                             var ctx = get_context(t)
-                            sig = mldsa_sign(priv, Span[UInt8, ...](msg), Span[UInt8, ...](ctx), Span[UInt8, ...](rnd))
+                            var sig = mldsa_sign(priv, Span[UInt8, ...](msg), Span[UInt8, ...](ctx), Span[UInt8, ...](rnd))
                             got = matches_hex(sig, String(t["sig"]))
                     except:
                         got = False
@@ -216,12 +217,11 @@ def run_sign_noseed_file(path: String, level: Int, py: PythonObject) raises -> T
                         passed += 1
                 continue
             except:
-                expected_key_valid = False
+                pass
         for t in g["tests"]:
             var tc_id = String(t["tcId"])
             var expected = String(t["result"]) == "valid"
             var got = False
-            got = False
             if got != expected:
                 print(path, " tcId=", tc_id, " sign-noseed mismatch")
                 failed += 1
@@ -296,9 +296,7 @@ def main() raises:
     var py = Python.import_module("json")
     var passed = 0
     var failed = 0
-    var result = (0, 0)
-
-    result = run_external_api_smoke_tests()
+    var result = run_external_api_smoke_tests()
     passed += result[0]
     failed += result[1]
 
