@@ -266,8 +266,6 @@ def chacha20_block(
 def _store_u64_le[origin: Origin[mut=True]](
     dst: UnsafePointer[UInt8, origin], byte_offset: Int, x: UInt64
 ):
-    # Mojo accepts alignment=1 for loads on this toolchain, but not for stores.
-    # Store bytes explicitly to avoid requiring UInt64 alignment for Span[UInt8].
     dst[byte_offset + 0] = UInt8(x & 0xff)
     dst[byte_offset + 1] = UInt8((x >> UInt64(8)) & 0xff)
     dst[byte_offset + 2] = UInt8((x >> UInt64(16)) & 0xff)

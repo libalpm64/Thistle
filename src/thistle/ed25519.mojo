@@ -314,7 +314,7 @@ def edwards_negate(p: EdwardsPoint) -> EdwardsPoint:
 @always_inline
 def _ct_select_fe(a: FieldElement51, b: FieldElement51, choice: UInt8) -> FieldElement51:
     # Constant-time select: returns choice ? b : a using XOR/mask.
-    # Verify optimized backend code for release targets.
+    # Todo: Verify optimized backend code for release targets.
     var mask = UInt64(0) - UInt64(choice)
     var limbs = SIMD[DType.uint64, 5](0, 0, 0, 0, 0)
     for i in range(5):

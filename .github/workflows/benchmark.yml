@@ -15,8 +15,5 @@ jobs:
           locked: false
           activate-environment: true
 
-      - name: Build PQ libraries
-        run: pixi run build-pq
-
       - name: Run benchmarks
         run: pixi run bench

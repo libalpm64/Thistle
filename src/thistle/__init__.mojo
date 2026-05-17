@@ -20,9 +20,12 @@ from .sha2 import sha256_hash, sha512_hash
 from .sha3 import sha3_256, sha3_512
 from .kcipher2 import KCipher2
 from .random import random_bytes, random_fill
-from .ml_dsa_native import mldsa44_keypair_internal, mldsa44_signature, mldsa44_verify
-from .ml_dsa_native import MLDSA44_SECRETKEYBYTES, MLDSA44_PUBLICKEYBYTES, MLDSA44_BYTES
-from .ml_dsa_native import MLD_ERR_OK, bytes_to_hex_str
+from .ml_dsa import mldsa44_keygen, mldsa65_keygen, mldsa87_keygen
+from .ml_dsa import mldsa_sign, mldsa_verify
+from .ml_dsa import MLDSA44_SECRETKEYBYTES, MLDSA44_PUBLICKEYBYTES, MLDSA44_BYTES
+from .ml_kem import mlkem512_keygen, mlkem768_keygen, mlkem1024_keygen
+from .ml_kem import mlkem512_encaps, mlkem768_encaps, mlkem1024_encaps
+from .ml_kem import mlkem512_decaps, mlkem768_decaps, mlkem1024_decaps
 
 comptime VERSION = "1.0.3"
 comptime AUTHOR = "Libalpm64, Lostlab Technologies"
