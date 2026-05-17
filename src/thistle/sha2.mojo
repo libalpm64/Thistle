@@ -893,8 +893,6 @@ def sha512_hash_bits(data: Span[UInt8, ...], bit_len: Int) -> List[UInt8]:
         return sha512_final(ctx)
     return sha512_final_partial(ctx, data[full_bytes], rem_bits, 64)
 
-
-# String functions
 def sha256_hash_string(s: String) -> String:
     var data = string_to_bytes(s)
     var hash = sha256_hash(Span[UInt8, ...](data))

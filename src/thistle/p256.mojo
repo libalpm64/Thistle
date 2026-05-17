@@ -12,7 +12,7 @@ comptime _MASK32 = UInt64(0xFFFFFFFF)
 
 
 struct U256(Copyable, ImplicitlyCopyable, Movable):
-    var limbs: InlineArray[UInt64, 8]  # little-endian 32-bit limbs
+    var limbs: InlineArray[UInt64, 8]
 
     def __init__(out self):
         self.limbs = InlineArray[UInt64, 8](fill=0)
