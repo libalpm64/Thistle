@@ -4,6 +4,14 @@
 """
 ML-DSA implementation in Mojo.
 By Libalpm64, no attribution required.
+
+Security notice:
+ML-DSA is incredibly difficult to implement safely because signing uses rejection sampling
+and large polynomial/vector states. Source-level optimizations can accidentally bring in
+secret-dependent control-flow, memory access, allocator timing, and temporary writes of sensitive
+state into external buffers. By no means is this a perfect implementation. We aim to keep
+sensitive signing state in private scratch, avoid early-exit checks on secret-derived polynomial
+data, zeroize sensitive temporaries with volatile stores when practical.
 """
 
 from std.collections import List
@@ -172,6 +180,24 @@ def _append_bytes_stack(mut out: StackBuffer[UInt8, ...], src: Span[UInt8, ...])
         out.push_unchecked(src[i])
 
 
+@always_inline
+def _ct_bool_to_u32(b: Bool) -> UInt32:
+    return UInt32(Int(b))
+
+@always_inline
+def _ct_select_u8(false_value: UInt8, true_value: UInt8, choice: UInt32) -> UInt8:
+    var mask = UInt8(0) - UInt8(choice)
+    return false_value ^ (mask & (false_value ^ true_value))
+
+
+@always_inline
+def _ct_select_u32(false_value: UInt32, true_value: UInt32, choice: UInt32) -> UInt32:
+    var mask = UInt32(0) - choice
+    return false_value ^ (mask & (false_value ^ true_value))
+
+
+# Volatile stores are stronger cleanup than std.memory.memset_zero, which is ordinary stores.
+# Note: Still no formal garantee of safety.
 def _zero_list_u8(mut data: List[UInt8]):
     var ptr = data.unsafe_ptr()
     for i in range(len(data)):
@@ -204,10 +230,12 @@ def _zero_stack_u8(mut data: StackBuffer[UInt8, ...]):
 def _bytes_equal(a: Span[UInt8, ...], b: Span[UInt8, ...]) -> Bool:
     if len(a) != len(b):
         return False
+
+    var diff = UInt8(0)
     for i in range(len(a)):
-        if a[i] != b[i]:
-            return False
-    return True
+        diff |= a[i] ^ b[i]
+
+    return diff == UInt8(0)
 
 
 @always_inline
@@ -528,23 +556,25 @@ def _make_hint(ct0: List[UInt32], w: List[UInt32], cs2: List[UInt32], p: MLDSAPa
 
 
 def _coefficients_exceed_bound(w: List[UInt32], bound: UInt32) -> Bool:
+	# Todo: Full scan, do not reveal the first coefficient that exceeds the bound.
+    var fail = UInt32(0)
     for i in range(N):
-        if _infinity_norm(w[i]) >= bound:
-            return True
-    return False
+        fail |= _ct_bool_to_u32(_infinity_norm(w[i]) >= bound)
+    return fail != UInt32(0)
 
 
 def _low_bits_exceed_bound(w: List[UInt32], bound: UInt32, p: MLDSAParams) -> Bool:
-    for i in range(N):
-        if p.gamma2_denom == 32:
+	# Todo: Full scan of parameter-set branch is public, coefficient failure position is not.
+    var fail = UInt32(0)
+    if p.gamma2_denom == 32:
+        for i in range(N):
             var d = _decompose32(w[i])
-            if _abs_i32(d[1]) >= bound:
-                return True
-        else:
+            fail |= _ct_bool_to_u32(_abs_i32(d[1]) >= bound)
+    else:
+        for i in range(N):
             var d = _decompose88(w[i])
-            if _abs_i32(d[1]) >= bound:
-                return True
-    return False
+            fail |= _ct_bool_to_u32(_abs_i32(d[1]) >= bound)
+    return fail != UInt32(0)
 
 
 def _pk_encode(rho: Span[UInt8, ...], t1: List[List[UInt16]], p: MLDSAParams) -> List[UInt8]:
@@ -875,11 +905,15 @@ def mldsa_private_key_from_seed(seed: Span[UInt8, ...], p: MLDSAParams) raises -
             row_t0.append(pr[1])
         t1.append(row_t1^)
         t0.append(_ntt(row_t0^))
+        _zero_list_u32(t)
 
     var pk = _pk_encode(Span[UInt8, ...](rho), t1, p)
     var tr = _compute_public_key_hash(Span[UInt8, ...](pk))
     var t1_hat = _compute_t1_hat(t1, p)
     var pub = MLDSAPublicKey(p.copy(), pk^, a^, t1_hat^, tr^)
+    _zero_list_u8(expanded)
+    _zero_list_u8(rho_s)
+    _zero_poly_vec_u32(t_hat)
     return MLDSAPrivateKey(p.copy(), _copy_bytes(seed), pub^, s1^, s2^, t0^, k_seed^)
 
 
@@ -930,17 +964,39 @@ def mldsa_private_key_from_semiexpanded(sk: Span[UInt8, ...], p: MLDSAParams) ra
         _zero_list_u32(product)
         var t = _inverse_ntt(t_hat^)
         var row_t1 = List[UInt16](capacity=N)
+        var t0_mismatch = UInt32(0)
         for j in range(N):
             var pr = _power2_round(t[j])
             row_t1.append(pr[0])
-            if pr[1] != t0_plain[i][j]:
-                raise Error("ML-DSA inconsistent t0")
+            t0_mismatch |= _ct_bool_to_u32(pr[1] != t0_plain[i][j])
+        if t0_mismatch != UInt32(0):
+            _zero_list_u32(t)
+            _zero_poly_vec_u32(s1_plain)
+            _zero_poly_vec_u32(s2_plain)
+            _zero_poly_vec_u32(t0_plain)
+            _zero_poly_vec_u32(s1)
+            _zero_poly_vec_u32(s2)
+            _zero_poly_vec_u32(t0)
+            raise Error("ML-DSA inconsistent t0")
         t1.append(row_t1^)
+        _zero_list_u32(t)
     var pk = _pk_encode(Span[UInt8, ...](rho), t1, p)
-    if not _bytes_equal(Span[UInt8, ...](_compute_public_key_hash(Span[UInt8, ...](pk))), Span[UInt8, ...](tr)):
+    var computed_tr = _compute_public_key_hash(Span[UInt8, ...](pk))
+    if not _bytes_equal(Span[UInt8, ...](computed_tr), Span[UInt8, ...](tr)):
+        _zero_list_u8(computed_tr)
+        _zero_poly_vec_u32(s1_plain)
+        _zero_poly_vec_u32(s2_plain)
+        _zero_poly_vec_u32(t0_plain)
+        _zero_poly_vec_u32(s1)
+        _zero_poly_vec_u32(s2)
+        _zero_poly_vec_u32(t0)
         raise Error("ML-DSA inconsistent public key hash")
+    _zero_list_u8(computed_tr)
     var t1_hat = _compute_t1_hat(t1, p)
     var pub = MLDSAPublicKey(p.copy(), pk^, a^, t1_hat^, tr^)
+    _zero_poly_vec_u32(s1_plain)
+    _zero_poly_vec_u32(s2_plain)
+    _zero_poly_vec_u32(t0_plain)
     return MLDSAPrivateKey(p.copy(), List[UInt8](), pub^, s1^, s2^, t0^, k_seed^)
 
 
@@ -1010,14 +1066,13 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
 
         var z = List[List[UInt32]](capacity=p.l)
         var rejected = False
+        var rejected_flag = UInt32(0)
         for i in range(p.l):
             var zi = y[i].copy()
             _poly_add_into(zi, cs1[i])
-            if _coefficients_exceed_bound(zi, gamma1_beta):
-                _zero_list_u32(zi)
-                rejected = True
-                break
+            rejected_flag |= _ct_bool_to_u32(_coefficients_exceed_bound(zi, gamma1_beta))
             z.append(zi^)
+        rejected = rejected_flag != UInt32(0)
         if rejected:
             _zero_poly_vec_u32(y)
             _zero_poly_vec_u32(y_hat)
@@ -1025,16 +1080,17 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
             _zero_poly_vec_u32(cs1)
             _zero_poly_vec_u32(cs2)
             _zero_poly_vec_u32(z)
+            _zero_list_u8(ch)
+            _zero_list_u32(c)
             continue
 
+        rejected_flag = UInt32(0)
         for i in range(p.k):
             var r0 = w[i].copy()
             _poly_sub_into(r0, cs2[i])
-            if _low_bits_exceed_bound(r0, gamma2_beta, p):
-                _zero_list_u32(r0)
-                rejected = True
-                break
+            rejected_flag |= _ct_bool_to_u32(_low_bits_exceed_bound(r0, gamma2_beta, p))
             _zero_list_u32(r0)
+        rejected = rejected_flag != UInt32(0)
         if rejected:
             _zero_poly_vec_u32(y)
             _zero_poly_vec_u32(y_hat)
@@ -1042,18 +1098,19 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
             _zero_poly_vec_u32(cs1)
             _zero_poly_vec_u32(cs2)
             _zero_poly_vec_u32(z)
+            _zero_list_u8(ch)
+            _zero_list_u32(c)
             continue
 
         var ct0 = List[List[UInt32]](capacity=p.k)
+        rejected_flag = UInt32(0)
         for i in range(p.k):
             var product = _zero_poly()
             _ntt_mul_into(product, c, priv.t0[i])
             var row = _inverse_ntt(product^)
-            if _coefficients_exceed_bound(row, gamma2):
-                _zero_list_u32(row)
-                rejected = True
-                break
+            rejected_flag |= _ct_bool_to_u32(_coefficients_exceed_bound(row, gamma2))
             ct0.append(row^)
+        rejected = rejected_flag != UInt32(0)
         if rejected:
             _zero_poly_vec_u32(y)
             _zero_poly_vec_u32(y_hat)
@@ -1062,6 +1119,8 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
             _zero_poly_vec_u32(cs2)
             _zero_poly_vec_u32(z)
             _zero_poly_vec_u32(ct0)
+            _zero_list_u8(ch)
+            _zero_list_u32(c)
             continue
 
         var h = List[List[UInt8]](capacity=p.k)
@@ -1079,6 +1138,8 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
             _zero_poly_vec_u32(z)
             _zero_poly_vec_u32(ct0)
             _zero_poly_vec_u8(h)
+            _zero_list_u8(ch)
+            _zero_list_u32(c)
             continue
         var sig = _sig_encode(Span[UInt8, ...](ch), z, h, p)
         _zero_poly_vec_u32(y)
@@ -1089,13 +1150,17 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
         _zero_poly_vec_u32(z)
         _zero_poly_vec_u32(ct0)
         _zero_poly_vec_u8(h)
+        _zero_list_u8(ch)
+        _zero_list_u32(c)
         _zero_list_u8(nonce)
         return sig^
 
 
 def mldsa_sign(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Span[UInt8, ...], random: Span[UInt8, ...]) raises -> List[UInt8]:
     var mu = _compute_message_hash(Span[UInt8, ...](priv.pub.tr), msg, context)
-    return mldsa_sign_external_mu(priv, Span[UInt8, ...](mu), random)
+    var sig = mldsa_sign_external_mu(priv, Span[UInt8, ...](mu), random)
+    _zero_list_u8(mu)
+    return sig^
 
 
 def mldsa_verify_external_mu(pub: MLDSAPublicKey, mu: Span[UInt8, ...], sig: Span[UInt8, ...]) raises -> Bool:
@@ -1109,9 +1174,14 @@ def mldsa_verify_external_mu(pub: MLDSAPublicKey, mu: Span[UInt8, ...], sig: Spa
     var ch = decoded[0].copy()
     var z = decoded[1].copy()
     var h = decoded[2].copy()
+    var z_bound_fail = UInt32(0)
     for i in range(p.l):
-        if _coefficients_exceed_bound(z[i], gamma1_beta):
-            return False
+        z_bound_fail |= _ct_bool_to_u32(_coefficients_exceed_bound(z[i], gamma1_beta))
+    if z_bound_fail != UInt32(0):
+        _zero_list_u8(ch)
+        _zero_poly_vec_u32(z)
+        _zero_poly_vec_u8(h)
+        return False
     var c = _ntt(_sample_in_ball(Span[UInt8, ...](ch), p))
 
     var z_hat = List[List[UInt32]](capacity=p.l)
@@ -1135,12 +1205,21 @@ def mldsa_verify_external_mu(pub: MLDSAPublicKey, mu: Span[UInt8, ...], sig: Spa
         _append_use_hint_encoded_stack(ch_input, w[i], h[i], p)
     var computed = shake256(Span[UInt8, ...](ptr=ch_input.ptr(), length=ch_input.len()), p.lambda_bits // 4)
     _zero_stack_u8(ch_input)
-    return _bytes_equal(Span[UInt8, ...](ch), Span[UInt8, ...](computed))
-
+    var ok = _bytes_equal(Span[UInt8, ...](ch), Span[UInt8, ...](computed))
+    _zero_list_u8(ch)
+    _zero_poly_vec_u32(z)
+    _zero_poly_vec_u8(h)
+    _zero_list_u32(c)
+    _zero_poly_vec_u32(z_hat)
+    _zero_poly_vec_u32(w)
+    _zero_list_u8(computed)
+    return ok
 
 def mldsa_verify(pub: MLDSAPublicKey, msg: Span[UInt8, ...], sig: Span[UInt8, ...], context: Span[UInt8, ...]) raises -> Bool:
     var mu = _compute_message_hash(Span[UInt8, ...](pub.tr), msg, context)
-    return mldsa_verify_external_mu(pub, Span[UInt8, ...](mu), sig)
+    var ok = mldsa_verify_external_mu(pub, Span[UInt8, ...](mu), sig)
+    _zero_list_u8(mu)
+    return ok
 
 
 def mldsa44_public_key(pk: Span[UInt8, ...]) raises -> MLDSAPublicKey:
@@ -1216,14 +1295,20 @@ def mldsa_sign_hedged(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Spa
 def mldsa_sign_deterministic(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Span[UInt8, ...]) raises -> List[UInt8]:
     # FIPS 204 optional deterministic variant: rnd = {0}^32.
     var rnd = _zero_random32()
-    return mldsa_sign(priv, msg, context, Span[UInt8, ...](rnd))
+    var sig = mldsa_sign(priv, msg, context, Span[UInt8, ...](rnd))
+    _zero_list_u8(rnd)
+    return sig^
 
 
 def mldsa_sign_external_mu_hedged(priv: MLDSAPrivateKey, mu: Span[UInt8, ...]) raises -> List[UInt8]:
     var rnd = random_bytes(MLDSA_RNDBYTES)
-    return mldsa_sign_external_mu(priv, mu, Span[UInt8, ...](rnd))
+    var sig = mldsa_sign_external_mu(priv, mu, Span[UInt8, ...](rnd))
+    _zero_list_u8(rnd)
+    return sig^
 
 
 def mldsa_sign_external_mu_deterministic(priv: MLDSAPrivateKey, mu: Span[UInt8, ...]) raises -> List[UInt8]:
     var rnd = _zero_random32()
-    return mldsa_sign_external_mu(priv, mu, Span[UInt8, ...](rnd))
+    var sig = mldsa_sign_external_mu(priv, mu, Span[UInt8, ...](rnd))
+    _zero_list_u8(rnd)
+    return sig^
