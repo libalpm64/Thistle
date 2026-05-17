@@ -535,28 +535,23 @@ def _make_hint_elem(ct0: UInt32, w: UInt32, cs2: UInt32, p: MLDSAParams) -> UInt
     if p.gamma2_denom == 32:
         var v1 = _high_bits32(_field_from_montgomery(r_plus_z))
         var r1 = _high_bits32(_field_from_montgomery(_field_add(r_plus_z, ct0)))
-        if v1 == r1:
-            return 0
-        return 1
+        return UInt8(_ct_bool_to_u32(v1 != r1))
     var v1 = _high_bits88(_field_from_montgomery(r_plus_z))
     var r1 = _high_bits88(_field_from_montgomery(_field_add(r_plus_z, ct0)))
-    if v1 == r1:
-        return 0
-    return 1
+    return UInt8(_ct_bool_to_u32(v1 != r1))
 
 
 def _make_hint(ct0: List[UInt32], w: List[UInt32], cs2: List[UInt32], p: MLDSAParams) -> Tuple[List[UInt8], Int]:
-    var h = List[UInt8](capacity=N)
+    var h = List[UInt8](unsafe_uninit_length=N)
     var count = 0
     for i in range(N):
         var bit = _make_hint_elem(ct0[i], w[i], cs2[i], p)
-        h.append(bit)
+        h[i] = bit
         count += Int(bit)
     return (h^, count)
 
 
 def _coefficients_exceed_bound(w: List[UInt32], bound: UInt32) -> Bool:
-	# Todo: Full scan, do not reveal the first coefficient that exceeds the bound.
     var fail = UInt32(0)
     for i in range(N):
         fail |= _ct_bool_to_u32(_infinity_norm(w[i]) >= bound)
@@ -564,7 +559,6 @@ def _coefficients_exceed_bound(w: List[UInt32], bound: UInt32) -> Bool:
 
 
 def _low_bits_exceed_bound(w: List[UInt32], bound: UInt32, p: MLDSAParams) -> Bool:
-	# Todo: Full scan of parameter-set branch is public, coefficient failure position is not.
     var fail = UInt32(0)
     if p.gamma2_denom == 32:
         for i in range(N):
