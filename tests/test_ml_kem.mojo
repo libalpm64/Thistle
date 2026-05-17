@@ -15,10 +15,13 @@ from thistle.ml_kem import (
     mlkem_keygen,
     mlkem_keygen_seed,
     mlkem512_encaps,
+    mlkem512_decaps,
     mlkem512_keygen,
     mlkem768_encaps,
+    mlkem768_decaps,
     mlkem768_keygen,
     mlkem1024_encaps,
+    mlkem1024_decaps,
     mlkem1024_keygen,
     montgomery_reduce,
     poly_frombytes,
@@ -78,7 +81,7 @@ def test_mlkem_external_api() raises -> Tuple[Int, Int]:
     else:
         var ct512 = enc512[0].copy()
         var ss512 = enc512[1].copy()
-        var dec512 = mlkem_decaps(Span[UInt8, ...](dk512), Span[UInt8, ...](ct512), "ML-KEM-512")
+        var dec512 = mlkem512_decaps(Span[UInt8, ...](dk512), Span[UInt8, ...](ct512))
         if not dec512[1] or not list_equal(ss512, dec512[0].copy()):
             print("ML-KEM external API: ML-KEM-512 decaps mismatch")
             failed += 1
@@ -95,7 +98,7 @@ def test_mlkem_external_api() raises -> Tuple[Int, Int]:
     else:
         var ct768 = enc768[0].copy()
         var ss768 = enc768[1].copy()
-        var dec768 = mlkem_decaps(Span[UInt8, ...](dk768), Span[UInt8, ...](ct768), "ML-KEM-768")
+        var dec768 = mlkem768_decaps(Span[UInt8, ...](dk768), Span[UInt8, ...](ct768))
         if not dec768[1] or not list_equal(ss768, dec768[0].copy()):
             print("ML-KEM external API: ML-KEM-768 decaps mismatch")
             failed += 1
@@ -112,7 +115,7 @@ def test_mlkem_external_api() raises -> Tuple[Int, Int]:
     else:
         var ct1024 = enc1024[0].copy()
         var ss1024 = enc1024[1].copy()
-        var dec1024 = mlkem_decaps(Span[UInt8, ...](dk1024), Span[UInt8, ...](ct1024), "ML-KEM-1024")
+        var dec1024 = mlkem1024_decaps(Span[UInt8, ...](dk1024), Span[UInt8, ...](ct1024))
         if not dec1024[1] or not list_equal(ss1024, dec1024[0].copy()):
             print("ML-KEM external API: ML-KEM-1024 decaps mismatch")
             failed += 1

@@ -61,6 +61,7 @@ comptime ENCAPSKEYBYTES_1024 = INDCPA_PUBLICKEYBYTES_1024
 comptime DECAPSKEYBYTES_512 = INDCPA_SECRETKEYBYTES_512 + INDCPA_PUBLICKEYBYTES_512 + 2 * SYMBYTES
 comptime DECAPSKEYBYTES_768 = INDCPA_SECRETKEYBYTES_768 + INDCPA_PUBLICKEYBYTES_768 + 2 * SYMBYTES
 comptime DECAPSKEYBYTES_1024 = INDCPA_SECRETKEYBYTES_1024 + INDCPA_PUBLICKEYBYTES_1024 + 2 * SYMBYTES
+comptime DECAPSKEYBYTES_MAX = DECAPSKEYBYTES_1024
 
 comptime CIPHERTEXTBYTES_512 = INDCPA_BYTES_512
 comptime CIPHERTEXTBYTES_768 = INDCPA_BYTES_768
@@ -386,7 +387,7 @@ def poly_tobytes(mut out: List[UInt8], a: Poly):
         out.append(UInt8(t1 >> 4))
 
 
-def poly_tobytes_stack(mut out: StackBuffer[UInt8, INDCPA_PUBLICKEYBYTES_MAX], a: Poly):
+def poly_tobytes_stack(mut out: StackBuffer[UInt8, ...], a: Poly):
     for i in range(N // 2):
         var t0 = _positive_coeff(a.coeffs[2 * i])
         var t1 = _positive_coeff(a.coeffs[2 * i + 1])
@@ -407,12 +408,12 @@ def poly_frombytes(mut r: Poly, a: Span[UInt8, ...]) raises -> Bool:
     return ok
 
 
-def polyvec_tobytes(mut out: List[UInt8], a: Polyvec, k: Int):
+def polyvec_tobytes(mut out: List[UInt8], ref a: Polyvec, k: Int):
     for i in range(k):
         poly_tobytes(out, a.vec[i])
 
 
-def polyvec_tobytes_stack(mut out: StackBuffer[UInt8, INDCPA_PUBLICKEYBYTES_MAX], a: Polyvec, k: Int):
+def polyvec_tobytes_stack(mut out: StackBuffer[UInt8, ...], ref a: Polyvec, k: Int):
     for i in range(k):
         poly_tobytes_stack(out, a.vec[i])
 
@@ -426,7 +427,7 @@ def polyvec_frombytes(mut r: Polyvec, a: Span[UInt8, ...], k: Int) raises -> Boo
     return ok
 
 
-def polyvec_compress(mut out: List[UInt8], a: Polyvec, k: Int) raises:
+def polyvec_compress(mut out: List[UInt8], ref a: Polyvec, k: Int) raises:
     if k == K_512 or k == K_768:
         for i in range(k):
             for j in range(N // 4):
@@ -465,6 +466,49 @@ def polyvec_compress(mut out: List[UInt8], a: Polyvec, k: Int) raises:
                 out.append(UInt8((t[5] >> 9) | (t[6] << 2)))
                 out.append(UInt8((t[6] >> 6) | (t[7] << 5)))
                 out.append(UInt8(t[7] >> 3))
+    else:
+        raise Error("ML-KEM polyvec_compress invalid k")
+
+
+def polyvec_compress_stack(mut out: StackBuffer[UInt8, CIPHERTEXTBYTES_MAX], ref a: Polyvec, k: Int) raises:
+    if k == K_512 or k == K_768:
+        for i in range(k):
+            for j in range(N // 4):
+                var t = InlineArray[UInt16, 4](fill=0)
+                for l in range(4):
+                    t[l] = _positive_coeff(a.vec[i].coeffs[4 * j + l])
+                    var d0 = UInt64(t[l]) << 10
+                    d0 += 1665
+                    d0 *= 1290167
+                    d0 >>= 32
+                    t[l] = UInt16(d0 & 0x3FF)
+                out.push_unchecked(UInt8(t[0] >> 0))
+                out.push_unchecked(UInt8((t[0] >> 8) | (t[1] << 2)))
+                out.push_unchecked(UInt8((t[1] >> 6) | (t[2] << 4)))
+                out.push_unchecked(UInt8((t[2] >> 4) | (t[3] << 6)))
+                out.push_unchecked(UInt8(t[3] >> 2))
+    elif k == K_1024:
+        for i in range(k):
+            for j in range(N // 8):
+                var t = InlineArray[UInt16, 8](fill=0)
+                for l in range(8):
+                    t[l] = _positive_coeff(a.vec[i].coeffs[8 * j + l])
+                    var d0 = UInt64(t[l]) << 11
+                    d0 += 1664
+                    d0 *= 645084
+                    d0 >>= 31
+                    t[l] = UInt16(d0 & 0x7FF)
+                out.push_unchecked(UInt8(t[0] >> 0))
+                out.push_unchecked(UInt8((t[0] >> 8) | (t[1] << 3)))
+                out.push_unchecked(UInt8((t[1] >> 5) | (t[2] << 6)))
+                out.push_unchecked(UInt8(t[2] >> 2))
+                out.push_unchecked(UInt8((t[2] >> 10) | (t[3] << 1)))
+                out.push_unchecked(UInt8((t[3] >> 7) | (t[4] << 4)))
+                out.push_unchecked(UInt8((t[4] >> 4) | (t[5] << 7)))
+                out.push_unchecked(UInt8(t[5] >> 1))
+                out.push_unchecked(UInt8((t[5] >> 9) | (t[6] << 2)))
+                out.push_unchecked(UInt8((t[6] >> 6) | (t[7] << 5)))
+                out.push_unchecked(UInt8(t[7] >> 3))
     else:
         raise Error("ML-KEM polyvec_compress invalid k")
 
@@ -556,7 +600,7 @@ def poly_tomsg_stack(mut msg: StackBuffer[UInt8, SYMBYTES], a: Poly):
             msg[i] = msg[i] | UInt8(t << UInt32(j))
 
 
-def poly_compress(mut out: List[UInt8], a: Poly, k: Int) raises:
+def poly_compress(mut out: List[UInt8], ref a: Poly, k: Int) raises:
     if k == K_512 or k == K_768:
         for i in range(N // 8):
             var t = InlineArray[UInt8, 8](fill=0)
@@ -588,6 +632,42 @@ def poly_compress(mut out: List[UInt8], a: Poly, k: Int) raises:
             out.append((t[3] >> 1) | (t[4] << 4))
             out.append((t[4] >> 4) | (t[5] << 1) | (t[6] << 6))
             out.append((t[6] >> 2) | (t[7] << 3))
+    else:
+        raise Error("ML-KEM poly_compress invalid k")
+
+
+def poly_compress_stack(mut out: StackBuffer[UInt8, CIPHERTEXTBYTES_MAX], ref a: Poly, k: Int) raises:
+    if k == K_512 or k == K_768:
+        for i in range(N // 8):
+            var t = InlineArray[UInt8, 8](fill=0)
+            for j in range(8):
+                var u = a.coeffs[8 * i + j]
+                u += (u >> 15) & Int16(Q)
+                var d0 = UInt32(u) << 4
+                d0 += 1665
+                d0 *= 80635
+                d0 >>= 28
+                t[j] = UInt8(d0) & 0x0F
+            out.push_unchecked(t[0] | (t[1] << 4))
+            out.push_unchecked(t[2] | (t[3] << 4))
+            out.push_unchecked(t[4] | (t[5] << 4))
+            out.push_unchecked(t[6] | (t[7] << 4))
+    elif k == K_1024:
+        for i in range(N // 8):
+            var t = InlineArray[UInt8, 8](fill=0)
+            for j in range(8):
+                var u = a.coeffs[8 * i + j]
+                u += (u >> 15) & Int16(Q)
+                var d0 = UInt32(u) << 5
+                d0 += 1664
+                d0 *= 40318
+                d0 >>= 27
+                t[j] = UInt8(d0) & 0x1F
+            out.push_unchecked((t[0] >> 0) | (t[1] << 5))
+            out.push_unchecked((t[1] >> 3) | (t[2] << 2) | (t[3] << 7))
+            out.push_unchecked((t[3] >> 1) | (t[4] << 4))
+            out.push_unchecked((t[4] >> 4) | (t[5] << 1) | (t[6] << 6))
+            out.push_unchecked((t[6] >> 2) | (t[7] << 3))
     else:
         raise Error("ML-KEM poly_compress invalid k")
 
@@ -665,12 +745,12 @@ def polyvec_invntt_tomont(mut r: Polyvec, k: Int):
         poly_invntt_tomont(r.vec[i])
 
 
-def polyvec_add(mut r: Polyvec, a: Polyvec, b: Polyvec, k: Int):
+def polyvec_add(mut r: Polyvec, ref a: Polyvec, ref b: Polyvec, k: Int):
     for i in range(k):
         poly_add(r.vec[i], a.vec[i], b.vec[i])
 
 
-def polyvec_basemul_acc_montgomery(mut r: Poly, a: Polyvec, b: Polyvec, k: Int):
+def polyvec_basemul_acc_montgomery(mut r: Poly, ref a: Polyvec, ref b: Polyvec, k: Int):
     var t = Poly()
     poly_basemul_montgomery(r, a.vec[0], b.vec[0])
     for i in range(1, k):
@@ -825,7 +905,7 @@ struct DecapsulationKey(Copyable, Movable):
         self.z = InlineArray[UInt8, SYMBYTES](fill=0)
 
 
-def pack_pk(mut out: List[UInt8], pk: Polyvec, seed: InlineArray[UInt8, SYMBYTES], k: Int) -> Bool:
+def pack_pk(mut out: List[UInt8], ref pk: Polyvec, seed: InlineArray[UInt8, SYMBYTES], k: Int) -> Bool:
     if polyvec_byte_size(k) == 0:
         return False
     polyvec_tobytes(out, pk, k)
@@ -834,7 +914,7 @@ def pack_pk(mut out: List[UInt8], pk: Polyvec, seed: InlineArray[UInt8, SYMBYTES
     return True
 
 
-def pack_pk_stack(mut out: StackBuffer[UInt8, INDCPA_PUBLICKEYBYTES_MAX], pk: Polyvec, seed: InlineArray[UInt8, SYMBYTES], k: Int) -> Bool:
+def pack_pk_stack(mut out: StackBuffer[UInt8, ...], ref pk: Polyvec, seed: InlineArray[UInt8, SYMBYTES], k: Int) -> Bool:
     if polyvec_byte_size(k) == 0:
         return False
     polyvec_tobytes_stack(out, pk, k)
@@ -843,7 +923,7 @@ def pack_pk_stack(mut out: StackBuffer[UInt8, INDCPA_PUBLICKEYBYTES_MAX], pk: Po
     return True
 
 
-def pack_sk(mut out: List[UInt8], sk: Polyvec, k: Int) -> Bool:
+def pack_sk(mut out: List[UInt8], ref sk: Polyvec, k: Int) -> Bool:
     if polyvec_byte_size(k) == 0:
         return False
     polyvec_tobytes(out, sk, k)
@@ -862,11 +942,19 @@ def unpack_pk(mut pk: KPKEEncryptionKey, input: Span[UInt8, ...], k: Int) raises
     return True
 
 
-def pack_ciphertext(mut out: List[UInt8], b: Polyvec, v: Poly, k: Int) raises -> Bool:
+def pack_ciphertext(mut out: List[UInt8], ref b: Polyvec, ref v: Poly, k: Int) raises -> Bool:
     if polyvec_compressed_byte_size(k) == 0 or poly_compressed_bytes(k) == 0:
         return False
     polyvec_compress(out, b, k)
     poly_compress(out, v, k)
+    return True
+
+
+def pack_ciphertext_stack(mut out: StackBuffer[UInt8, CIPHERTEXTBYTES_MAX], ref b: Polyvec, ref v: Poly, k: Int) raises -> Bool:
+    if polyvec_compressed_byte_size(k) == 0 or poly_compressed_bytes(k) == 0:
+        return False
+    polyvec_compress_stack(out, b, k)
+    poly_compress_stack(out, v, k)
     return True
 
 
@@ -931,7 +1019,7 @@ def k_pke_keygen(mut ek: KPKEEncryptionKey, mut dk: KPKEDecapsulationKey, d: Spa
     ek.k = k
 
 
-def k_pke_encrypt(mut ciphertext: List[UInt8], ek: KPKEEncryptionKey, m: Span[UInt8, ...], r: Span[UInt8, ...]) raises -> Bool:
+def k_pke_encrypt(mut ciphertext: List[UInt8], ref ek: KPKEEncryptionKey, m: Span[UInt8, ...], r: Span[UInt8, ...]) raises -> Bool:
     if len(m) != INDCPA_MSGBYTES or len(r) != SYMBYTES:
         return False
     var k = ek.k
@@ -981,7 +1069,57 @@ def k_pke_encrypt(mut ciphertext: List[UInt8], ek: KPKEEncryptionKey, m: Span[UI
     return pack_ciphertext(ciphertext, b, v, k)
 
 
-def k_pke_decrypt_msg(mut plaintext: StackBuffer[UInt8, SYMBYTES], dk: KPKEDecapsulationKey, c: Span[UInt8, ...]) raises -> Bool:
+def k_pke_encrypt_into(mut ciphertext: StackBuffer[UInt8, CIPHERTEXTBYTES_MAX], ref ek: KPKEEncryptionKey, m: Span[UInt8, ...], r: Span[UInt8, ...]) raises -> Bool:
+    if len(m) != INDCPA_MSGBYTES or len(r) != SYMBYTES:
+        return False
+    var k = ek.k
+    if k != K_512 and k != K_768 and k != K_1024:
+        return False
+
+    var kay = Poly()
+    var epp = Poly()
+    var v = Poly()
+    var at = InlineArray[Polyvec, K_MAX](fill=Polyvec())
+    var sp = Polyvec()
+    var ep = Polyvec()
+    var b = Polyvec()
+
+    poly_frommsg(kay, m)
+    gen_matrix(at, ek.p, True, k)
+
+    var nonce = UInt8(0)
+    for i in range(k):
+        if k == K_512:
+            poly_getnoise_eta1_512(sp.vec[i], r, nonce)
+        else:
+            poly_getnoise_eta1(sp.vec[i], r, nonce)
+        nonce += 1
+    for i in range(k):
+        poly_getnoise_eta2(ep.vec[i], r, nonce)
+        nonce += 1
+    poly_getnoise_eta2(epp, r, nonce)
+
+    polyvec_ntt(sp, k)
+
+    for i in range(k):
+        polyvec_basemul_acc_montgomery(b.vec[i], at[i], sp, k)
+
+    polyvec_basemul_acc_montgomery(v, ek.pv, sp, k)
+
+    polyvec_invntt_tomont(b, k)
+    poly_invntt_tomont(v)
+
+    for i in range(k):
+        poly_add_inplace(b.vec[i], ep.vec[i])
+    poly_add_inplace(v, epp)
+    poly_add_inplace(v, kay)
+    polyvec_reduce(b, k)
+    poly_reduce(v)
+
+    return pack_ciphertext_stack(ciphertext, b, v, k)
+
+
+def k_pke_decrypt_msg(mut plaintext: StackBuffer[UInt8, SYMBYTES], ref dk: KPKEDecapsulationKey, c: Span[UInt8, ...]) raises -> Bool:
     var k = dk.k
     if k != K_512 and k != K_768 and k != K_1024:
         return False
@@ -1022,7 +1160,7 @@ def kem_keygen_internal(seed: Span[UInt8, ...], k: Int) raises -> DecapsulationK
     return dk^
 
 
-def decapsulation_key_expanded_bytes(dk: DecapsulationKey) -> List[UInt8]:
+def decapsulation_key_expanded_bytes(ref dk: DecapsulationKey) -> List[UInt8]:
     var out = List[UInt8](capacity=_decapsulation_key_size(dk.pke_dk.k))
     _ = pack_sk(out, dk.pke_dk.pv, dk.pke_dk.k)
     var ek_len = polyvec_byte_size(dk.pke_dk.k) + SYMBYTES
@@ -1035,12 +1173,39 @@ def decapsulation_key_expanded_bytes(dk: DecapsulationKey) -> List[UInt8]:
     return out^
 
 
-def encapsulation_key_bytes(dk: DecapsulationKey) -> List[UInt8]:
+def encapsulation_key_bytes(ref dk: DecapsulationKey) -> List[UInt8]:
     var out = List[UInt8](capacity=polyvec_byte_size(dk.pke_dk.k) + SYMBYTES)
     var ek_len = polyvec_byte_size(dk.pke_dk.k) + SYMBYTES
     for i in range(ek_len):
         out.append(dk.ek.raw_bytes[i])
     return out^
+
+
+def encapsulation_key_bytes_into(mut out: StackBuffer[UInt8, INDCPA_PUBLICKEYBYTES_MAX], ref dk: DecapsulationKey) -> Bool:
+    out.clear()
+    var ek_len = polyvec_byte_size(dk.pke_dk.k) + SYMBYTES
+    if ek_len == 0:
+        return False
+    for i in range(ek_len):
+        out.push_unchecked(dk.ek.raw_bytes[i])
+    return True
+
+
+def decapsulation_key_expanded_bytes_into(mut out: StackBuffer[UInt8, DECAPSKEYBYTES_MAX], ref dk: DecapsulationKey) -> Bool:
+    out.clear()
+    var k = dk.pke_dk.k
+    var dk_len = _decapsulation_key_size(k)
+    if dk_len == 0:
+        return False
+    polyvec_tobytes_stack(out, dk.pke_dk.pv, k)
+    var ek_len = polyvec_byte_size(k) + SYMBYTES
+    for i in range(ek_len):
+        out.push_unchecked(dk.ek.raw_bytes[i])
+    for i in range(SYMBYTES):
+        out.push_unchecked(dk.ek.h[i])
+    for i in range(SYMBYTES):
+        out.push_unchecked(dk.z[i])
+    return True
 
 
 def _parameter_set_k(parameter_set: String) raises -> Int:
@@ -1141,11 +1306,34 @@ def decapsulation_key_from_bytes(input: Span[UInt8, ...], k: Int) raises -> Tupl
     return (dk^, True)
 
 
-def mlkem_keygen_seed(seed: Span[UInt8, ...], parameter_set: String) raises -> Tuple[List[UInt8], List[UInt8]]:
+def mlkem_keygen_seed_into(mut ek_out: StackBuffer[UInt8, INDCPA_PUBLICKEYBYTES_MAX], mut dk_out: StackBuffer[UInt8, DECAPSKEYBYTES_MAX], seed: Span[UInt8, ...], parameter_set: String) raises -> Bool:
+    ek_out.clear()
+    dk_out.clear()
     var k = _parameter_set_k(parameter_set)
-
     var dk = kem_keygen_internal(seed, k)
-    return (encapsulation_key_bytes(dk), decapsulation_key_expanded_bytes(dk))
+    if not encapsulation_key_bytes_into(ek_out, dk):
+        return False
+    if not decapsulation_key_expanded_bytes_into(dk_out, dk):
+        _zero_stack_u8(ek_out)
+        return False
+    return True
+
+
+def mlkem_keygen_seed(seed: Span[UInt8, ...], parameter_set: String) raises -> Tuple[List[UInt8], List[UInt8]]:
+    var ek_buf = StackBuffer[UInt8, INDCPA_PUBLICKEYBYTES_MAX]()
+    var dk_buf = StackBuffer[UInt8, DECAPSKEYBYTES_MAX]()
+    if not mlkem_keygen_seed_into(ek_buf, dk_buf, seed, parameter_set):
+        return (List[UInt8](), List[UInt8]())
+
+    var ek = List[UInt8](capacity=ek_buf.len())
+    for i in range(ek_buf.len()):
+        ek.append(ek_buf[i])
+    var dk = List[UInt8](capacity=dk_buf.len())
+    for i in range(dk_buf.len()):
+        dk.append(dk_buf[i])
+    _zero_stack_u8(ek_buf)
+    _zero_stack_u8(dk_buf)
+    return (ek^, dk^)
 
 
 # FIPS 203 external ML-KEM.KeyGen().
@@ -1195,16 +1383,16 @@ def mlkem1024_encaps(ek_bytes: Span[UInt8, ...]) raises -> Tuple[List[UInt8], Li
     return mlkem_encaps(ek_bytes, "ML-KEM-1024")
 
 
-def mlkem_encaps_seed_vector_order(ek_bytes: Span[UInt8, ...], m: Span[UInt8, ...], parameter_set: String) raises -> Tuple[List[UInt8], List[UInt8], Bool]:
-    # KAT/vector order: (shared_secret, ciphertext, ok).
-    # Use mlkem_encaps_seed() for the FIPS/RFC external order.
+def mlkem_encaps_seed_into(mut ciphertext_out: StackBuffer[UInt8, CIPHERTEXTBYTES_MAX], mut shared_out: StackBuffer[UInt8, SYMBYTES], ek_bytes: Span[UInt8, ...], m: Span[UInt8, ...], parameter_set: String) raises -> Bool:
+    ciphertext_out.clear()
+    shared_out.clear()
     var k = _parameter_set_k(parameter_set)
     if len(m) != SYMBYTES:
-        return (List[UInt8](), List[UInt8](), False)
+        return False
 
     var ek = KPKEEncryptionKey()
     if not unpack_pk(ek, ek_bytes, k):
-        return (List[UInt8](), List[UInt8](), False)
+        return False
 
     var h = hash_h(ek_bytes)
     var g_input = StackBuffer[UInt8, 2 * SYMBYTES]()
@@ -1214,15 +1402,33 @@ def mlkem_encaps_seed_vector_order(ek_bytes: Span[UInt8, ...], m: Span[UInt8, ..
         g_input.push_unchecked(h[i])
     var g = hash_g(Span[UInt8, ...](ptr=g_input.ptr(), length=g_input.len()))
     _zero_stack_u8(g_input)
+    for i in range(SYMBYTES):
+        shared_out.push_unchecked(g[i])
+    if not k_pke_encrypt_into(ciphertext_out, ek, m, Span[UInt8, ...](g[SYMBYTES:2 * SYMBYTES])):
+        _zero_list(g)
+        _zero_stack_u8(shared_out)
+        _zero_stack_u8(ciphertext_out)
+        return False
+    _zero_list(g)
+    return True
+
+
+def mlkem_encaps_seed_vector_order(ek_bytes: Span[UInt8, ...], m: Span[UInt8, ...], parameter_set: String) raises -> Tuple[List[UInt8], List[UInt8], Bool]:
+    # KAT/vector order: (shared_secret, ciphertext, ok).
+    # Use mlkem_encaps_seed() for the FIPS/RFC external order.
+    var shared_buf = StackBuffer[UInt8, SYMBYTES]()
+    var ciphertext_buf = StackBuffer[UInt8, CIPHERTEXTBYTES_MAX]()
+    if not mlkem_encaps_seed_into(ciphertext_buf, shared_buf, ek_bytes, m, parameter_set):
+        return (List[UInt8](), List[UInt8](), False)
+
     var shared = List[UInt8](capacity=SYMBYTES)
     for i in range(SYMBYTES):
-        shared.append(g[i])
-    var ciphertext = List[UInt8](capacity=polyvec_compressed_byte_size(k) + poly_compressed_bytes(k))
-    if not k_pke_encrypt(ciphertext, ek, m, Span[UInt8, ...](g[SYMBYTES:2 * SYMBYTES])):
-        _zero_list(g)
-        _zero_list(shared)
-        return (List[UInt8](), List[UInt8](), False)
-    _zero_list(g)
+        shared.append(shared_buf[i])
+    var ciphertext = List[UInt8](capacity=ciphertext_buf.len())
+    for i in range(ciphertext_buf.len()):
+        ciphertext.append(ciphertext_buf[i])
+    _zero_stack_u8(shared_buf)
+    _zero_stack_u8(ciphertext_buf)
     return (shared^, ciphertext^, True)
 
 
@@ -1238,19 +1444,20 @@ def mlkem_encaps_seed(ek_bytes: Span[UInt8, ...], m: Span[UInt8, ...], parameter
     return (result[1].copy(), result[0].copy(), True)
 
 
-def mlkem_decaps(dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...], parameter_set: String) raises -> Tuple[List[UInt8], Bool]:
+def mlkem_decaps_into(mut shared_out: StackBuffer[UInt8, SYMBYTES], dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...], parameter_set: String) raises -> Bool:
+    shared_out.clear()
     var k = _parameter_set_k(parameter_set)
     if len(ciphertext) != _ciphertext_size(k):
-        return (List[UInt8](), False)
+        return False
 
     var dk = DecapsulationKey()
     if not decapsulation_key_decode(dk, dk_bytes, k):
-        return (List[UInt8](), False)
+        return False
 
     var m = StackBuffer[UInt8, SYMBYTES]()
     if not k_pke_decrypt_msg(m, dk.pke_dk, ciphertext):
         _zero_stack_u8(m)
-        return (List[UInt8](), False)
+        return False
 
     var g_input = StackBuffer[UInt8, 2 * SYMBYTES]()
     for i in range(SYMBYTES):
@@ -1260,26 +1467,45 @@ def mlkem_decaps(dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...], param
     var g = hash_g(Span[UInt8, ...](ptr=g_input.ptr(), length=g_input.len()))
     _zero_stack_u8(g_input)
 
-    var ct_check = List[UInt8](capacity=_ciphertext_size(k))
-    if not k_pke_encrypt(ct_check, dk.ek.pke_ek, Span[UInt8, ...](ptr=m.ptr(), length=m.len()), Span[UInt8, ...](g[SYMBYTES:2 * SYMBYTES])):
+    var ct_check = StackBuffer[UInt8, CIPHERTEXTBYTES_MAX]()
+    if not k_pke_encrypt_into(ct_check, dk.ek.pke_ek, Span[UInt8, ...](ptr=m.ptr(), length=m.len()), Span[UInt8, ...](g[SYMBYTES:2 * SYMBYTES])):
         _zero_stack_u8(m)
         _zero_list(g)
-        _zero_list(ct_check)
-        return (List[UInt8](), False)
+        _zero_stack_u8(ct_check)
+        return False
 
     var rejection = rkprf(Span[UInt8, ...](dk.z), ciphertext)
-    var shared_buf = StackBuffer[UInt8, SYMBYTES]()
-    var equal = _ct_is_zero_u8(_bytes_diff(Span[UInt8, ...](ct_check), ciphertext))
+    var equal = _ct_is_zero_u8(_bytes_diff(Span[UInt8, ...](ptr=ct_check.ptr(), length=ct_check.len()), ciphertext))
     for i in range(SYMBYTES):
-        shared_buf.push_unchecked(_ct_select_u8(rejection[i], g[i], equal))
+        shared_out.push_unchecked(_ct_select_u8(rejection[i], g[i], equal))
+
+    _zero_stack_u8(m)
+    _zero_list(g)
+    _zero_stack_u8(ct_check)
+    _zero_list(rejection)
+    return True
+
+
+def mlkem_decaps(dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...], parameter_set: String) raises -> Tuple[List[UInt8], Bool]:
+    var shared_buf = StackBuffer[UInt8, SYMBYTES]()
+    if not mlkem_decaps_into(shared_buf, dk_bytes, ciphertext, parameter_set):
+        _zero_stack_u8(shared_buf)
+        return (List[UInt8](), False)
 
     var shared = List[UInt8](capacity=SYMBYTES)
     for i in range(SYMBYTES):
         shared.append(shared_buf[i])
-
-    _zero_stack_u8(m)
-    _zero_list(g)
-    _zero_list(ct_check)
     _zero_stack_u8(shared_buf)
-    _zero_list(rejection)
     return (shared^, True)
+
+
+def mlkem512_decaps(dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...]) raises -> Tuple[List[UInt8], Bool]:
+    return mlkem_decaps(dk_bytes, ciphertext, "ML-KEM-512")
+
+
+def mlkem768_decaps(dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...]) raises -> Tuple[List[UInt8], Bool]:
+    return mlkem_decaps(dk_bytes, ciphertext, "ML-KEM-768")
+
+
+def mlkem1024_decaps(dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...]) raises -> Tuple[List[UInt8], Bool]:
+    return mlkem_decaps(dk_bytes, ciphertext, "ML-KEM-1024")
