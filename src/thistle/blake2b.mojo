@@ -242,7 +242,7 @@ struct Blake2b(Movable):
 
     def finalize(mut self) -> List[UInt8]:
         var output = List[UInt8](capacity=self.out_len)
-        for i in range(self.out_len):
+        for _ in range(self.out_len):
             output.append(0)
         self.finalize_into(output.unsafe_ptr())
         return output^

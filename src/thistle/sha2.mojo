@@ -433,7 +433,7 @@ def sha256_update(mut ctx: SHA256Context, data: Span[UInt8, ...]):
 
 def sha256_final(mut ctx: SHA256Context) -> List[UInt8]:
     var output = List[UInt8](capacity=32)
-    for i in range(32):
+    for _ in range(32):
         output.append(0)
     sha256_final_to_buffer(ctx, output.unsafe_ptr())
     return output^
