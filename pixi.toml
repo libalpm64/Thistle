@@ -6,26 +6,12 @@ platforms = ["linux-64", "osx-arm64"]
 version = "1.0.2"
 
 [tasks]
-build-pq = { cmd = "bash libs/build.sh", inputs = ["libs/src/**/*.c", "libs/build.sh"] }
-test = { cmd = "mojo run -I src/ tests/thistle_test_vectors.mojo", depends-on = ["build-pq"] }
-test-pq = { cmd = "bash -lc 'if [[ \"$(uname)\" == \"Darwin\" ]]; then export DYLD_LIBRARY_PATH=.pixi/envs/default/lib:libs:${DYLD_LIBRARY_PATH:-}; else export LD_LIBRARY_PATH=.pixi/envs/default/lib:libs:${LD_LIBRARY_PATH:-}; fi; mojo run -I src/ tests/pq_test_vectors.mojo'", depends-on = ["build-pq"] }
-bench = { cmd = "mojo run -I src/ tests/benchmark.mojo", depends-on = ["build-pq"] }
-clean-pq = "rm -rf libs/src/mldsa-native libs/src/mlkem-native libs/*.so libs/*.dylib libs/*.dll"
+test = "mojo run -I src/ tests/thistle_test_vectors.mojo"
+test-ml-kem = "mojo run -I src/ tests/test_ml_kem.mojo"
+test-ml-dsa = "mojo run -I src/ tests/test_ml_dsa.mojo"
+bench = "mojo run -I src/ tests/benchmark.mojo"
 
 [dependencies]
 python = "3.12.*"
 max = ">=26.3,<26.4"
 mojo = "==1.0.0b1"
-
-git = "*"
-make = "*"
-gcc = "*"
-
-[target.linux-64.dependencies]
-gcc_linux-64 = "*"
-
-[target.osx-arm64.dependencies]
-clang = "*"
-
-[activation.env]
-THISTLE_LIBS = "$PIXI_PROJECT_ROOT/libs"

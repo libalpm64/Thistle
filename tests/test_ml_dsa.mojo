@@ -9,6 +9,7 @@ from thistle.ml_dsa import (
     mldsa_sign,
     mldsa_sign_external_mu,
     mldsa_verify,
+    mldsa_verify_external_mu,
     mldsa_keygen,
     mldsa44_keygen,
     mldsa65_keygen,
@@ -76,6 +77,8 @@ def has_field(obj: PythonObject, name: String) raises -> Bool:
 def get_context(t: PythonObject) raises -> List[UInt8]:
     if has_field(t, "ctx"):
         return hex_to_bytes(String(t["ctx"]))
+    if has_field(t, "context"):
+        return hex_to_bytes(String(t["context"]))
     return List[UInt8]()
 
 
@@ -87,6 +90,16 @@ def get_params(level: Int) raises -> MLDSAParams:
     if level == 87:
         return params87()
     raise Error("invalid ML-DSA level: " + String(level))
+
+
+def get_params_from_name(parameter_set: String) raises -> MLDSAParams:
+    if parameter_set == "ML-DSA-44":
+        return params44()
+    if parameter_set == "ML-DSA-65":
+        return params65()
+    if parameter_set == "ML-DSA-87":
+        return params87()
+    raise Error("invalid ML-DSA parameter set: " + parameter_set)
 
 
 def run_verify_file(path: String, level: Int, py: PythonObject) raises -> Tuple[Int, Int]:
@@ -121,6 +134,31 @@ def run_verify_file(path: String, level: Int, py: PythonObject) raises -> Tuple[
                 failed += 1
             else:
                 passed += 1
+    return passed, failed
+
+
+def run_nist_keygen_file(prompt_path: String, expected_path: String, py: PythonObject) raises -> Tuple[Int, Int]:
+    var prompt = load_json(prompt_path, py)
+    var expected = load_json(expected_path, py)
+    var passed = 0
+    var failed = 0
+    for group_idx in range(Int(py=prompt["testGroups"].__len__())):
+        var g = prompt["testGroups"][group_idx]
+        var eg = expected["testGroups"][group_idx]
+        var p = get_params_from_name(String(g["parameterSet"]))
+        var tests = g["tests"]
+        var expected_tests = eg["tests"]
+        for test_idx in range(Int(py=tests.__len__())):
+            var t = tests[test_idx]
+            var et = expected_tests[test_idx]
+            var tc_id = String(t["tcId"])
+            var seed = hex_to_bytes(String(t["seed"]))
+            var pub = mldsa_public_key_from_seed(Span[UInt8, ...](seed), p)
+            if not matches_hex(pub.raw, String(et["pk"])):
+                print(prompt_path, " tcId=", tc_id, " NIST public key mismatch")
+                failed += 1
+                continue
+            passed += 1
     return passed, failed
 
 
@@ -168,12 +206,52 @@ def run_sign_seed_file(path: String, level: Int, py: PythonObject) raises -> Tup
         for t in g["tests"]:
             var tc_id = String(t["tcId"])
             var expected = String(t["result"]) == "valid"
-            var got = False
-            if got != expected:
+            if expected:
                 print(path, " tcId=", tc_id, " sign-seed mismatch")
                 failed += 1
             else:
                 passed += 1
+    return passed, failed
+
+
+def run_nist_siggen_file(prompt_path: String, expected_path: String, py: PythonObject) raises -> Tuple[Int, Int]:
+    var prompt = load_json(prompt_path, py)
+    var expected = load_json(expected_path, py)
+    var passed = 0
+    var failed = 0
+    for group_idx in range(Int(py=prompt["testGroups"].__len__())):
+        var g = prompt["testGroups"][group_idx]
+        var eg = expected["testGroups"][group_idx]
+        var p = get_params_from_name(String(g["parameterSet"]))
+        var pre_hash = String(g.get("preHash", "pure"))
+        var signature_interface = String(g.get("signatureInterface", "external"))
+        var external_mu = Bool(g.get("externalMu", False))
+        if pre_hash != "pure" or (signature_interface == "internal" and not external_mu):
+            continue
+        var tests = g["tests"]
+        var expected_tests = eg["tests"]
+        for test_idx in range(Int(py=tests.__len__())):
+            var t = tests[test_idx]
+            var et = expected_tests[test_idx]
+            var tc_id = String(t["tcId"])
+            var sk = hex_to_bytes(String(t["sk"]))
+            var rnd = zero_random()
+            if has_field(t, "rnd"):
+                rnd = hex_to_bytes(String(t["rnd"]))
+            var priv = mldsa_private_key_from_semiexpanded(Span[UInt8, ...](sk), p)
+            var sig: List[UInt8]
+            if signature_interface == "internal" and external_mu:
+                var mu = hex_to_bytes(String(t["mu"]))
+                sig = mldsa_sign_external_mu(priv, Span[UInt8, ...](mu), Span[UInt8, ...](rnd))
+            else:
+                var msg = hex_to_bytes(String(t["message"]))
+                var ctx = get_context(t)
+                sig = mldsa_sign(priv, Span[UInt8, ...](msg), Span[UInt8, ...](ctx), Span[UInt8, ...](rnd))
+            if not matches_hex(sig, String(et["signature"])):
+                print(prompt_path, " tcId=", tc_id, " NIST signature mismatch")
+                failed += 1
+                continue
+            passed += 1
     return passed, failed
 
 
@@ -221,12 +299,54 @@ def run_sign_noseed_file(path: String, level: Int, py: PythonObject) raises -> T
         for t in g["tests"]:
             var tc_id = String(t["tcId"])
             var expected = String(t["result"]) == "valid"
-            var got = False
-            if got != expected:
+            if expected:
                 print(path, " tcId=", tc_id, " sign-noseed mismatch")
                 failed += 1
             else:
                 passed += 1
+    return passed, failed
+
+
+def run_nist_sigver_file(prompt_path: String, expected_path: String, py: PythonObject) raises -> Tuple[Int, Int]:
+    var prompt = load_json(prompt_path, py)
+    var expected = load_json(expected_path, py)
+    var passed = 0
+    var failed = 0
+    for group_idx in range(Int(py=prompt["testGroups"].__len__())):
+        var g = prompt["testGroups"][group_idx]
+        var eg = expected["testGroups"][group_idx]
+        var p = get_params_from_name(String(g["parameterSet"]))
+        var pre_hash = String(g.get("preHash", "pure"))
+        var signature_interface = String(g.get("signatureInterface", "external"))
+        var external_mu = Bool(g.get("externalMu", False))
+        if pre_hash != "pure" or (signature_interface == "internal" and not external_mu):
+            continue
+        var tests = g["tests"]
+        var expected_tests = eg["tests"]
+        for test_idx in range(Int(py=tests.__len__())):
+            var t = tests[test_idx]
+            var et = expected_tests[test_idx]
+            var tc_id = String(t["tcId"])
+            var expected_pass = Bool(et["testPassed"])
+            var pk = hex_to_bytes(String(t["pk"]))
+            var sig = hex_to_bytes(String(t["signature"]))
+            var got: Bool
+            try:
+                var pub = new_public_key(Span[UInt8, ...](pk), p)
+                if signature_interface == "internal" and external_mu:
+                    var mu = hex_to_bytes(String(t["mu"]))
+                    got = mldsa_verify_external_mu(pub, Span[UInt8, ...](mu), Span[UInt8, ...](sig))
+                else:
+                    var msg = hex_to_bytes(String(t["message"]))
+                    var ctx = get_context(t)
+                    got = mldsa_verify(pub, Span[UInt8, ...](msg), Span[UInt8, ...](sig), Span[UInt8, ...](ctx))
+            except:
+                got = False
+            if got != expected_pass:
+                print(prompt_path, " tcId=", tc_id, " NIST verify mismatch")
+                failed += 1
+                continue
+            passed += 1
     return passed, failed
 
 
@@ -327,6 +447,16 @@ def main() raises:
     passed += result[0]
     failed += result[1]
     result = run_verify_file("tests/Wycheproof/mldsa_87_verify_test.json", 87, py)
+    passed += result[0]
+    failed += result[1]
+
+    result = run_nist_keygen_file("tests/NIST/ML-DSA-keyGen-FIPS204/prompt.json", "tests/NIST/ML-DSA-keyGen-FIPS204/expectedResults.json", py)
+    passed += result[0]
+    failed += result[1]
+    result = run_nist_siggen_file("tests/NIST/ML-DSA-sigGen-FIPS204/prompt.json", "tests/NIST/ML-DSA-sigGen-FIPS204/expectedResults.json", py)
+    passed += result[0]
+    failed += result[1]
+    result = run_nist_sigver_file("tests/NIST/ML-DSA-sigVer-FIPS204/prompt.json", "tests/NIST/ML-DSA-sigVer-FIPS204/expectedResults.json", py)
     passed += result[0]
     failed += result[1]
 

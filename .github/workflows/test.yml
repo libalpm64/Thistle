@@ -24,37 +24,7 @@ jobs:
           OMP_NUM_THREADS: 1
         run: |
           for i in 1 2 3; do
-            pixi run test && break
-            if [ $i -eq 3 ]; then exit 1; fi
-            echo "Attempt $i failed, clearing JIT cache and retrying..."
-            rm -rf ~/.mojo
-            sleep 5
-          done
-
-  test-pq:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: prefix-dev/setup-pixi@v0.9.4
-        with:
-          cache: false
-          locked: false
-          activate-environment: true
-
-      - name: Build PQ libraries
-        run: pixi run build-pq
-
-      - name: Clear Mojo cache
-        run: rm -rf ~/.mojo
-
-      - name: Run PQ tests
-        env:
-          MAX_NUM_THREADS: 1
-          OMP_NUM_THREADS: 1
-        run: |
-          for i in 1 2 3; do
-            pixi run test-pq && break
+            pixi run test && pixi run test-ml-kem && pixi run test-ml-dsa && break
             if [ $i -eq 3 ]; then exit 1; fi
             echo "Attempt $i failed, clearing JIT cache and retrying..."
             rm -rf ~/.mojo

@@ -332,6 +332,98 @@ def run_full_file(path: String, py: PythonObject) raises -> Tuple[Int, Int]:
     return passed, failed
 
 
+def run_nist_keygen_file(prompt_path: String, expected_path: String, py: PythonObject) raises -> Tuple[Int, Int]:
+    var prompt = load_json(prompt_path, py)
+    var expected = load_json(expected_path, py)
+    var passed = 0
+    var failed = 0
+    for group_idx in range(Int(py=prompt["testGroups"].__len__())):
+        var g = prompt["testGroups"][group_idx]
+        var eg = expected["testGroups"][group_idx]
+        var parameter_set = String(g["parameterSet"])
+        var tests = g["tests"]
+        var expected_tests = eg["tests"]
+        for test_idx in range(Int(py=tests.__len__())):
+            var t = tests[test_idx]
+            var et = expected_tests[test_idx]
+            var tc_id = String(t["tcId"])
+            var d = hex_to_bytes(String(t["d"]))
+            var z = hex_to_bytes(String(t["z"]))
+            var seed = List[UInt8](capacity=64)
+            for i in range(32):
+                seed.append(d[i])
+            for i in range(32):
+                seed.append(z[i])
+            var pair = mlkem_keygen_seed(Span[UInt8, ...](seed), parameter_set)
+            var ek = pair[0].copy()
+            var dk = pair[1].copy()
+            if not matches_hex(ek, String(et["ek"])):
+                print(prompt_path, " tcId=", tc_id, " NIST ek mismatch")
+                failed += 1
+                continue
+            if not matches_hex(dk, String(et["dk"])):
+                print(prompt_path, " tcId=", tc_id, " NIST dk mismatch")
+                failed += 1
+                continue
+            passed += 1
+    return passed, failed
+
+
+def run_nist_encapdecap_file(prompt_path: String, expected_path: String, py: PythonObject) raises -> Tuple[Int, Int]:
+    var prompt = load_json(prompt_path, py)
+    var expected = load_json(expected_path, py)
+    var passed = 0
+    var failed = 0
+    for group_idx in range(Int(py=prompt["testGroups"].__len__())):
+        var g = prompt["testGroups"][group_idx]
+        var eg = expected["testGroups"][group_idx]
+        var parameter_set = String(g["parameterSet"])
+        var function = String(g["function"])
+        var tests = g["tests"]
+        var expected_tests = eg["tests"]
+        for test_idx in range(Int(py=tests.__len__())):
+            var t = tests[test_idx]
+            var et = expected_tests[test_idx]
+            var tc_id = String(t["tcId"])
+            if function == "encapsulation":
+                var ek = hex_to_bytes(String(t["ek"]))
+                var m = hex_to_bytes(String(t["m"]))
+                var result = mlkem_encaps_seed_vector(Span[UInt8, ...](ek), Span[UInt8, ...](m), parameter_set)
+                if not result[2]:
+                    print(prompt_path, " tcId=", tc_id, " NIST encaps rejected")
+                    failed += 1
+                    continue
+                var shared = result[0].copy()
+                var ciphertext = result[1].copy()
+                if not matches_hex(ciphertext, String(et["c"])):
+                    print(prompt_path, " tcId=", tc_id, " NIST ciphertext mismatch")
+                    failed += 1
+                    continue
+                if not matches_hex(shared, String(et["k"])):
+                    print(prompt_path, " tcId=", tc_id, " NIST shared secret mismatch")
+                    failed += 1
+                    continue
+                passed += 1
+            elif function == "decapsulation":
+                var dk = hex_to_bytes(String(t["dk"]))
+                var c = hex_to_bytes(String(t["c"]))
+                var result = mlkem_decaps(Span[UInt8, ...](dk), Span[UInt8, ...](c), parameter_set)
+                if not result[1]:
+                    print(prompt_path, " tcId=", tc_id, " NIST decaps rejected")
+                    failed += 1
+                    continue
+                var shared = result[0].copy()
+                if not matches_hex(shared, String(et["k"])):
+                    print(prompt_path, " tcId=", tc_id, " NIST decaps shared secret mismatch")
+                    failed += 1
+                    continue
+                passed += 1
+            else:
+                # The pure Mojo API does not expose standalone key-check functions yet.
+                pass
+    return passed, failed
+
+
 def main() raises:
     print("ML-KEM test suite")
     var py = Python.import_module("json")
@@ -387,7 +479,14 @@ def main() raises:
     passed += result[0]
     failed += result[1]
 
-    # ML-KEM vectors cover the pure Mojo implementation; PQ FFI tests remain separate.
+    result = run_nist_keygen_file("tests/NIST/ML-KEM-keyGen-FIPS203/prompt.json", "tests/NIST/ML-KEM-keyGen-FIPS203/expectedResults.json", py)
+    passed += result[0]
+    failed += result[1]
+    result = run_nist_encapdecap_file("tests/NIST/ML-KEM-encapDecap-FIPS203/prompt.json", "tests/NIST/ML-KEM-encapDecap-FIPS203/expectedResults.json", py)
+    passed += result[0]
+    failed += result[1]
+
+    # ML-KEM vectors cover the pure Mojo implementation; key-check-only ACVP groups are skipped.
     print("ML-KEM test suite: ", passed, " passed, ", failed, " failed")
     if failed > 0:
         raise Error("ML-KEM test suite failed")
