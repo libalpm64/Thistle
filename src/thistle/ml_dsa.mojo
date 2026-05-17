@@ -779,7 +779,7 @@ def _append_use_hint_encoded_stack(mut out: StackBuffer[UInt8, ...], w: List[UIn
 
 def _hint_encode(mut out: List[UInt8], h: List[List[UInt8]], p: MLDSAParams):
     var y = List[UInt8](unsafe_uninit_length=p.omega + p.k)
-    memset_zero(y.unsafe_ptr(), p.omega + p.k)
+    _zero_list_u8(y)
     var idx: UInt8 = 0
     for i in range(p.k):
         for j in range(N):
@@ -788,6 +788,7 @@ def _hint_encode(mut out: List[UInt8], h: List[List[UInt8]], p: MLDSAParams):
                 idx += 1
         y[p.omega + i] = idx
     _append_bytes(out, Span[UInt8, ...](y))
+    _zero_list_u8(y)
 
 
 def _hint_decode(y: Span[UInt8, ...], p: MLDSAParams) raises -> List[List[UInt8]]:
@@ -797,7 +798,7 @@ def _hint_decode(y: Span[UInt8, ...], p: MLDSAParams) raises -> List[List[UInt8]
     var idx: UInt8 = 0
     for i in range(p.k):
         var row = List[UInt8](unsafe_uninit_length=N)
-        memset_zero(row.unsafe_ptr(), N)
+        _zero_list_u8(row)
         var limit = y[p.omega + i]
         if limit < idx or limit > UInt8(p.omega):
             raise Error("ML-DSA invalid hint limits")
@@ -849,7 +850,9 @@ def _compute_message_hash(tr: Span[UInt8, ...], msg: Span[UInt8, ...], context: 
     input.append(UInt8(len(context)))
     _append_bytes(input, context)
     _append_bytes(input, msg)
-    return shake256(Span[UInt8, ...](input), 64)
+    var out = shake256(Span[UInt8, ...](input), 64)
+    _zero_list_u8(input)
+    return out^
 
 
 def mldsa_public_key_from_seed(seed: Span[UInt8, ...], p: MLDSAParams) raises -> MLDSAPublicKey:
@@ -1253,8 +1256,9 @@ def mldsa87_private_key_from_semiexpanded(sk: Span[UInt8, ...]) raises -> MLDSAP
 
 
 def _zero_random32() -> List[UInt8]:
+    # Deterministic ML-DSA signing uses rnd = {0}^32.
     var r = List[UInt8](unsafe_uninit_length=MLDSA_RNDBYTES)
-    memset_zero(r.unsafe_ptr(), MLDSA_RNDBYTES)
+    _zero_list_u8(r)
     return r^
 
 
