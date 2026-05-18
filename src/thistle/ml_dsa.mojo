@@ -19,7 +19,7 @@ from std.algorithm.functional import vectorize
 from std.builtin.globals import global_constant
 from std.memory import memset_zero
 from std.sys import simd_width_of
-from thistle.sha3 import shake128, shake256
+from thistle.sha3 import SHA3Context, sha3_update, shake_final, shake128, shake256
 from thistle.random import random_bytes
 from thistle.utils import StackBuffer
 
@@ -844,15 +844,20 @@ def _sig_decode(sig: Span[UInt8, ...], p: MLDSAParams) raises -> Tuple[List[UInt
 def _compute_message_hash(tr: Span[UInt8, ...], msg: Span[UInt8, ...], context: Span[UInt8, ...]) raises -> List[UInt8]:
     if len(context) > 255:
         raise Error("ML-DSA context too long")
-    var input = List[UInt8](capacity=len(tr) + len(msg) + len(context) + 2)
-    _append_bytes(input, tr)
-    input.append(0)
-    input.append(UInt8(len(context)))
-    _append_bytes(input, context)
-    _append_bytes(input, msg)
-    var out = shake256(Span[UInt8, ...](input), 64)
-    _zero_list_u8(input)
-    return out^
+
+	# Stream buffer from SHAKE_final
+    var ctx = SHA3Context(1088)
+    sha3_update(ctx, tr)
+
+    var prefix = StackBuffer[UInt8, 2]()
+    prefix.push_unchecked(UInt8(0))
+    prefix.push_unchecked(UInt8(len(context)))
+    sha3_update(ctx, Span[UInt8, ...](ptr=prefix.ptr(), length=prefix.len()))
+    _zero_stack_u8(prefix)
+
+    sha3_update(ctx, context)
+    sha3_update(ctx, msg)
+    return shake_final(ctx, MLDSA_CRHBYTES)
 
 
 def mldsa_public_key_from_seed(seed: Span[UInt8, ...], p: MLDSAParams) raises -> MLDSAPublicKey:

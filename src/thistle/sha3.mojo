@@ -367,11 +367,7 @@ def sha3_512_hash_string(s: String) -> String:
     return bytes_to_hex(hash)
 
 
-@always_inline
-def shake_hash(rate_bits: Int, data: Span[UInt8, ...], output_len: Int) -> List[UInt8]:
-    var ctx = SHA3Context(rate_bits)
-    sha3_update(ctx, data)
-
+def shake_final(mut ctx: SHA3Context, output_len: Int) -> List[UInt8]:
     ctx.buffer[ctx.buffer_len] = 0x1F
     ctx.buffer_len += 1
 
@@ -404,6 +400,13 @@ def shake_hash(rate_bits: Int, data: Span[UInt8, ...], output_len: Int) -> List[
             keccak_f1600(ctx.state.ptr())
 
     return output^
+
+
+@always_inline
+def shake_hash(rate_bits: Int, data: Span[UInt8, ...], output_len: Int) -> List[UInt8]:
+    var ctx = SHA3Context(rate_bits)
+    sha3_update(ctx, data)
+    return shake_final(ctx, output_len)
 
 
 def shake128(data: Span[UInt8, ...], output_len_bytes: Int) -> List[UInt8]:
