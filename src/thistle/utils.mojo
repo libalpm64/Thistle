@@ -171,6 +171,10 @@ struct StackBuffer[T: Copyable & ImplicitlyDestructible, N: Int](Movable):
     def clear(mut self):
         self._len = 0
 
+    def set_len_unchecked(mut self, new_len: Int):
+        debug_assert(0 <= new_len <= Self.N, "StackBuffer set_len_unchecked out of bounds")
+        self._len = new_len
+
     def reset(mut self):
         self.clear()
 
@@ -185,5 +189,5 @@ struct StackBuffer[T: Copyable & ImplicitlyDestructible, N: Int](Movable):
     def ptr(mut self) -> UnsafePointer[Self.T, MutAnyOrigin]:
         return self._data.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
 
-    def const_ptr(ref self) -> UnsafePointer[Self.T, ImmutExternalOrigin]:
-        return self._data.unsafe_ptr().unsafe_origin_cast[ImmutExternalOrigin]()
+    def const_ptr(mut self) -> UnsafePointer[Self.T, MutAnyOrigin]:
+        return self.ptr()
