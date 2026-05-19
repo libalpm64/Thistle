@@ -287,7 +287,7 @@ def ntt(mut r: InlineArray[Int16, N]):
     comptime W = simd_width_of[DType.int16]()
     var ptr = r.unsafe_ptr()
 
-    comptime for stage in range(7)
+    comptime for stage in range(7):
         comptime l = 128 >> stage
         comptime blocks = N // (2 * l)
         comptime for block in range(blocks):
