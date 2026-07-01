@@ -4,7 +4,7 @@ from std.collections import List
 from std.sys import has_accelerator
 from thistle.sha2 import bytes_to_hex
 from thistle.aes import SBOX, expand_key_128, expand_key_192, expand_key_256
-from thistle.aes_gpu import aes_gpu_kernel_ecb, aes_gpu_kernel_ctr, aes_gpu_kernel_gcm, aes_gpu_kernel_xts
+from thistle.aes_gpu import aes_gpu_kernel_ecb, aes_gpu_kernel_ctr, aes_gpu_kernel_gcm
 from std.memory import alloc
 from std.gpu.host import DeviceContext
 from std.memory.unsafe_pointer import UnsafePointer
@@ -192,14 +192,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
         var round_keys_size: Int
         var round_keys: UnsafePointer[UInt32, MutAnyOrigin]
         
-        if "XTS" in mode:
-            key_ptr = alloc[UInt8](32)
-            for j in range(min(key_len, 32)):
-                key_ptr.store(j, key_bytes[j])
-            round_keys_size = 44
-            round_keys = expand_key_128(key_ptr)
-        else:
-            if key_len == 16:
+        if key_len == 16:
                 key_ptr = alloc[UInt8](16)
                 for j in range(16):
                     key_ptr.store(j, key_bytes[j])
@@ -304,66 +297,6 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
                 grid_dim=grid_dim,
                 block_dim=block_dim,
             )
-        elif "XTS" in mode:
-            var tweak_hex = String(tv.get("tweak", PythonObject()))
-            var tweak_ptr = alloc[UInt8](16)
-            if tweak_hex.byte_length() == 0:
-                for j in range(16):
-                    tweak_ptr[j] = 0
-            else:
-                var tweak_bytes = hex_to_bytes(tweak_hex)
-                for j in range(16):
-                    tweak_ptr.store(j, tweak_bytes[j])
-            
-            var key1_ptr: UnsafePointer[UInt8, MutAnyOrigin]
-            var key2_ptr: UnsafePointer[UInt8, MutAnyOrigin]
-            var xts_rounds: Int
-            
-            if key_len == 32:
-                key1_ptr = alloc[UInt8](16)
-                key2_ptr = alloc[UInt8](16)
-                for j in range(16):
-                    key1_ptr.store(j, key_bytes[j])
-                    key2_ptr.store(j, key_bytes[j + 16])
-                xts_rounds = 10
-            else:
-                key1_ptr = alloc[UInt8](32)
-                key2_ptr = alloc[UInt8](32)
-                for j in range(32):
-                    key1_ptr.store(j, key_bytes[j])
-                    key2_ptr.store(j, key_bytes[j + 32])
-                xts_rounds = 14
-            
-            var round_keys1 = expand_key_128(key1_ptr) if xts_rounds == 10 else expand_key_256(key1_ptr)
-            var round_keys2 = expand_key_128(key2_ptr) if xts_rounds == 10 else expand_key_256(key2_ptr)
-            
-            var round_keys1_size = 44 if xts_rounds == 10 else 60
-            var round_keys2_size = 44 if xts_rounds == 10 else 60
-            var round_keys1_buffer = ctx.enqueue_create_buffer[DType.uint32](round_keys1_size)
-            var round_keys2_buffer = ctx.enqueue_create_buffer[DType.uint32](round_keys2_size)
-            ctx.enqueue_copy(round_keys1_buffer, round_keys1)
-            ctx.enqueue_copy(round_keys2_buffer, round_keys2)
-            
-            var tweak_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
-            ctx.enqueue_copy(tweak_buffer, tweak_ptr)
-            ctx.synchronize()
-            
-            ctx.enqueue_function[aes_gpu_kernel_xts](
-                input_buffer.unsafe_ptr(),
-                output_buffer.unsafe_ptr(),
-                round_keys1_buffer.unsafe_ptr(),
-                round_keys2_buffer.unsafe_ptr(),
-                sbox_buffer.unsafe_ptr(),
-                n_blocks,
-                tweak_buffer.unsafe_ptr(),
-                xts_rounds,
-                grid_dim=grid_dim,
-                block_dim=block_dim,
-            )
-            round_keys1.free()
-            round_keys2.free()
-            key1_ptr.free()
-            key2_ptr.free()
         else:
             ctx.enqueue_function[aes_gpu_kernel_ecb](
                 input_buffer.unsafe_ptr(),
@@ -444,8 +377,7 @@ def main() raises:
         var json_data = load_json("tests/vectors/aes_test_vectors.json", py)
         var modes = ["AES-128-ECB", "AES-192-ECB", "AES-256-ECB", 
                      "AES-128-CTR", "AES-192-CTR", "AES-256-CTR",
-                     "AES-128-GCM", "AES-192-GCM", "AES-256-GCM",
-                     "AES-128-XTS", "AES-256-XTS"]
+                     "AES-128-GCM", "AES-192-GCM", "AES-256-GCM"]
         
         for mode in modes:
             print("Loading " + mode + " vectors...")

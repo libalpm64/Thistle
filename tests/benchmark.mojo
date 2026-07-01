@@ -288,7 +288,7 @@ def benchmark_aes_gpu_ecb() raises -> String:
         var block_dim = 256
         var grid_dim = ceildiv(num_blocks, block_dim)
         
-        ctx.enqueue_function[aes_gpu_kernel_ecb, aes_gpu_kernel_ecb](
+        ctx.enqueue_function[aes_gpu_kernel_ecb](
             input_buffer.unsafe_ptr(),
             output_buffer.unsafe_ptr(),
             round_keys_buffer.unsafe_ptr(),
@@ -303,7 +303,7 @@ def benchmark_aes_gpu_ecb() raises -> String:
         var iterations = 50
         var start = perf_counter()
         for _ in range(iterations):
-            ctx.enqueue_function[aes_gpu_kernel_ecb, aes_gpu_kernel_ecb](
+            ctx.enqueue_function[aes_gpu_kernel_ecb](
                 input_buffer.unsafe_ptr(),
                 output_buffer.unsafe_ptr(),
                 round_keys_buffer.unsafe_ptr(),
@@ -373,7 +373,7 @@ def benchmark_aes_gpu_ctr() raises -> String:
         var block_dim = 256
         var grid_dim = ceildiv(num_blocks, block_dim)
         
-        ctx.enqueue_function[aes_gpu_kernel_ctr, aes_gpu_kernel_ctr](
+        ctx.enqueue_function[aes_gpu_kernel_ctr](
             input_buffer.unsafe_ptr(),
             output_buffer.unsafe_ptr(),
             round_keys_buffer.unsafe_ptr(),
@@ -389,7 +389,7 @@ def benchmark_aes_gpu_ctr() raises -> String:
         var iterations = 50
         var start = perf_counter()
         for _ in range(iterations):
-            ctx.enqueue_function[aes_gpu_kernel_ctr, aes_gpu_kernel_ctr](
+            ctx.enqueue_function[aes_gpu_kernel_ctr](
                 input_buffer.unsafe_ptr(),
                 output_buffer.unsafe_ptr(),
                 round_keys_buffer.unsafe_ptr(),
@@ -415,6 +415,9 @@ def benchmark_aes_gpu_ctr() raises -> String:
         key_ptr.free()
         
         return "aes-128-gpu-ctr | throughput: " + String(gbps)[byte=:6] + " gb/s, iterations: " + String(iterations)
+
+
+
 
 
 def main() raises:

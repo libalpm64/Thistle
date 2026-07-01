@@ -6,13 +6,11 @@ AES-GPU implementation
 By Libalpm64 no attribution required.
 """
 
-from std.gpu import global_idx, thread_idx, block_dim, barrier
+from std.gpu import global_idx
 from std.memory import stack_allocation
 from std.memory import AddressSpace
 from std.memory.unsafe_pointer import UnsafePointer
 from std.utils import StaticTuple
-
-comptime MAX_WG_SIZE = 1024
 
 @always_inline
 def gpu_gf_mul2(a: UInt8) -> UInt8:
@@ -280,14 +278,6 @@ def incr_counter(mut counter: StaticTuple[UInt8, 16]) -> None:
         if carry == 0:
             break
 
-def xts_mul_alpha(tweak: UnsafePointer[UInt8, MutAnyOrigin]) -> None:
-    var high_bit = (tweak[15] & 0x80) != 0
-    for i in range(15, 0, -1):
-        tweak[i] = (tweak[i] << UInt8(1)) | (tweak[i - 1] >> UInt8(7))
-    tweak[0] = tweak[0] << UInt8(1)
-    if high_bit:
-        tweak[0] = tweak[0] ^ UInt8(0x87)
-
 @always_inline
 def aes_gpu_kernel_ecb(
     input_data: UnsafePointer[UInt8, MutAnyOrigin],
@@ -374,64 +364,4 @@ def aes_gpu_kernel_gcm(
     else:
         aes_encrypt_ctr[14](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch.address_space_cast[AddressSpace.GENERIC]())
 
-@always_inline
-def aes_gpu_kernel_xts(
-    input_data: UnsafePointer[UInt8, MutAnyOrigin],
-    output_data: UnsafePointer[UInt8, MutAnyOrigin],
-    round_keys_data1: UnsafePointer[UInt32, MutAnyOrigin],
-    round_keys_data2: UnsafePointer[UInt32, MutAnyOrigin],
-    sbox_buffer: UnsafePointer[UInt8, MutAnyOrigin],
-    n: Int,
-    tweak: UnsafePointer[UInt8, MutAnyOrigin],
-    rounds: Int,
-) -> None:
-    var tid = global_idx.x
-    if tid >= n:
-        return
-    var bp = input_data + tid * 16
-    var op = output_data + tid * 16
-    var local_tid = thread_idx.x
 
-    var wg_size = block_dim.x
-    var shared_tweaks = stack_allocation[MAX_WG_SIZE * 16, UInt8, address_space=AddressSpace.SHARED]()
-
-    var base_tweak = stack_allocation[16, UInt8, address_space=AddressSpace.LOCAL]()
-    if rounds == 10:
-        aes_encrypt_ecb[10](tweak, base_tweak.address_space_cast[AddressSpace.GENERIC](), round_keys_data2, sbox_buffer, 1)
-    elif rounds == 12:
-        aes_encrypt_ecb[12](tweak, base_tweak.address_space_cast[AddressSpace.GENERIC](), round_keys_data2, sbox_buffer, 1)
-    else:
-        aes_encrypt_ecb[14](tweak, base_tweak.address_space_cast[AddressSpace.GENERIC](), round_keys_data2, sbox_buffer, 1)
-
-    if local_tid == 0:
-        var cur_ptr = shared_tweaks
-        for j in range(16):
-            cur_ptr[j] = base_tweak[j]
-        var base_tid = global_idx.x
-        for _ in range(base_tid):
-            xts_mul_alpha(cur_ptr.address_space_cast[AddressSpace.GENERIC]())
-        for i in range(1, wg_size):
-            var prev_ptr = cur_ptr
-            cur_ptr = shared_tweaks + i * 16
-            for j in range(16):
-                cur_ptr[j] = prev_ptr[j]
-            xts_mul_alpha(cur_ptr.address_space_cast[AddressSpace.GENERIC]())
-
-    barrier()
-
-    var my_tweak = shared_tweaks + local_tid * 16
-
-    var tmp = stack_allocation[16, UInt8, address_space=AddressSpace.LOCAL]()
-    for j in range(16):
-        tmp[j] = bp[j] ^ my_tweak[j]
-
-    var enc_tmp = stack_allocation[16, UInt8, address_space=AddressSpace.LOCAL]()
-    if rounds == 10:
-        aes_encrypt_ecb[10](tmp.address_space_cast[AddressSpace.GENERIC](), enc_tmp.address_space_cast[AddressSpace.GENERIC](), round_keys_data1, sbox_buffer, 1)
-    elif rounds == 12:
-        aes_encrypt_ecb[12](tmp.address_space_cast[AddressSpace.GENERIC](), enc_tmp.address_space_cast[AddressSpace.GENERIC](), round_keys_data1, sbox_buffer, 1)
-    else:
-        aes_encrypt_ecb[14](tmp.address_space_cast[AddressSpace.GENERIC](), enc_tmp.address_space_cast[AddressSpace.GENERIC](), round_keys_data1, sbox_buffer, 1)
-
-    for j in range(16):
-        op[j] = enc_tmp[j] ^ my_tweak[j]
