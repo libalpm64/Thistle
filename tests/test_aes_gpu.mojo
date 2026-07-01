@@ -238,6 +238,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
         else:
             rounds = 14
         
+        var nonce_ptr = alloc[UInt8](16)
         if "ECB" in mode:
             ctx.enqueue_function[aes_gpu_kernel_ecb](
                 input_buffer.unsafe_ptr(),
@@ -251,7 +252,6 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
             )
         elif "CTR" in mode:
             var iv_hex = String(tv.get("iv", PythonObject()))
-            var nonce_ptr = alloc[UInt8](16)
             if iv_hex.byte_length() == 0:
                 for j in range(16):
                     nonce_ptr[j] = 0
@@ -275,7 +275,6 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
             )
         elif "GCM" in mode:
             var nonce_hex = String(tv.get("nonce", PythonObject()))
-            var nonce_ptr = alloc[UInt8](12)
             if nonce_hex.byte_length() == 0:
                 for j in range(12):
                     nonce_ptr[j] = 0
@@ -338,6 +337,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
         round_keys.free()
         pt_ptr.free()
         ct_ptr.free()
+        nonce_ptr.free()
     
     return TestResult(passed, failed, failures^)
 
