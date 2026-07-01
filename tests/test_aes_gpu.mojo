@@ -116,7 +116,7 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
             var block_dim = 1
             var grid_dim = 4
             
-            ctx.enqueue_function[aes_gpu_kernel_ecb, aes_gpu_kernel_ecb](
+            ctx.enqueue_function[aes_gpu_kernel_ecb](
                 input_buffer.unsafe_ptr(),
                 output_buffer.unsafe_ptr(),
                 round_keys_buffer.unsafe_ptr(),
@@ -246,7 +246,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
             rounds = 14
         
         if "ECB" in mode:
-            ctx.enqueue_function[aes_gpu_kernel_ecb, aes_gpu_kernel_ecb](
+            ctx.enqueue_function[aes_gpu_kernel_ecb](
                 input_buffer.unsafe_ptr(),
                 output_buffer.unsafe_ptr(),
                 round_keys_buffer.unsafe_ptr(),
@@ -269,7 +269,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
             
             var nonce_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
             ctx.enqueue_copy(nonce_buffer, nonce_ptr)
-            ctx.enqueue_function[aes_gpu_kernel_ctr, aes_gpu_kernel_ctr](
+            ctx.enqueue_function[aes_gpu_kernel_ctr](
                 input_buffer.unsafe_ptr(),
                 output_buffer.unsafe_ptr(),
                 round_keys_buffer.unsafe_ptr(),
@@ -293,7 +293,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
             
             var nonce_buffer = ctx.enqueue_create_buffer[DType.uint8](12)
             ctx.enqueue_copy(nonce_buffer, nonce_ptr)
-            ctx.enqueue_function[aes_gpu_kernel_gcm, aes_gpu_kernel_gcm](
+            ctx.enqueue_function[aes_gpu_kernel_gcm](
                 input_buffer.unsafe_ptr(),
                 output_buffer.unsafe_ptr(),
                 round_keys_buffer.unsafe_ptr(),
@@ -348,7 +348,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
             ctx.enqueue_copy(tweak_buffer, tweak_ptr)
             ctx.synchronize()
             
-            ctx.enqueue_function[aes_gpu_kernel_xts, aes_gpu_kernel_xts](
+            ctx.enqueue_function[aes_gpu_kernel_xts](
                 input_buffer.unsafe_ptr(),
                 output_buffer.unsafe_ptr(),
                 round_keys1_buffer.unsafe_ptr(),
@@ -365,7 +365,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
             key1_ptr.free()
             key2_ptr.free()
         else:
-            ctx.enqueue_function[aes_gpu_kernel_ecb, aes_gpu_kernel_ecb](
+            ctx.enqueue_function[aes_gpu_kernel_ecb](
                 input_buffer.unsafe_ptr(),
                 output_buffer.unsafe_ptr(),
                 round_keys_buffer.unsafe_ptr(),
