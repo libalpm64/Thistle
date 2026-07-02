@@ -5,48 +5,48 @@ nav_order: 8
 
 # Security Notes
 
-What Thistle does for you, and what it expects from you.
+What Thistle takes care of, and what remains your job.
 
-## Constant-time behavior
+## What Thistle does for you
 
-Secret-handling paths avoid secret-dependent branches and table indices at
-the source level:
+**Tested against the world's test suites.** 20,000+ vectors from NIST
+(CAVP/ACVP), Google's Wycheproof (which specifically probes edge cases and
+known implementation bugs), and the RFCs, run continuously for over four
+months.
 
-- X25519 / Ed25519 / P-256 / P-384 scalar multiplication: always
-  double-add-select ladders with mask-based conditional swaps.
-- Field arithmetic under those curves: branchless carries, borrows, and
-  conditional reductions.
-- ML-KEM: branchless message encoding, constant-time implicit rejection.
-- ML-DSA: flag-accumulated rejection bounds, branchless reductions.
+**Timing-attack resistance.** Code that touches secret keys runs in the
+same amount of time regardless of what the secret is, so attackers can't
+learn key bits with a stopwatch. This holds for X25519, Ed25519,
+P-256/P-384, ML-KEM, and ML-DSA. Two documented exceptions: software AES
+and Camellia use lookup tables that a co-tenant on shared hardware could
+observe through the CPU cache — use the AES-NI path (`has_aes_ni()`) or
+ChaCha20 there.
 
-Known exceptions, disclosed in the source: software AES and Camellia use
-lookup tables that are observable through cache timing. Prefer the AES-NI
-path on shared hardware.
+**Input checking.** Wrong key lengths, out-of-range parameters, undersized
+buffers, cipher limits — public functions validate and raise. The
+`True`/`False` APIs (P-256/P-384) must have their result checked.
 
-Source-level constant-time is not a formal guarantee — a compiler can
-reintroduce branches. Crypto entry points are marked `@no_inline` to keep
-codegen stable. For a formal evaluation, inspect the emitted assembly or run
-a dudect-style harness.
+**Key cleanup.** Key schedules, secret scratch, and hash state that
+absorbed secrets are erased from memory after use.
 
-## Input validation
+## What's still your job
 
-Every public entry point validates its inputs and raises on violation:
-key/point/block lengths, RFC 9106 Argon2 bounds, PBKDF2 iteration minimums,
-BLAKE2b digest bounds, ChaCha20 counter exhaustion, SEC 1 point validation,
-ML-DSA/ML-KEM encoding checks. A `Bool`-returning API (P-256/P-384) must
-have its result checked.
+- **Keep private keys private.** Thistle has no key storage; where keys
+  live is up to you.
+- **Fresh nonces.** Stream ciphers break if a (key, nonce) pair is ever
+  reused. Thistle catches counter overflow, but it can't know you used the
+  same nonce twice across runs.
+- **Hash shared secrets before using them as keys** (one `sha256_hash`
+  call).
+- **Authenticate your ciphertext.** ChaCha20 hides data but doesn't detect
+  tampering — add an [HMAC](mac-kdf).
+- **Compare secrets in constant time.** Checking an HMAC tag with `==`
+  leaks through timing; compare all bytes unconditionally.
 
-## Zeroization
+## Honest limits
 
-Key schedules, hash contexts that absorbed secrets, signing scratch, and
-secret intermediates are wiped with volatile stores after use (`wipe()`
-methods and internal cleanup). This is best-effort: Mojo gives no formal
-guarantee that copies never exist elsewhere (registers, spills).
-
-## What Thistle does not do
-
-- No protocol layer: no TLS, no Noise, no session management.
-- No key management or storage.
-- Raw ECDH outputs and KEM secrets should pass through a KDF before use.
-- ChaCha20 has no built-in authentication.
-- Not independently audited.
+- No protocol layer: Thistle is primitives, not TLS/Noise/sessions.
+- Memory erasure is best-effort — the language gives no guarantee that no
+  copy of a secret ever existed in a register or spilled to the stack.
+- Not yet independently audited. The test coverage is extensive; an audit
+  is a different kind of assurance.

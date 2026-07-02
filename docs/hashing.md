@@ -5,58 +5,91 @@ nav_order: 2
 
 # Hashing
 
-All one-shot hash functions take a `Span[UInt8, ...]` and return a
-`List[UInt8]` digest.
+A hash turns any amount of data into a short, fixed-size fingerprint. The
+same input always gives the same fingerprint, and no two different inputs
+should ever share one. Use it to check files for corruption, deduplicate
+data, or build integrity checks.
 
-## SHA-2 / SHA-3
+**Which one?** Use **BLAKE3** when you just need a fast, modern hash. Use
+**SHA-256** when you need compatibility with other systems (it's the world's
+default). The others exist for protocols that require them.
+
+## Hash a string
 
 ```mojo
-from thistle import sha224_hash, sha256_hash, sha384_hash, sha512_hash
-from thistle import sha3_224, sha3_256, sha3_384, sha3_512, shake128, shake256
+from thistle import sha256_hash, sha3_256, blake3_hash, blake2b_hash
 
-var digest = sha256_hash(data)          # 32 bytes
-var wide = sha512_hash(data)            # 64 bytes
-var xof = shake256(data, 100)           # arbitrary output length
+def main() raises:
+    var message = String("abc").as_bytes()
+
+    var a = sha256_hash(message)    # 32 bytes
+    var b = sha3_256(message)       # 32 bytes
+    var c = blake3_hash(message)    # 32 bytes
+    var d = blake2b_hash(message)   # 64 bytes
 ```
 
-Streaming SHA-2 via contexts:
+For `"abc"` these produce (in hex):
+
+| Function | Result |
+|---|---|
+| `sha256_hash` | `ba7816bf8f01cfea...b410ff61f20015ad` |
+| `sha3_256` | `3a985da74fe225b2...5b46bfe24511431532` |
+| `blake3_hash` | `6437b3ac38465133...fd359c6cd5bd9d85` |
+
+If your output matches these, everything is working.
+
+## Hash a large file fast
+
+`blake3_parallel_hash` splits the work across CPU cores — around 10 GB/s on
+a modern laptop:
+
+```mojo
+from thistle import blake3_parallel_hash
+
+var digest = blake3_parallel_hash(big_data)   # same result as blake3_hash
+```
+
+`sha256ni_hash` is SHA-256 using your CPU's dedicated hash instructions
+(4-5x faster than plain code). It gives byte-identical results to
+`sha256_hash` on every machine — CPUs without the instructions fall back
+automatically:
+
+```mojo
+from thistle import sha256ni_hash
+
+var digest = sha256ni_hash(data)
+```
+
+## Hash data that arrives in pieces
+
+If you can't hold everything in memory at once, feed it in chunks:
 
 ```mojo
 from thistle import SHA256Context
 from thistle.sha2 import sha256_update, sha256_final_to_buffer
 
 var ctx = SHA256Context()
-sha256_update(ctx, part1)
-sha256_update(ctx, part2)
-var out = InlineArray[UInt8, 32](uninitialized=True)
-sha256_final_to_buffer(ctx, out.unsafe_ptr())
+sha256_update(ctx, chunk1)
+sha256_update(ctx, chunk2)
+var digest = InlineArray[UInt8, 32](uninitialized=True)
+sha256_final_to_buffer(ctx, digest.unsafe_ptr())
 ```
 
-`SHA512Context.wipe()` volatile-clears the context if it absorbed secret
-input.
+## Variable-length output
 
-## Hardware SHA-256
-
-`sha256ni_hash` uses the SHA extensions on x86 (SHA-NI) and ARMv8 (Apple
-Silicon and other ARM crypto-extension CPUs), roughly 4-5x the scalar
-throughput. On CPUs without the extension it transparently falls back to the
-scalar transform, so it is always correct:
+SHAKE lets you ask for as many output bytes as you want:
 
 ```mojo
-from thistle import sha256ni_hash, has_sha_ni
+from thistle import shake256
 
-var digest = sha256ni_hash(data)   # same output as sha256_hash, faster
+var out = shake256(data, 100)   # any length you like
 ```
 
-## BLAKE2b / BLAKE3
+## Common mistakes
 
-```mojo
-from thistle import blake2b_hash, blake2b_hash_keyed, blake3_hash, blake3_parallel_hash
-
-var d = blake2b_hash(data)                 # out_len 1..64, default 64; raises otherwise
-var mac = blake2b_hash_keyed(data, key)    # key up to 64 bytes
-var b3 = blake3_hash(data)                 # out_len default 32, any length
-var big = blake3_parallel_hash(data)       # multi-threaded for large inputs (~10 GB/s)
-```
-
-Streaming BLAKE3 uses the `Hasher` struct from `thistle`.
+- **Don't hash passwords with these.** Plain hashes are fast — which means
+  attackers can guess billions of passwords per second. Use
+  [Argon2id](mac-kdf) instead.
+- **A hash is not a signature.** Anyone can compute a hash of tampered data.
+  If you need to prove *who* produced data, you want an
+  [HMAC](mac-kdf) or a [signature](curves).

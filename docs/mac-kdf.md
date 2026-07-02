@@ -1,50 +1,84 @@
 ---
-title: MACs & Key Derivation
+title: Passwords & Keys
 nav_order: 3
 ---
 
-# MACs & Key Derivation
+# Passwords & Keys
 
-## HMAC
+Two everyday jobs live here: storing passwords so a database leak doesn't
+expose them, and proving a message wasn't tampered with by someone who
+doesn't know your key.
+
+## Store a password (Argon2id)
+
+Never store passwords, and never store plain hashes of them either. Argon2id
+is deliberately slow and memory-hungry, so guessing attacks cost real money.
+It's the current best practice.
 
 ```mojo
-from thistle import hmac_sha256, hmac_sha512
+from thistle import argon2id_hash_string
 
-var tag = hmac_sha256(key, message)   # 32 bytes
-var tag2 = hmac_sha512(key, message)  # 64 bytes
+def main() raises:
+    # store this string in your database instead of the password
+    var stored = argon2id_hash_string("hunter2", "somesalt16bytes!")
+
+    # at login: recompute with the same salt and compare
+    var attempt = argon2id_hash_string("hunter2", "somesalt16bytes!")
+    var ok = attempt == stored
 ```
 
-Keys longer than the block size are hashed first, per RFC 2104. When
-comparing tags, use a constant-time comparison — never `==` on the raw lists.
+The salt should be random and unique per user — 16 bytes from
+[`random_bytes`](random) is right. Store it next to the hash; it is not a
+secret.
 
-## PBKDF2
-
-```mojo
-from thistle import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
-
-var dk = pbkdf2_hmac_sha256(password, salt, 600_000, 32)
-```
-
-Raises if `iterations < 1` or `dkLen < 1`. Pick iteration counts from the
-current OWASP guidance (600k+ for SHA-256).
-
-## Argon2id
-
-The recommended password hash. Parameters are validated against RFC 9106 and
-raise on violation (parallelism in [1, 2^24), tag length >= 4, memory >= 8 x
-parallelism KiB, iterations >= 1).
+Need more control (memory cost, iterations, output length)?
 
 ```mojo
-from thistle import Argon2id, argon2id_hash_string
+from thistle import Argon2id
 
-# full control
 var ctx = Argon2id(salt, parallelism=4, tag_length=32,
                    memory_size_kb=65536, iterations=3)
 var hash = ctx.hash(password)
-
-# one-liner with defaults, hex output
-var hex = argon2id_hash_string("hunter2", "somesalt16bytes!")
 ```
 
-A second constructor accepts `secret` (pepper) and `ad` (associated data)
-spans before the keyword parameters.
+Out-of-range parameters raise an error instead of quietly weakening the
+hash.
+
+## Prove a message wasn't tampered with (HMAC)
+
+An HMAC is a hash that only someone holding the key can compute. Send the
+tag along with the message; the receiver recomputes it with the shared key
+and compares.
+
+```mojo
+from thistle import hmac_sha256
+
+def main() raises:
+    var key = String("my secret key").as_bytes()
+    var message = String("abc").as_bytes()
+
+    var tag = hmac_sha256(key, message)   # 32 bytes, send with the message
+```
+
+When comparing a received tag with your own, compare **every byte** rather
+than stopping at the first difference, so timing doesn't leak how close a
+forgery got.
+
+## Turn a password into an encryption key (PBKDF2)
+
+Encryption needs a random-looking key, and "hunter2" isn't one. PBKDF2
+stretches a password into key material:
+
+```mojo
+from thistle import pbkdf2_hmac_sha256
+
+def main() raises:
+    var password = String("correct horse battery staple").as_bytes()
+    var salt = random_bytes(16)
+
+    var key = pbkdf2_hmac_sha256(password, Span[UInt8, ...](salt), 600_000, 32)
+```
+
+600,000 iterations is the current OWASP recommendation. Fewer than 1 raises
+an error. If you're choosing fresh today and don't need PBKDF2
+compatibility, prefer Argon2id for this job too.
