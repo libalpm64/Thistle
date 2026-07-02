@@ -9,8 +9,11 @@ Symmetric encryption scrambles data with a key; the same key unscrambles
 it. Both sides must already share the key — see
 [Signatures & Key Exchange](curves) for how two parties get one.
 
-**Which one?** Use **ChaCha20** unless you have a specific reason not to.
-It's fast everywhere, and its implementation has no timing side channels.
+**Which one?** **ChaCha20**, unless a spec forces AES. Its ARX design is
+inherently bitsliced — additions, rotations, XORs, no lookup tables — which
+makes it immune to cache-timing attacks by construction, where AES needs
+hardware support (AES-NI) or careful bitslicing to get the same property.
+It's also faster than software AES on CPUs.
 
 ## Encrypt and decrypt with ChaCha20
 

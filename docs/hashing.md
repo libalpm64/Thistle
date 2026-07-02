@@ -10,9 +10,9 @@ same input always gives the same fingerprint, and no two different inputs
 should ever share one. Use it to check files for corruption, deduplicate
 data, or build integrity checks.
 
-**Which one?** Use **BLAKE3** when you just need a fast, modern hash. Use
-**SHA-256** when you need compatibility with other systems (it's the world's
-default). The others exist for protocols that require them.
+**Which one?**
+**BLAKE3** Incredibly fast parallel hashing algorithim.
+**SHA-256** when you need compatibility with older systems.
 
 ## Hash a string
 
@@ -49,10 +49,11 @@ from thistle import blake3_parallel_hash
 var digest = blake3_parallel_hash(big_data)   # same result as blake3_hash
 ```
 
-`sha256ni_hash` is SHA-256 using your CPU's dedicated hash instructions
-(4-5x faster than plain code). It gives byte-identical results to
-`sha256_hash` on every machine — CPUs without the instructions fall back
-automatically:
+`sha256ni_hash` compiles to the dedicated SHA instructions — `sha256rnds2`
+/ `sha256msg1/2` on x86 (SHA-NI), `sha256h/h2/su0/su1` on ARMv8 (Apple
+Silicon and other CPUs with the crypto extension) — via LLVM intrinsics,
+selected at compile time. Roughly 4-5x scalar throughput, byte-identical
+output, and a scalar fallback on CPUs without the extension:
 
 ```mojo
 from thistle import sha256ni_hash

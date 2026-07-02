@@ -5,26 +5,32 @@ nav_order: 7
 
 # Random Numbers
 
-Every key on this site starts as random bytes. Cryptographic randomness has
-to come from the operating system's secure generator — not from timestamps,
-not from `rand()`.
+`thistle.random` is the CSPRNG interface: it pulls entropy straight from
+the kernel, which fuses hardware sources (RDRAND/RNDR), interrupt timing,
+and other OS-collected input.
 
 ```mojo
 from thistle import random_bytes, random_fill
 
 def main() raises:
-    var key = random_bytes(32)      # a fresh 32-byte key
-    var nonce = random_bytes(12)    # a fresh nonce
+    var key = random_bytes(32)
+    var nonce = random_bytes(12)
 
     # or fill a buffer you already own
     random_fill(buf.unsafe_ptr(), 64)
 ```
 
-That's the whole API. Under the hood it calls the kernel directly
-(`getrandom` on Linux, `getentropy` on macOS) and raises if the kernel
-reports a failure. On platforms without a secure source, the code refuses
-to compile rather than substitute something weak.
+Implementation details that matter:
 
-If you need reproducible "randomness" for simulations or tests, that's a
-different tool — use `std.random`, never this module, and never the other
-way around.
+- Raw syscalls — `getrandom(2)` on Linux, `getentropy(2)` on macOS. No
+  `/dev/urandom` file descriptor to exhaust, race, or have redirected in a
+  sandbox.
+- Failures raise; short reads are retried; platforms without a secure
+  source fail at **compile time** rather than falling back to something
+  weak.
+
+**When to use what:** for keys, nonces, salts, and anything an attacker
+must not predict, use this module. For bulk non-secret randomness where
+throughput matters (simulations, fuzzing, shuffling), use a PRNG like
+`std.random` — it's orders of magnitude faster and reproducibility is a
+feature there, not a bug.

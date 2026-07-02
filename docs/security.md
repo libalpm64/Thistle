@@ -10,9 +10,8 @@ What Thistle takes care of, and what remains your job.
 ## What Thistle does for you
 
 **Tested against the world's test suites.** 20,000+ vectors from NIST
-(CAVP/ACVP), Google's Wycheproof (which specifically probes edge cases and
-known implementation bugs), and the RFCs, run continuously for over four
-months.
+(CAVP/ACVP) and Google's Wycheproof, which specifically probes edge cases
+and known implementation bugs.
 
 **Timing-attack resistance.** Code that touches secret keys runs in the
 same amount of time regardless of what the secret is, so attackers can't
