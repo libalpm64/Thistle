@@ -1,10 +1,3 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
-"""
-Curve25519 implementation
-By Libalpm64
-"""
 from std.builtin.dtype import DType
 from std.collections import InlineArray
 

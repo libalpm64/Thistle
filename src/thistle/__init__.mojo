@@ -1,7 +1,4 @@
-# ===----------------------------------------------------------------------=== #
-# Thistle Cryptography Library
-# Primary API Entry Point
-# ===----------------------------------------------------------------------=== #
+# Thistle public API
 
 from . import fips
 from .aes import AESKey, expand_key_128, expand_key_192, expand_key_256, SBOX, ROUNDS_128
@@ -27,5 +24,5 @@ from .ml_kem import mlkem512_keygen, mlkem768_keygen, mlkem1024_keygen
 from .ml_kem import mlkem512_encaps, mlkem768_encaps, mlkem1024_encaps
 from .ml_kem import mlkem512_decaps, mlkem768_decaps, mlkem1024_decaps
 
-comptime VERSION = "1.0.3"
+comptime VERSION = "1.0.4"
 comptime AUTHOR = "Libalpm64, Lostlab Technologies"

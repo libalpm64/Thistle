@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 NIST P-256 / secp256r1 implementation.
-By libalpm64, no attribution required.
 """
 
 comptime P256_SIZE = 32
@@ -490,7 +486,6 @@ def _select_u256(a: U256, b: U256, choice: UInt64) -> U256:
 def _select_jacobian(
     a: P256JacobianPoint, b: P256JacobianPoint, choice: UInt64
 ) -> P256JacobianPoint:
-    # infinity flag is not used on the constant-time path
     var infinity = a.infinity
     if choice != 0:
         infinity = b.infinity
@@ -540,7 +535,6 @@ def _select_jacobian_ct(
 
 @always_inline
 def _mul_small_mod(x: U256, c: UInt64) -> U256:
-    # c is a public formula constant, doubling chains are fine
     if c == 2:
         return _add_mod(x, x, _p())
     if c == 3:
@@ -559,7 +553,7 @@ def _mul_small_mod(x: U256, c: UInt64) -> U256:
 
 
 def _is_on_curve(point: P256Point) -> Bool:
-    # cofactor-1 short Weierstrass curves validation for pub keys
+    # SEC 1 public key validation
     if point.infinity:
         return False
     if _cmp(point.x, _p()) >= 0 or _cmp(point.y, _p()) >= 0:
@@ -573,7 +567,6 @@ def _is_on_curve(point: P256Point) -> Bool:
 
 
 def _jacobian_double_ct(p: P256JacobianPoint) -> P256JacobianPoint:
-    # EFD shortw/jacobian-3 doubling, a = -3; scalar-core infinity is Z == 0.
     var delta = _square_mod(p.z, _p())
     var gamma = _square_mod(p.y, _p())
     var beta = _mul_mod(p.x, gamma, _p())

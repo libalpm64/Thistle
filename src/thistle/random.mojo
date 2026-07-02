@@ -20,8 +20,7 @@ def _getrandom_linux_x86(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) -
 @always_inline
 def _getrandom_linux_arm(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) -> Int:
     # Linux aarch64: getrandom(buf, len, flags=0), syscall 278.
-    # Put inputs in scratch registers first, then move them into the syscall ABI
-    # registers inside the asm block. This avoids fixed input/output conflicts.
+    # inputs go via scratch registers to avoid asm constraint conflicts
     return Int(
         inlined_assembly[
             """

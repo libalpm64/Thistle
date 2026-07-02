@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 AES-GPU implementation
-By Libalpm64 no attribution required.
 """
 
 from std.gpu import global_idx

@@ -1,10 +1,6 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 SHA-3 (Keccak) + shake128/shake256 Implementation in Mojo
 FIPS 202
-By Libalpm64, Attribute not required.
 """
 
 from std.collections import List

@@ -9,8 +9,6 @@ from std.memory import alloc
 from std.gpu.host import DeviceContext
 from std.memory.unsafe_pointer import UnsafePointer
 
-# This is a test file this is only for testing purposes.
-# This file will be removed later on.
 
 def byte_to_hex(b: UInt8) -> String:
     var hi = Int(b >> 4)

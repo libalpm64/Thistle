@@ -1,10 +1,6 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 BLAKE2b Implementation in Mojo
 RFC 7693
-By Libalpm64, Attribute not required.
 """
 
 from std.collections import List

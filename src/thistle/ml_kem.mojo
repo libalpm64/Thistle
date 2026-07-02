@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 ML-KEM primitives implementation in Mojo
-By Libalpm64, no attribution required.
 """
 
 from std.collections import List
@@ -1672,9 +1668,7 @@ def mlkem_keygen_seed(seed: Span[UInt8, ...], parameter_set: String) raises -> T
     return (ek^, dk^)
 
 
-# FIPS 203 external ML-KEM.KeyGen().
-# Generates fresh d || z inside the cryptographic module, then calls the
-# deterministic internal seed expansion used by KATs and test vectors.
+# FIPS 203 ML-KEM.KeyGen(): fresh d || z, then deterministic expansion.
 def mlkem_keygen(parameter_set: String) raises -> Tuple[List[UInt8], List[UInt8]]:
     var seed = random_bytes(2 * SYMBYTES)
     var result = mlkem_keygen_seed(Span[UInt8, ...](seed), parameter_set)
@@ -1733,10 +1727,7 @@ def mlkem1024_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
     return (ek^, dk^)
 
 
-# FIPS 203 external ML-KEM.Encaps().
-# Generates fresh m inside the cryptographic module, then calls the
-# deterministic/internal encapsulation used by KATs and test vectors.
-# Return order follows the external KEM API: (ciphertext, shared_secret, ok).
+# FIPS 203 ML-KEM.Encaps(): fresh m, returns (ciphertext, shared_secret, ok).
 def mlkem_encaps(ek_bytes: Span[UInt8, ...], parameter_set: String) raises -> Tuple[List[UInt8], List[UInt8], Bool]:
     var m = random_bytes(SYMBYTES)
     var result = mlkem_encaps_seed(ek_bytes, Span[UInt8, ...](m), parameter_set)

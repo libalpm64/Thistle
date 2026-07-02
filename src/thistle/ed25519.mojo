@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 Ed25519 implementation
-By Libalpm64, no attribution required.
 """
 from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
@@ -318,8 +314,7 @@ def edwards_negate(p: EdwardsPoint) -> EdwardsPoint:
 
 @always_inline
 def _ct_select_fe(a: FieldElement51, b: FieldElement51, choice: UInt8) -> FieldElement51:
-    # Constant-time select: returns choice ? b : a using XOR/mask.
-    # Todo: Verify optimized backend code for release targets.
+    # constant-time select via mask
     var mask = UInt64(0) - UInt64(choice)
     var limbs = SIMD[DType.uint64, 5](0, 0, 0, 0, 0)
     for i in range(5):
@@ -448,7 +443,7 @@ def edwards_decode_checked(data: Span[UInt8, ...]) -> DecodeResult:
     return edwards_decode(data, strict=True)
 
 def edwards_decode_verify_compatible(data: Span[UInt8, ...]) -> DecodeResult:
-    # RFC verification decode, no ZIP-215 decoding (relaxed decoding not allowed under RFC strictnes).
+    # strict RFC decoding only, no ZIP-215
     return edwards_decode(data, strict=True)
 
 @no_inline
@@ -540,7 +535,7 @@ def _scalar_mult_base(k: Span[UInt8, ...]) -> EdwardsPoint:
 @no_inline
 def ed25519_generate_public_key(private_key: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]) raises:
     # RFC 8032 5.1.5: public key A = [pruned SHA512(secret)]B.
-    if len(private_key) < 32:
+    if len(private_key) != 32:
         raise Error("Ed25519 private key must be 32 bytes")
     var hash = InlineArray[UInt8, 64](uninitialized=True)
     var ctx = SHA512Context()
@@ -565,7 +560,7 @@ def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...], outpu
     # RFC 8032 5.1.6 pure Ed25519:
     # r = SHA512(prefix || M), R = [r]B,
     # k = SHA512(R || A || M), S = r + k*s mod L.
-    if len(private_key) < 32:
+    if len(private_key) != 32:
         raise Error("Ed25519 private key must be 32 bytes")
     var hash = InlineArray[UInt8, 64](uninitialized=True)
     var ctx = SHA512Context()

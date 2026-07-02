@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 X25519 implementation
-By Libalpm64
 """
 
 from .curve25519 import FieldElement51
@@ -43,10 +39,7 @@ def x25519(scalar_in: Span[UInt8, ...], point: Span[UInt8, ...], output: UnsafeP
     scalar[31] |= 64
 
     var u = FieldElement51.from_bytes_span(point)
-    # RFC 7748 Section 5: X25519 masks the most significant bit of the
-    # received u-coordinate. FieldElement51.from_bytes_span already masks this
-    # bit through the 51-bit top limb mask; keep it explicit here at the X25519
-    # boundary so the protocol rule is not hidden inside field decoding.
+    # RFC 7748: mask the top bit of the u-coordinate (kept explicit here)
     u.limbs[4] &= (UInt64(1) << UInt64(51)) - UInt64(1)
 
     var x_1 = u

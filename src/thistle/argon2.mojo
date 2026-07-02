@@ -1,10 +1,6 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 Argon2id/Argon2d Implementation in Mojo
 RFC 9106
-By Libalpm64 no attribution required.
 """
 
 from std.collections import List
@@ -393,12 +389,12 @@ def _validate_params(parallelism: Int, tag_length: Int, memory_size_kb: Int, ite
     # RFC 9106 section 3 parameter bounds
     if parallelism < 1 or parallelism >= (1 << 24):
         raise Error("Argon2 parallelism must be in [1, 2^24)")
-    if tag_length < 4:
-        raise Error("Argon2 tag length must be at least 4")
-    if memory_size_kb < 8 * parallelism:
-        raise Error("Argon2 memory must be at least 8*parallelism KiB")
-    if iterations < 1:
-        raise Error("Argon2 iterations must be at least 1")
+    if tag_length < 4 or tag_length >= (1 << 32):
+        raise Error("Argon2 tag length must be in [4, 2^32)")
+    if memory_size_kb < 8 * parallelism or memory_size_kb >= (1 << 32):
+        raise Error("Argon2 memory must be in [8*parallelism, 2^32) KiB")
+    if iterations < 1 or iterations >= (1 << 32):
+        raise Error("Argon2 iterations must be in [1, 2^32)")
 
 
 struct Argon2id:

@@ -1,10 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 AES CPU implementation
-By Libalpm64 no attribution required.
-Work in progress.
 """
 
 from std.memory import alloc

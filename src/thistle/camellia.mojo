@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 Camellia block cipher implementation per RFC 3713
-By Libalpm no attribution required
 """
 
 from std.memory import bitcast, UnsafePointer

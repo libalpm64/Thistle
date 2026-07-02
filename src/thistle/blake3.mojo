@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies, Martinyuvk.
-
 """
 BLAKE3 cryptographic hash function
-By Libalpm64, Martinvuyk no attribution required.
 """
 
 from std.algorithm import parallelize
@@ -180,24 +176,6 @@ def compress_internal[
     )
 
 @always_inline
-def g_vertical(
-    mut a: SIMD[DType.uint32, 8],
-    mut b: SIMD[DType.uint32, 8],
-    mut c: SIMD[DType.uint32, 8],
-    mut d: SIMD[DType.uint32, 8],
-    x: SIMD[DType.uint32, 8],
-    y: SIMD[DType.uint32, 8],
-):
-    a = a + b + x
-    d = bit_rotr[16, 8](d ^ a)
-    c = c + d
-    b = bit_rotr[12, 8](b ^ c)
-    a = a + b + y
-    d = bit_rotr[8, 8](d ^ a)
-    c = c + d
-    b = bit_rotr[7, 8](b ^ c)
-
-@always_inline
 def compress_core(
     cv: SIMD[DType.uint32, 8],
     block: SIMD[DType.uint32, 16],
@@ -316,9 +294,7 @@ def compress_parallel_8(
         for v_idx in range(len(_v_idxes_arr)):
             comptime v_i = _v_idxes_arr[v_idx]
             comptime m_i = round_idxes[v_idx]
-            g_vertical(
-                v[v_i[0]], v[v_i[1]], v[v_i[2]], v[v_i[3]], m[m_i[0]], m[m_i[1]]
-            )
+            g_idx[8, v_i[0], v_i[1], v_i[2], v_i[3]](v, m[m_i[0]], m[m_i[1]])
 
     out_ptr[0] = v[0] ^ v[8]
     out_ptr[1] = v[1] ^ v[9]
@@ -395,12 +371,8 @@ def compress_parallel_16_per_lane(
         for v_idx in range(len(_v_idxes_arr)):
             comptime v = _v_idxes_arr[v_idx]
             comptime m_i = round_idxes[v_idx]
-            g_vertical(
-                va[v[0]], va[v[1]], va[v[2]], va[v[3]], ma[m_i[0]], ma[m_i[1]]
-            )
-            g_vertical(
-                vb[v[0]], vb[v[1]], vb[v[2]], vb[v[3]], mb[m_i[0]], mb[m_i[1]]
-            )
+            g_idx[8, v[0], v[1], v[2], v[3]](va, ma[m_i[0]], ma[m_i[1]])
+            g_idx[8, v[0], v[1], v[2], v[3]](vb, mb[m_i[0]], mb[m_i[1]])
 
     var res_a: StackInlineArray[SIMD[DType.uint32, 8], 8] = [
         va[0] ^ va[8],

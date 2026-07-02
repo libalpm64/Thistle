@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 SHA-NI implementation In Mojo.
-By Libalpm64, attribution not required.
 """
 
 from std.sys import llvm_intrinsic, CompilationTarget, prefetch, PrefetchOptions
@@ -11,7 +7,7 @@ from std.memory import UnsafePointer, bitcast
 from .utils import StackBuffer
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
-from .sha2 import SHA256_IV
+from .sha2 import SHA256_IV, sha256_transform
 
 comptime SIMD128 = SIMD[DType.uint32, 4]
 comptime PAL_0 = 1
@@ -130,10 +126,13 @@ def prefetch_next_block(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]):
 
 
 def sha256ni_transform(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]) -> SIMD[DType.uint32, 8]:
-    comptime if CompilationTarget.is_x86():
+    # fall back to the scalar transform so unsupported CPUs never get zeros
+    comptime if CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]():
         return _sha256ni_transform_x86(state, block)
-    else:
+    elif CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86():
         return _sha256ni_transform_arm(state, block)
+    else:
+        return sha256_transform(state, block)
 
 
 def _sha256ni_transform_arm(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]) -> SIMD[DType.uint32, 8]:

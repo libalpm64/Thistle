@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 ML-DSA implementation in Mojo.
-By Libalpm64, no attribution required.
 
 Security notice:
 ML-DSA is incredibly difficult to implement safely because signing uses rejection sampling
@@ -256,8 +252,7 @@ def _ct_select_u32(false_value: UInt32, true_value: UInt32, choice: UInt32) -> U
     return false_value ^ (mask & (false_value ^ true_value))
 
 
-# Volatile stores are stronger cleanup than std.memory.memset_zero, which is ordinary stores.
-# Note: Still no formal guarantee of safety.
+# volatile stores so the wipe can't be optimized away
 def _zero_list_u8(mut data: List[UInt8]):
     var ptr = data.unsafe_ptr()
     for i in range(len(data)):
@@ -1177,7 +1172,6 @@ def _compute_message_hash(tr: Span[UInt8, ...], msg: Span[UInt8, ...], context: 
     if len(context) > 255:
         raise Error("ML-DSA context too long")
 
-	# Stream buffer from SHAKE_final
     var ctx = SHA3Context(1088)
     sha3_update(ctx, tr)
 
@@ -1351,8 +1345,7 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
     var nonce = shake256(Span[UInt8, ...](ptr=h_input.ptr(), length=h_input.len()), 64)
     _zero_stack_u8(h_input)
 
-    # Signing-attempt scratch is allocated once and reused.
-    # Note: Still not constant time but reduces a lot of "noise".
+    # signing scratch allocated once and reused across attempts
     var y = DSAPolyVec[MAX_L]()
     var y_hat = DSAPolyVec[MAX_L]()
     var w = DSAPolyVec[MAX_K]()

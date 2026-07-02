@@ -1,6 +1,5 @@
 """
 This test file is for testing the Wycheproof P-256 ECDH test vectors.
-By Libalpm64, no attribution required.
 """
 from std.collections import List
 from std.python import Python

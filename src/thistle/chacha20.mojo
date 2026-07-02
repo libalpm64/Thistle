@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 ChaCha20 stream cipher implementation per RFC 7539
-By Libalpm no attribution required
 """
 
 from std.memory import bitcast

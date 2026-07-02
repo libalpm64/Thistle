@@ -1,10 +1,6 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 PBKDF2 (Password-Based Key Derivation Function 2) Implementation in Mojo
 SP 800-132 / FIPS 140-2 / RFC 8018
-By Libalpm64, Attribute not required.
 """
 from std.collections import List
 from std.memory import memset_zero, memcpy, UnsafePointer

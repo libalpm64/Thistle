@@ -1,8 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
 """
 Wycheproof X25519 test suite
-By Libalpm64
 """
 from std.collections import List
 from std.python import Python

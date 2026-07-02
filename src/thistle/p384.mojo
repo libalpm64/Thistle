@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 NIST P-384 / secp384r1 implementation.
-By libalpm64, no attribution required.
 """
 
 comptime P384_SIZE = 48

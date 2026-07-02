@@ -1,10 +1,6 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 SHA-2 (SHA-256/SHA-512) Implementation in Mojo
 RFC 6234 / FIPS 180-4 / CAVP validated
-By Libalpm64, Attribute not required.
 """
 
 from std.collections import List
@@ -179,7 +175,6 @@ def small_sigma1_generic[WordType: DType](x: SIMD[WordType, 1]) -> SIMD[WordType
         return SIMD[WordType, 1](rotate_bits_right[19](x[0]) ^ rotate_bits_right[61](x[0]) ^ (x[0] >> 6))
 
 
-# hex conversions
 @always_inline
 def nibble_to_hex_char(nibble: UInt8) -> UInt8:
     """Convert a nibble (0-15) to its hex character ASCII value."""
