@@ -335,7 +335,7 @@ struct ChaCha20:
     def _check_counter_space(self, data_len: Int) raises:
         var blocks_needed = UInt64((data_len + 63) // 64)
         var space = UInt64(0x100000000) - UInt64(self.counter)
-        if blocks_needed > space:
+        if blocks_needed >= space:
             raise Error("ChaCha20 counter would wrap; use a new nonce")
 
     def encrypt_into[origin: Origin[mut=True]](

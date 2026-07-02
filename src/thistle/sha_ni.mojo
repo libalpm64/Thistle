@@ -112,7 +112,7 @@ def byte_swap32(v: SIMD128) -> SIMD128:
 
 @always_inline("nodebug")
 def Load(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]) -> SIMD128:
-    return byte_swap32(ptr.bitcast[UInt32]().load[width=4]())
+    return byte_swap32(ptr.bitcast[UInt32]().load[width=4, alignment=1]())
 
 
 @always_inline("nodebug")

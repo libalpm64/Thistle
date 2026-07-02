@@ -432,7 +432,7 @@ struct Hasher:
         while len(d) > 0:
             if self.buf_len == 64:
                 var blk = (
-                    self.buf.unsafe_ptr().bitcast[UInt32]().load[width=16]()
+                    self.buf.unsafe_ptr().bitcast[UInt32]().load[width=16, alignment=1]()
                 )
 
                 if self.blocks_compressed == 15:
@@ -520,7 +520,7 @@ struct Hasher:
         for i in range(self.buf_len):
             temp_buf.unsafe_set(i, self.buf[i])
 
-        var blk = temp_buf.unsafe_ptr().bitcast[UInt32]().load[width=16]()
+        var blk = temp_buf.unsafe_ptr().bitcast[UInt32]().load[width=16, alignment=1]()
 
         var flags = (
             CHUNK_START if self.blocks_compressed == 0 else UInt8(0)
@@ -626,7 +626,7 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) -> List[UIn
                     @parameter
                     @always_inline
                     def _load_idx(v: Int) -> SIMD[DType.uint32, 4]:
-                        return base_ptr.load[width=4](
+                        return base_ptr.load[width=4, alignment=1](
                             (base + v) * 256 + b * 16 + joff
                         )
 
