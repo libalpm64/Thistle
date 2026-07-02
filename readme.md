@@ -2,11 +2,6 @@
 
 Thistle is a high-performance Crypto Library written in Mojo.
 
-Thistle was written to avoid the **150x performance drops** when Mojo has to call Python Objects.
-
-> [!IMPORTANT]
-> Currently, Thistle is an experimental library.
-
 ### Currently supported Algorithms:
 
 * **Argon2**
