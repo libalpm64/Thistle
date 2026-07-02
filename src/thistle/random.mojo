@@ -121,8 +121,6 @@ def random_fill(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) raises:
 def random_bytes(n: Int) raises -> List[UInt8]:
     if n < 0:
         raise Error("random_bytes length must be non-negative")
-    var result = List[UInt8](capacity=n)
-    for _ in range(n):
-        result.append(0)
+    var result = List[UInt8](length=n, fill=0)
     random_fill(result.unsafe_ptr(), n)
     return result^

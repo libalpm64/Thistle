@@ -2,7 +2,7 @@
 AES CPU implementation
 """
 
-from std.memory import alloc
+from std.memory import alloc, memset_zero
 from std.utils import StaticTuple
 from .utils import StackBuffer
 
@@ -330,17 +330,13 @@ def cpu_aes_ctr_kernel(
         for j in range(16):
             tp.store(j, nonce_ptr[j])
 
-        var ctr = (
-            (UInt32(nonce_ptr[12]) << 24)
-            | (UInt32(nonce_ptr[13]) << 16)
-            | (UInt32(nonce_ptr[14]) << 8)
-            | UInt32(nonce_ptr[15])
-        ) + UInt32(i)
-
-        tp.store(12, UInt8((ctr >> 24) & 0xff))
-        tp.store(13, UInt8((ctr >> 16) & 0xff))
-        tp.store(14, UInt8((ctr >> 8) & 0xff))
-        tp.store(15, UInt8(ctr & 0xff))
+        var carry = UInt64(i)
+        for j in range(15, -1, -1):
+            if carry == 0:
+                break
+            var total = UInt64(tp.load(j)) + (carry & 0xFF)
+            tp.store(j, UInt8(total & 0xFF))
+            carry = (carry >> 8) + (total >> 8)
 
         if rounds == 10:
             _cpu_aes_encrypt[10](tp, round_keys)
@@ -537,7 +533,8 @@ struct AESKey:
         expand_key_128_into(self._data.ptr(), self._round_keys.ptr())
     
     def __del__(deinit self):
-        pass
-    
+        memset_zero(self._data.ptr(), 16)
+        memset_zero(self._round_keys.ptr(), 44)
+
     def round_keys(mut self) -> UnsafePointer[UInt32, MutAnyOrigin]:
         return self._round_keys.ptr()

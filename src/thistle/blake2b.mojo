@@ -88,10 +88,14 @@ struct Blake2b(Movable):
     var h: SIMD[DType.uint64, 8]
     var t_low: UInt64
     var t_high: UInt64
-    var buffer: UnsafePointer[UInt8, MutAnyOrigin]
+    var buffer: InlineArray[UInt64, 16]
     var buffer_len: Int
     var out_len: Int
     var key_len: Int
+
+    @always_inline
+    def _buf_ptr(mut self) -> UnsafePointer[UInt8, MutAnyOrigin]:
+        return self.buffer.unsafe_ptr().bitcast[UInt8]().unsafe_origin_cast[MutAnyOrigin]()
 
     def __init__(out self, out_len: Int = 64):
         debug_assert(1 <= out_len <= 64, "BLAKE2b digest length must be 1..64")
@@ -100,9 +104,7 @@ struct Blake2b(Movable):
         self.h = BLAKE2B_IV
         self.t_low = 0
         self.t_high = 0
-        self.buffer = alloc[UInt8](128)
-        for i in range(128):
-            self.buffer[i] = 0
+        self.buffer = InlineArray[UInt64, 16](fill=0)
         self.buffer_len = 0
 
         var p0: UInt64 = 0x01010000
@@ -119,9 +121,7 @@ struct Blake2b(Movable):
         self.h = BLAKE2B_IV
         self.t_low = 0
         self.t_high = 0
-        self.buffer = alloc[UInt8](128)
-        for i in range(128):
-            self.buffer[i] = 0
+        self.buffer = InlineArray[UInt64, 16](fill=0)
         self.buffer_len = 0
 
         var p0: UInt64 = 0x01010000
@@ -132,21 +132,22 @@ struct Blake2b(Movable):
 
         if self.key_len > 0:
             self.update(key)
+            var buf = self._buf_ptr()
             while self.buffer_len < 128:
-                self.buffer[self.buffer_len] = 0
+                buf[self.buffer_len] = 0
                 self.buffer_len += 1
 
     def __init__(out self, *, deinit take: Self):
         self.h = take.h
         self.t_low = take.t_low
         self.t_high = take.t_high
-        self.buffer = take.buffer
+        self.buffer = take.buffer^
         self.buffer_len = take.buffer_len
         self.out_len = take.out_len
         self.key_len = take.key_len
 
     def __del__(deinit self):
-        zero_and_free(self.buffer, 128)
+        memset_zero(self.buffer.unsafe_ptr(), 16)
 
     def compress(mut self, is_last: Bool):
         var v0 = self.h[0]
@@ -172,7 +173,7 @@ struct Blake2b(Movable):
         if is_last:
             v14 ^= 0xFFFFFFFFFFFFFFFF
 
-        var m = self.buffer.bitcast[UInt64]()
+        var m = self.buffer.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
         
         (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[0](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
         (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[1](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
@@ -213,7 +214,7 @@ struct Blake2b(Movable):
                 to_copy = remaining_data
 
             memcpy(
-                dest=self.buffer + self.buffer_len,
+                dest=self._buf_ptr() + self.buffer_len,
                 src=data.unsafe_ptr() + i,
                 count=to_copy,
             )
@@ -227,8 +228,9 @@ struct Blake2b(Movable):
         if self.t_low < old_low:
             self.t_high += 1
 
+        var buf = self._buf_ptr()
         while self.buffer_len < 128:
-            self.buffer[self.buffer_len] = 0
+            buf[self.buffer_len] = 0
             self.buffer_len += 1
 
         self.compress(True)
@@ -255,7 +257,7 @@ def nibble_to_hex_char(nibble: UInt8) -> UInt8:
 
 
 def bytes_to_hex(data: List[UInt8]) -> String:
-    var result = String()
+    var result = String(capacity=len(data) * 2)
     for i in range(len(data)):
         var b = data[i]
         var high = (b >> 4) & 0x0F
