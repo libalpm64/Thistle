@@ -21,4 +21,6 @@ Thistle is a high-performance Crypto Library written in Mojo.
 * **ECDSA** (ED25519/X25519)
 * **ECDH** (NIST P-256, P-384)
 
+[Thistle documentation website](https://libalpm64.github.io/Thistle/)
+
 Platforms supported: Linux, macOS
