@@ -54,6 +54,15 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         self.limbs = limbs
 
     @always_inline
+    def __init__(out self, limbs: SIMD[DType.uint64, 5]):
+        self.limbs = InlineArray[UInt64, 5](uninitialized=True)
+        self.limbs[0] = limbs[0]
+        self.limbs[1] = limbs[1]
+        self.limbs[2] = limbs[2]
+        self.limbs[3] = limbs[3]
+        self.limbs[4] = limbs[4]
+
+    @always_inline
     def __copyinit__(out self, copy: Self):
         self.limbs = copy.limbs
 
@@ -201,8 +210,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         var l = limbs
         var MASK = UInt64(0x7FFFFFFFFFFFF)
         
-        # Iterate until there are no more carries
-        for _ in range(5):
+        for _ in range(2):
             l[1] += l[0] >> 51
             l[0] = l[0] & MASK
             l[2] += l[1] >> 51
@@ -350,8 +358,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         var l0_out = (l0_final_2.cast[DType.uint64]()) & MASK
         var l1_out = UInt64(l1_final) + carry.cast[DType.uint64]()
         
-        var raw = FieldElement51(l0_out, l1_out, l2_final, l3_final, l4_final)
-        return raw._reduce(raw.limbs)
+        return FieldElement51(l0_out, l1_out, l2_final, l3_final, l4_final)
 
     @always_inline
     def _reduce(self, limbs: InlineArray[UInt64, 5]) -> FieldElement51:
@@ -366,7 +373,9 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return FieldElement51(l)
 
     @staticmethod
-    def from_bytes_span(bytes: Span[UInt8, ...]) -> FieldElement51:
+    def from_bytes_span(bytes: Span[UInt8, ...]) raises -> FieldElement51:
+        if len(bytes) < 32:
+            raise Error("FieldElement51 input must be at least 32 bytes")
         @always_inline
         def load8(ptr: UnsafePointer[UInt8, _]) -> UInt64:
             return ptr.bitcast[UInt64]().load[width=1, alignment=1]()

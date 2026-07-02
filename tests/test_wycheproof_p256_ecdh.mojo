@@ -1,12 +1,12 @@
+"""
+This test file is for testing the Wycheproof P-256 ECDH test vectors.
+By Libalpm64, no attribution required.
+"""
 from std.collections import List
 from std.python import Python
 from thistle.p256 import p256_ecdh
 from thistle.utils import StackInlineArray
 
-"""
-This test file is for testing the Wycheproof P-256 ECDH test vectors.
-By Libalpm64, no attribution required.
-"""
 
 def hex_to_bytes(s: String) -> List[UInt8]:
     var r = List[UInt8]()

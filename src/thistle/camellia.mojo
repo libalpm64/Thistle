@@ -6,7 +6,7 @@ Camellia block cipher implementation per RFC 3713
 By Libalpm no attribution required
 """
 
-from std.memory import bitcast
+from std.memory import bitcast, UnsafePointer
 from std.bit import byte_swap, rotate_bits_left
 from std.collections import InlineArray
 from std.utils import StaticTuple
@@ -206,22 +206,28 @@ struct CamelliaCipher:
     var ke: InlineArray[UInt64, 6]
     var is_128: Bool
     
-    def __init__(out self, key: Span[UInt8, ...]):
+    def __init__(out self, key: Span[UInt8, ...]) raises:
         self.kw = SIMD[DType.uint64, 4](0)
-        self.k = InlineArray[UInt64, 24](uninitialized=True)
-        self.ke = InlineArray[UInt64, 6](uninitialized=True)
-        for i in range(24):
-            self.k[i] = 0
-        for i in range(6):
-            self.ke[i] = 0
+        self.k = InlineArray[UInt64, 24](fill=0)
+        self.ke = InlineArray[UInt64, 6](fill=0)
         self.is_128 = len(key) == 16
-        
+
         if self.is_128:
             self._key_schedule_128(key)
         elif len(key) == 24 or len(key) == 32:
             self._key_schedule_192_256(key)
         else:
-            print("Error: Invalid key length. Must be 16, 24, or 32 bytes.")
+            raise Error("Camellia key must be 16, 24, or 32 bytes")
+
+    def wipe(mut self):
+        var kw_ptr = UnsafePointer(to=self.kw).bitcast[UInt64]()
+        kw_ptr.store[volatile=True](0, SIMD[DType.uint64, 4](0))
+        var k_ptr = self.k.unsafe_ptr()
+        for i in range(24):
+            k_ptr.store[volatile=True](i, UInt64(0))
+        var ke_ptr = self.ke.unsafe_ptr()
+        for i in range(6):
+            ke_ptr.store[volatile=True](i, UInt64(0))
 
     @always_inline
     def _bytes_to_u64_be(ref self, b: Span[UInt8, ...]) -> UInt64:
@@ -485,8 +491,12 @@ struct CamelliaCipher:
         
         return bitcast[DType.uint8, 16](SIMD[DType.uint64, 2](byte_swap(d1), byte_swap(d2)))
 
-    def encrypt(self, block: Span[UInt8, ...]) -> SIMD[DType.uint8, 16]:
+    def encrypt(self, block: Span[UInt8, ...]) raises -> SIMD[DType.uint8, 16]:
+        if len(block) < 16:
+            raise Error("Camellia block must be 16 bytes")
         return self.encrypt(block.unsafe_ptr().load[width=16, alignment=1](0))
 
-    def decrypt(self, block: Span[UInt8, ...]) -> SIMD[DType.uint8, 16]:
+    def decrypt(self, block: Span[UInt8, ...]) raises -> SIMD[DType.uint8, 16]:
+        if len(block) < 16:
+            raise Error("Camellia block must be 16 bytes")
         return self.decrypt(block.unsafe_ptr().load[width=16, alignment=1](0))

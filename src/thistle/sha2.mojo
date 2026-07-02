@@ -503,6 +503,17 @@ struct SHA512Context(Movable):
     def __del__(deinit self):
         memset_zero(self.buffer.unsafe_ptr(), 128)
 
+    def wipe(mut self):
+        UnsafePointer(to=self.state).bitcast[UInt64]().store[volatile=True](
+            0, SIMD[DType.uint64, 8](0)
+        )
+        var buf_ptr = self.buffer.unsafe_ptr()
+        for i in range(128):
+            buf_ptr.store[volatile=True](i, UInt8(0))
+        self.count_high = 0
+        self.count_low = 0
+        self.buffer_len = 0
+
     def reset(mut self):
         var iv = SHA512_IV
         self.state = iv

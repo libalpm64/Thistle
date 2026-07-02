@@ -184,14 +184,9 @@ def _sub_raw(a: U256, b: U256) -> Tuple[U256, UInt64]:
     var out = U256()
     var borrow: UInt64 = 0
     comptime for i in range(8):
-        var ai = a.limbs[i]
-        var bi = b.limbs[i] + borrow
-        if ai >= bi:
-            out.limbs[i] = ai - bi
-            borrow = 0
-        else:
-            out.limbs[i] = (UInt64(1) << UInt64(32)) + ai - bi
-            borrow = 1
+        var d = (UInt64(1) << UInt64(32)) + a.limbs[i] - b.limbs[i] - borrow
+        out.limbs[i] = d & _MASK32
+        borrow = (d >> UInt64(32)) ^ UInt64(1)
     return out, borrow
 
 
@@ -209,21 +204,17 @@ def _add_raw(a: U256, b: U256) -> Tuple[U256, UInt64]:
 @always_inline
 def _add_mod(a: U256, b: U256, m: U256) -> U256:
     var sum, carry = _add_raw(a, b)
-    if carry != 0:
-        sum, _ = _add_raw(sum, _p_overflow_correction())
-    if _cmp(sum, m) >= 0:
-        var reduced, _ = _sub_raw(sum, m)
-        return reduced
-    return sum
+    var sum_folded, _ = _add_raw(sum, _p_overflow_correction())
+    sum = _select_u256(sum, sum_folded, carry)
+    var sum_minus_m, borrow = _sub_raw(sum, m)
+    return _select_u256(sum_minus_m, sum, borrow)
 
 
 @always_inline
 def _sub_mod(a: U256, b: U256, m: U256) -> U256:
     var diff, borrow = _sub_raw(a, b)
-    if borrow != 0:
-        var fixed, _ = _add_raw(diff, m)
-        return fixed
-    return diff
+    var diff_plus_m, _ = _add_raw(diff, m)
+    return _select_u256(diff, diff_plus_m, borrow)
 
 
 @always_inline
@@ -233,11 +224,126 @@ def _add_small_mod(a: U256, small: UInt64, m: U256) -> U256:
 
 
 @always_inline
+def _add_signed_limb(
+    acc: InlineArray[Int64, 9], i: Int, value: UInt64, multiplier: Int64
+) -> InlineArray[Int64, 9]:
+    var out = acc
+    out[i] += Int64(value) * multiplier
+    return out
+
+
+@always_inline
+def _normalize_signed_p256(acc_in: InlineArray[Int64, 9]) -> U256:
+    var acc = acc_in
+    comptime for _ in range(4):
+        comptime for i in range(8):
+            var carry = acc[i] >> 32
+            acc[i] -= carry << 32
+            acc[i + 1] += carry
+
+        # Fold overflow 2^256 ≡ 2^224 - 2^192 - 2^96 + 1 mod p256.
+        var hi = acc[8]
+        acc[8] = 0
+        acc[0] += hi
+        acc[3] -= hi
+        acc[6] -= hi
+        acc[7] += hi
+
+    var out = U256()
+    comptime for i in range(8):
+        var carry = acc[i] >> 32
+        acc[i] -= carry << 32
+        if i < 7:
+            acc[i + 1] += carry
+        out.limbs[i] = UInt64(acc[i])
+
+    var minus_p, borrow = _sub_raw(out, _p())
+    out = _select_u256(minus_p, out, borrow)
+    var minus_p2, borrow2 = _sub_raw(out, _p())
+    return _select_u256(minus_p2, out, borrow2)
+
+
+@always_inline
+def _reduce_p256(t: InlineArray[UInt64, 16]) -> U256:
+    # FIPS 186-4 D.2.3 P-256 Mersenne reduction:
+    # r = s1 + 2*s2 + 2*s3 + s4 + s5 - s6 - s7 - s8 - s9 mod p.
+    var acc = InlineArray[Int64, 9](fill=0)
+
+    # s1 = (c7, ..., c0)
+    comptime for i in range(8):
+        acc = _add_signed_limb(acc, i, t[i], 1)
+
+    # 2*s2 = 2 * (c15, c14, c13, c12, c11, 0, 0, 0)
+    acc = _add_signed_limb(acc, 3, t[11], 2)
+    acc = _add_signed_limb(acc, 4, t[12], 2)
+    acc = _add_signed_limb(acc, 5, t[13], 2)
+    acc = _add_signed_limb(acc, 6, t[14], 2)
+    acc = _add_signed_limb(acc, 7, t[15], 2)
+
+    # 2*s3 = 2 * (0, c15, c14, c13, c12, 0, 0, 0)
+    acc = _add_signed_limb(acc, 3, t[12], 2)
+    acc = _add_signed_limb(acc, 4, t[13], 2)
+    acc = _add_signed_limb(acc, 5, t[14], 2)
+    acc = _add_signed_limb(acc, 6, t[15], 2)
+
+    # s4 = (c15, c14, 0, 0, 0, c10, c9, c8)
+    acc = _add_signed_limb(acc, 0, t[8], 1)
+    acc = _add_signed_limb(acc, 1, t[9], 1)
+    acc = _add_signed_limb(acc, 2, t[10], 1)
+    acc = _add_signed_limb(acc, 6, t[14], 1)
+    acc = _add_signed_limb(acc, 7, t[15], 1)
+
+    # s5 = (c8, c13, c15, c14, c13, c11, c10, c9)
+    acc = _add_signed_limb(acc, 0, t[9], 1)
+    acc = _add_signed_limb(acc, 1, t[10], 1)
+    acc = _add_signed_limb(acc, 2, t[11], 1)
+    acc = _add_signed_limb(acc, 3, t[13], 1)
+    acc = _add_signed_limb(acc, 4, t[14], 1)
+    acc = _add_signed_limb(acc, 5, t[15], 1)
+    acc = _add_signed_limb(acc, 6, t[13], 1)
+    acc = _add_signed_limb(acc, 7, t[8], 1)
+
+    # s6 = (c10, c8, 0, 0, 0, c13, c12, c11)
+    acc = _add_signed_limb(acc, 0, t[11], -1)
+    acc = _add_signed_limb(acc, 1, t[12], -1)
+    acc = _add_signed_limb(acc, 2, t[13], -1)
+    acc = _add_signed_limb(acc, 6, t[8], -1)
+    acc = _add_signed_limb(acc, 7, t[10], -1)
+
+    # s7 = (c11, c9, 0, 0, c15, c14, c13, c12)
+    acc = _add_signed_limb(acc, 0, t[12], -1)
+    acc = _add_signed_limb(acc, 1, t[13], -1)
+    acc = _add_signed_limb(acc, 2, t[14], -1)
+    acc = _add_signed_limb(acc, 3, t[15], -1)
+    acc = _add_signed_limb(acc, 6, t[9], -1)
+    acc = _add_signed_limb(acc, 7, t[11], -1)
+
+    # s8 = (c12, 0, c10, c9, c8, c15, c14, c13)
+    acc = _add_signed_limb(acc, 0, t[13], -1)
+    acc = _add_signed_limb(acc, 1, t[14], -1)
+    acc = _add_signed_limb(acc, 2, t[15], -1)
+    acc = _add_signed_limb(acc, 3, t[8], -1)
+    acc = _add_signed_limb(acc, 4, t[9], -1)
+    acc = _add_signed_limb(acc, 5, t[10], -1)
+    acc = _add_signed_limb(acc, 7, t[12], -1)
+
+    # s9 = (c13, 0, c11, c10, c9, 0, c15, c14)
+    acc = _add_signed_limb(acc, 0, t[14], -1)
+    acc = _add_signed_limb(acc, 1, t[15], -1)
+    acc = _add_signed_limb(acc, 3, t[9], -1)
+    acc = _add_signed_limb(acc, 4, t[10], -1)
+    acc = _add_signed_limb(acc, 5, t[11], -1)
+    acc = _add_signed_limb(acc, 7, t[13], -1)
+
+    return _normalize_signed_p256(acc)
+
+
+@always_inline
 def _mul_mod(a: U256, b: U256, m: U256) -> U256:
     var t = InlineArray[UInt64, 16](fill=0)
-    for i in range(8):
+    comptime for i in range(8):
         var carry = UInt128(0)
-        for j in range(8):
+        comptime for j in range(8):
             var k = i + j
             var prod = (
                 UInt128(a.limbs[i]) * UInt128(b.limbs[j])
@@ -252,15 +358,7 @@ def _mul_mod(a: U256, b: U256, m: U256) -> U256:
             t[k2] = UInt64(s & UInt128(_MASK32))
             carry = s >> UInt128(32)
             k2 += 1
-
-    var r = U256()
-    for bit_index in range(511, -1, -1):
-        r = _add_mod(r, r, m)
-        var limb = bit_index // 32
-        var bit = (t[limb] >> UInt64(bit_index % 32)) & 1
-        if bit != 0:
-            r = _add_small_mod(r, 1, m)
-    return r
+    return _reduce_p256(t)
 
 
 @always_inline
@@ -392,7 +490,7 @@ def _select_u256(a: U256, b: U256, choice: UInt64) -> U256:
 def _select_jacobian(
     a: P256JacobianPoint, b: P256JacobianPoint, choice: UInt64
 ) -> P256JacobianPoint:
-    # Coordinate path uses mask-select; infinity Bool is not on the CT scalar core.
+    # infinity flag is not used on the constant-time path
     var infinity = a.infinity
     if choice != 0:
         infinity = b.infinity
@@ -442,6 +540,18 @@ def _select_jacobian_ct(
 
 @always_inline
 def _mul_small_mod(x: U256, c: UInt64) -> U256:
+    # c is a public formula constant, doubling chains are fine
+    if c == 2:
+        return _add_mod(x, x, _p())
+    if c == 3:
+        return _add_mod(_add_mod(x, x, _p()), x, _p())
+    if c == 4:
+        var x2 = _add_mod(x, x, _p())
+        return _add_mod(x2, x2, _p())
+    if c == 8:
+        var x2 = _add_mod(x, x, _p())
+        var x4 = _add_mod(x2, x2, _p())
+        return _add_mod(x4, x4, _p())
     var out = U256()
     for _ in range(c):
         out = _add_mod(out, x, _p())
@@ -449,7 +559,7 @@ def _mul_small_mod(x: U256, c: UInt64) -> U256:
 
 
 def _is_on_curve(point: P256Point) -> Bool:
-    # SEC 1 public-key validation for cofactor-1 short Weierstrass curves.
+    # cofactor-1 short Weierstrass curves validation for pub keys
     if point.infinity:
         return False
     if _cmp(point.x, _p()) >= 0 or _cmp(point.y, _p()) >= 0:
@@ -488,7 +598,6 @@ def _jacobian_double_ct(p: P256JacobianPoint) -> P256JacobianPoint:
 def _jacobian_add_affine_ct(
     p: P256JacobianPoint, q: P256Point
 ) -> P256JacobianPoint:
-    # EFD mixed add; handle H == 0 by mask-selecting exceptional candidates.
     var z1z1 = _square_mod(p.z, _p())
     var u2 = _mul_mod(q.x, z1z1, _p())
     var s2 = _mul_mod(q.y, _mul_mod(p.z, z1z1, _p()), _p())
@@ -544,7 +653,6 @@ def _jacobian_to_affine(p: P256JacobianPoint) -> P256Point:
 
 
 def _scalar_mult(k: U256, p: P256Point) -> P256Point:
-    # Secret scalar loop: always double/add/select; scalar-core infinity is Z == 0.
     var acc = _jacobian_infinity()
     for j in range(256):
         var i = 255 - j
@@ -555,7 +663,7 @@ def _scalar_mult(k: U256, p: P256Point) -> P256Point:
 
 
 def p256_decode_uncompressed(point: Span[UInt8, ...]) -> P256Point:
-    # SEC 1 point decoding: compressed 02/03||X and uncompressed 04||X||Y.
+    # compressed 02/03||X and uncompressed 04||X||Y.
     if len(point) == 33 and (point[0] == 0x02 or point[0] == 0x03):
         var x = _from_be(
             Span[UInt8, ...](ptr=point.unsafe_ptr() + 1, length=32)
@@ -588,7 +696,7 @@ def p256_decode_uncompressed(point: Span[UInt8, ...]) -> P256Point:
 def p256_encode_uncompressed(
     point: P256Point, output: UnsafePointer[UInt8, MutAnyOrigin]
 ) -> Bool:
-    # SEC 1 uncompressed point encoding: 04 || X || Y.
+    # uncompressed point encoding: 04 || X || Y.
     if point.infinity or not _is_on_curve(point):
         return False
     output[0] = 0x04
@@ -597,10 +705,11 @@ def p256_encode_uncompressed(
     return True
 
 
+@no_inline
 def p256_public_key(
     private_key: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]
 ) -> Bool:
-    # SEC 1 key generation: Q = dG with d in [1, n - 1].
+    # Q = dG with d in [1, n - 1].
     if len(private_key) != 32:
         return False
     var d = _from_be(private_key)
@@ -610,12 +719,13 @@ def p256_public_key(
     return p256_encode_uncompressed(q, output)
 
 
+@no_inline
 def p256_ecdh(
     private_key: Span[UInt8, ...],
     public_key: Span[UInt8, ...],
     output: UnsafePointer[UInt8, MutAnyOrigin],
 ) -> Bool:
-    # SEC 1 ECDH: validate Q, compute dQ, reject infinity, output x-coordinate.
+    # validate Q, compute dQ, reject infinity, output x-coordinate.
     if len(private_key) != 32:
         return False
     var d = _from_be(private_key)

@@ -29,7 +29,12 @@ def _cswap_pair(
     _cswap_fe(swap, x_2, x_3)
     _cswap_fe(swap, z_2, z_3)
 
-def x25519(scalar_in: Span[UInt8, ...], point: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]):
+@no_inline
+def x25519(scalar_in: Span[UInt8, ...], point: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]) raises:
+    if len(scalar_in) < 32:
+        raise Error("X25519 scalar must be 32 bytes")
+    if len(point) < 32:
+        raise Error("X25519 point must be 32 bytes")
     var scalar = StackInlineArray[UInt8, 32](uninitialized=True)
     for i in range(32):
         scalar[i] = scalar_in[i]
@@ -76,3 +81,6 @@ def x25519(scalar_in: Span[UInt8, ...], point: Span[UInt8, ...], output: UnsafeP
         
     var res = x_2 * z_2.invert()
     res.to_bytes_into(output)
+    var scalar_ptr = scalar.unsafe_ptr()
+    for i in range(32):
+        scalar_ptr.store[volatile=True](i, UInt8(0))

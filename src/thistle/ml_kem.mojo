@@ -484,7 +484,7 @@ def poly_frombytes(mut r: Poly, a: Span[UInt8, ...]) raises -> Bool:
         var t = _u24_le(a, 3 * i)
         r.coeffs[2 * i] = Int16(t & 0xFFF)
         r.coeffs[2 * i + 1] = Int16((t >> 12) & 0xFFF)
-        ok = ok and r.coeffs[2 * i] < Int16(Q) and r.coeffs[2 * i + 1] < Int16(Q)
+        ok = ok & (r.coeffs[2 * i] < Int16(Q)) & (r.coeffs[2 * i + 1] < Int16(Q))
     return ok
 
 
@@ -503,7 +503,7 @@ def polyvec_frombytes(mut r: Polyvec, a: Span[UInt8, ...], k: Int) raises -> Boo
         raise Error("ML-KEM polyvec_frombytes invalid buffer length")
     var ok = True
     for i in range(k):
-        ok = poly_frombytes(r.vec[i], a[i * POLYBYTES : (i + 1) * POLYBYTES]) and ok
+        ok = poly_frombytes(r.vec[i], a[i * POLYBYTES : (i + 1) * POLYBYTES]) & ok
     return ok
 
 
@@ -641,10 +641,9 @@ def poly_frommsg(mut r: Poly, msg: Span[UInt8, ...]) raises:
         raise Error("ML-KEM poly_frommsg invalid message length")
     for i in range(N // 8):
         for j in range(8):
-            var bit = (msg[i] >> UInt8(j)) & 1
-            r.coeffs[8 * i + j] = Int16(0)
-            if bit != 0:
-                r.coeffs[8 * i + j] = Int16((Q + 1) // 2)
+            # message bits are secret during decaps, don't branch on them
+            var mask = Int16(0) - Int16((msg[i] >> UInt8(j)) & 1)
+            r.coeffs[8 * i + j] = mask & Int16((Q + 1) // 2)
 
 
 def poly_tomsg(mut msg: List[UInt8], a: Poly):

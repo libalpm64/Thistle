@@ -15,6 +15,9 @@ from thistle.sha2 import sha256_hash, sha512_hash
 from thistle.sha_ni import sha256ni_hash, has_sha_ni
 from thistle.sha3 import sha3_256
 from thistle.aes import AESKey, SBOX, cpu_aes_encrypt, ROUNDS_128, expand_key_128
+from thistle.x25519 import x25519
+from thistle.ed25519 import ed25519_sign, ed25519_verify, ed25519_generate_public_key
+from thistle.utils import StackInlineArray
 from std.memory import alloc
 from std.utils import StaticTuple
 
@@ -33,6 +36,69 @@ def generate_data(length: Int) -> List[UInt8]:
     for i in range(length):
         data.append(UInt8(i % 256))
     return data^
+
+
+def benchmark_x25519(duration_secs: Float64) raises -> String:
+    var scalar = InlineArray[UInt8, 32](uninitialized=True)
+    var point = InlineArray[UInt8, 32](uninitialized=True)
+    var out = InlineArray[UInt8, 32](uninitialized=True)
+    for i in range(32):
+        scalar[i] = UInt8(i + 1)
+        point[i] = UInt8(9) if i == 0 else UInt8(0)
+    var scalar_span = Span[UInt8, ...](ptr=scalar.unsafe_ptr(), length=32)
+    var point_span = Span[UInt8, ...](ptr=point.unsafe_ptr(), length=32)
+    x25519(scalar_span, point_span, out.unsafe_ptr())
+    var count = 0
+    var start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        x25519(scalar_span, point_span, out.unsafe_ptr())
+        scalar.unsafe_ptr().store[volatile=True](0, out[0] | 8)
+        count += 1
+    var duration = perf_counter() - start
+    var ops = Float64(count) / duration
+    return "x25519 | throughput: " + String(ops)[byte=:8] + " ops/s, ops: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+
+
+def benchmark_ed25519(duration_secs: Float64) raises -> String:
+    var sk = InlineArray[UInt8, 32](uninitialized=True)
+    var pk = InlineArray[UInt8, 32](uninitialized=True)
+    var msg = InlineArray[UInt8, 64](uninitialized=True)
+    var sig = InlineArray[UInt8, 64](uninitialized=True)
+    for i in range(32):
+        sk[i] = UInt8(i * 7 + 1)
+    for i in range(64):
+        msg[i] = UInt8(i)
+    var sk_span = Span[UInt8, ...](ptr=sk.unsafe_ptr(), length=32)
+    var msg_span = Span[UInt8, ...](ptr=msg.unsafe_ptr(), length=64)
+    var sig_span = Span[UInt8, ...](ptr=sig.unsafe_ptr(), length=64)
+    var pk_span = Span[UInt8, ...](ptr=pk.unsafe_ptr(), length=32)
+    ed25519_generate_public_key(sk_span, pk.unsafe_ptr())
+    ed25519_sign(sk_span, msg_span, sig.unsafe_ptr())
+
+    var sign_count = 0
+    var start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        ed25519_sign(sk_span, msg_span, sig.unsafe_ptr())
+        sign_count += 1
+    var sign_duration = perf_counter() - start
+    var sign_ops = Float64(sign_count) / sign_duration
+
+    ed25519_sign(sk_span, msg_span, sig.unsafe_ptr())
+    var verify_count = 0
+    var verify_failures = 0
+    start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        if not ed25519_verify(pk_span, msg_span, sig_span):
+            verify_failures += 1
+        verify_count += 1
+    var verify_duration = perf_counter() - start
+    var verify_ops = Float64(verify_count) / verify_duration
+
+    var result = "ed25519-sign | throughput: " + String(sign_ops)[byte=:8] + " ops/s, ops: " + String(sign_count) + ", time: " + String(sign_duration)[byte=:4] + "s\n"
+    result += "ed25519-verify | throughput: " + String(verify_ops)[byte=:8] + " ops/s, ops: " + String(verify_count) + ", time: " + String(verify_duration)[byte=:4] + "s"
+    if verify_failures > 0:
+        result += " [" + String(verify_failures) + " FAILED VERIFICATIONS]"
+    return result
 
 
 def benchmark_sha256(data: List[UInt8], duration_secs: Float64) -> String:
@@ -128,7 +194,7 @@ def benchmark_blake3(data: List[UInt8], duration_secs: Float64) -> String:
     return "blake3 | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-def benchmark_camellia(data_size: Int, duration_secs: Float64) -> String:
+def benchmark_camellia(data_size: Int, duration_secs: Float64) raises -> String:
     var key = List[UInt8]()
     for i in range(16):
         key.append(UInt8(i))
@@ -153,7 +219,7 @@ def benchmark_camellia(data_size: Int, duration_secs: Float64) -> String:
     return "camellia | throughput: " + String(mbps)[byte=:6] + " mb/s, blocks: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-def benchmark_chacha20(data_size: Int, duration_secs: Float64) -> String:
+def benchmark_chacha20(data_size: Int, duration_secs: Float64) raises -> String:
     var key = SIMD[DType.uint8, 32](0)
     for i in range(32):
         key[i] = UInt8(i)
@@ -204,7 +270,7 @@ def benchmark_kcipher2(data_size: Int, duration_secs: Float64) -> String:
     return "kcipher2 | throughput: " + String(mbps)[byte=:6] + " mb/s, encrypts: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-def benchmark_argon2(duration_secs: Float64) -> String:
+def benchmark_argon2(duration_secs: Float64) raises -> String:
     var password = String("password").as_bytes()
     var salt = String("saltsalt12345678").as_bytes()
     var ctx = Argon2id(salt, memory_size_kb=65536, iterations=3, parallelism=4)
@@ -443,6 +509,8 @@ def main() raises:
     print(benchmark_aes_gpu_ecb())
     print(benchmark_aes_gpu_ctr())
     print(benchmark_argon2(duration))
-    
+    print(benchmark_x25519(duration))
+    print(benchmark_ed25519(duration))
+
     print()
     print("All benchmarks completed")

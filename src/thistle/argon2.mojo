@@ -389,6 +389,18 @@ def _argon2_process_lane(
     zero_and_free_u64(zero_u64, 128)
     zero_and_free_u64(tmp_addr, 128)
 
+def _validate_params(parallelism: Int, tag_length: Int, memory_size_kb: Int, iterations: Int) raises:
+    # RFC 9106 section 3 parameter bounds
+    if parallelism < 1 or parallelism >= (1 << 24):
+        raise Error("Argon2 parallelism must be in [1, 2^24)")
+    if tag_length < 4:
+        raise Error("Argon2 tag length must be at least 4")
+    if memory_size_kb < 8 * parallelism:
+        raise Error("Argon2 memory must be at least 8*parallelism KiB")
+    if iterations < 1:
+        raise Error("Argon2 iterations must be at least 1")
+
+
 struct Argon2id:
     var parallelism: Int
     var tag_length: Int
@@ -408,7 +420,8 @@ struct Argon2id:
         memory_size_kb: Int = 65536,
         iterations: Int = 3,
         version: Int = 0x13,
-    ):
+    ) raises:
+        _validate_params(parallelism, tag_length, memory_size_kb, iterations)
         self.parallelism = parallelism
         self.tag_length = tag_length
         self.memory_size_kb = memory_size_kb
@@ -431,7 +444,8 @@ struct Argon2id:
         memory_size_kb: Int = 65536,
         iterations: Int = 3,
         version: Int = 0x13,
-    ):
+    ) raises:
+        _validate_params(parallelism, tag_length, memory_size_kb, iterations)
         self.parallelism = parallelism
         self.tag_length = tag_length
         self.memory_size_kb = memory_size_kb
@@ -553,7 +567,7 @@ struct Argon2id:
         zero_and_free(c_bytes, 1024)
         return result^
 
-def argon2id_hash_string(password: String, salt: String) -> String:
+def argon2id_hash_string(password: String, salt: String) raises -> String:
     var p_bytes = password.as_bytes()
     var s_bytes = salt.as_bytes()
     var ctx = Argon2id(s_bytes)

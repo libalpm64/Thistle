@@ -238,6 +238,7 @@ def _cpu_aes_encrypt[rounds: Int](
     pt_bytes.store(15, s15)
 
 @always_inline
+# Not Constant Time
 def cpu_aes_encrypt(
     pt_bytes: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],

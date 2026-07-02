@@ -226,14 +226,9 @@ def _sub_raw(a: U384, b: U384) -> Tuple[U384, UInt64]:
     var out = U384()
     var borrow: UInt64 = 0
     comptime for i in range(12):
-        var ai = a.limbs[i]
-        var bi = b.limbs[i] + borrow
-        if ai >= bi:
-            out.limbs[i] = ai - bi
-            borrow = 0
-        else:
-            out.limbs[i] = (UInt64(1) << UInt64(32)) + ai - bi
-            borrow = 1
+        var d = (UInt64(1) << UInt64(32)) + a.limbs[i] - b.limbs[i] - borrow
+        out.limbs[i] = d & _MASK32
+        borrow = (d >> UInt64(32)) ^ UInt64(1)
     return out, borrow
 
 
@@ -251,21 +246,17 @@ def _add_raw(a: U384, b: U384) -> Tuple[U384, UInt64]:
 @always_inline
 def _add_mod(a: U384, b: U384, m: U384) -> U384:
     var sum, carry = _add_raw(a, b)
-    if carry != 0:
-        sum, _ = _add_raw(sum, _p_overflow_correction())
-    if _cmp(sum, m) >= 0:
-        var reduced, _ = _sub_raw(sum, m)
-        return reduced
-    return sum
+    var sum_folded, _ = _add_raw(sum, _p_overflow_correction())
+    sum = _select_u384(sum, sum_folded, carry)
+    var sum_minus_m, borrow = _sub_raw(sum, m)
+    return _select_u384(sum_minus_m, sum, borrow)
 
 
 @always_inline
 def _sub_mod(a: U384, b: U384, m: U384) -> U384:
     var diff, borrow = _sub_raw(a, b)
-    if borrow != 0:
-        var fixed, _ = _add_raw(diff, m)
-        return fixed
-    return diff
+    var diff_plus_m, _ = _add_raw(diff, m)
+    return _select_u384(diff, diff_plus_m, borrow)
 
 
 @always_inline
@@ -308,11 +299,10 @@ def _normalize_signed_p384(acc_in: InlineArray[Int64, 13]) -> U384:
             acc[i + 1] += carry
         out.limbs[i] = UInt64(acc[i])
 
-    if _cmp(out, _p()) >= 0:
-        out, _ = _sub_raw(out, _p())
-    if _cmp(out, _p()) >= 0:
-        out, _ = _sub_raw(out, _p())
-    return out
+    var minus_p, borrow = _sub_raw(out, _p())
+    out = _select_u384(minus_p, out, borrow)
+    var minus_p2, borrow2 = _sub_raw(out, _p())
+    return _select_u384(minus_p2, out, borrow2)
 
 
 @always_inline
@@ -520,7 +510,7 @@ def _select_u384(a: U384, b: U384, choice: UInt64) -> U384:
 def _select_jacobian(
     a: P384JacobianPoint, b: P384JacobianPoint, choice: UInt64
 ) -> P384JacobianPoint:
-    # Coordinate path uses mask-select; infinity Bool is not on the CT scalar core.
+    # infinity flag is not used on the constant-time path
     var infinity = a.infinity
     if choice != 0:
         infinity = b.infinity
@@ -570,6 +560,17 @@ def _select_jacobian_ct(
 
 @always_inline
 def _mul_small_mod(x: U384, c: UInt64) -> U384:
+    if c == 2:
+        return _add_mod(x, x, _p())
+    if c == 3:
+        return _add_mod(_add_mod(x, x, _p()), x, _p())
+    if c == 4:
+        var x2 = _add_mod(x, x, _p())
+        return _add_mod(x2, x2, _p())
+    if c == 8:
+        var x2 = _add_mod(x, x, _p())
+        var x4 = _add_mod(x2, x2, _p())
+        return _add_mod(x4, x4, _p())
     var out = U384()
     for _ in range(c):
         out = _add_mod(out, x, _p())
@@ -725,6 +726,7 @@ def p384_encode_uncompressed(
     return True
 
 
+@no_inline
 def p384_public_key(
     private_key: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]
 ) -> Bool:
@@ -738,6 +740,7 @@ def p384_public_key(
     return p384_encode_uncompressed(q, output)
 
 
+@no_inline
 def p384_ecdh(
     private_key: Span[UInt8, ...],
     public_key: Span[UInt8, ...],
