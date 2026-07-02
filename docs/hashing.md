@@ -11,8 +11,12 @@ should ever share one. Use it to check files for corruption, deduplicate
 data, or build integrity checks.
 
 **Which one?**
-**BLAKE3** Incredibly fast parallel hashing algorithim.
-**SHA-256** when you need compatibility with older systems.
+
+- **BLAKE3** — secure, internally parallel (tree hashing); recommended for
+  both speed and security.
+- **SHA-256** — the compatibility default, and on modern CPUs
+  `sha256ni_hash` lowers directly to the hardware SHA instructions via LLVM
+  intrinsics — register-only, no table lookups, immune to cache attacks.
 
 ## Hash a string
 
