@@ -1,13 +1,11 @@
-from std.builtin.rebind import downcast
-from std.builtin.constrained import _constrained_conforms_to
-from std.memory import stack_allocation
-
 struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
-    var _ptr: UnsafePointer[Self.ElementType, MutExternalOrigin]
+    var _data: InlineArray[Self.ElementType, Self.size]
 
     @always_inline
     def __init__(out self, *, uninitialized: Bool):
-        self._ptr = stack_allocation[Self.size, Self.ElementType]()
+        self._data = InlineArray[Self.ElementType, Self.size](
+            uninitialized=True
+        )
 
     @always_inline
     def __init__(out self, var *elems: Self.ElementType, __list_literal__: NoneType):
@@ -54,14 +52,14 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
         address_space=address_space
     ]:
         return (
-            self._ptr
+            self._data.unsafe_ptr()
             .unsafe_mut_cast[origin.mut]()
             .unsafe_origin_cast[origin]()
             .address_space_cast[address_space]()
         )
 
     @always_inline
-    def unsafe_get[I: Indexer](ref self, idx: I) -> ref[MutExternalOrigin] Self.ElementType:
+    def unsafe_get[I: Indexer](ref self, idx: I) -> ref[self._data] Self.ElementType:
         var i = index(idx)
         debug_assert(
             0 <= i < Self.size,
@@ -70,12 +68,12 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
             " should be greater than or equal to 0 and less than ",
             Self.size,
         )
-        return self._ptr[i]
+        return self._data.unsafe_get(i)
 
     @always_inline
     def __getitem_param__[
         idx: Some[Indexer]
-    ](ref self) -> ref[MutExternalOrigin] Self.ElementType:
+    ](ref self) -> ref[self._data] Self.ElementType:
         comptime i = index(idx)
         comptime assert 0 <= i < Self.size, "Index must be within bounds."
         return self.unsafe_get(i)
@@ -83,13 +81,13 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
     @always_inline
     def __getitem_param__[
         idx: Int
-    ](ref self) -> ref[MutExternalOrigin] Self.ElementType:
+    ](ref self) -> ref[self._data] Self.ElementType:
         comptime i = index(idx)
         comptime assert 0 <= i < Self.size, "Index must be within bounds."
         return self.unsafe_get(i)
 
     @always_inline
-    def __getitem__(ref self, idx: Int) -> ref[MutExternalOrigin] Self.ElementType:
+    def __getitem__(ref self, idx: Int) -> ref[self._data] Self.ElementType:
         debug_assert(
             0 <= idx < Self.size,
             "Index out of bounds: ", idx, " should be in [0, ", Self.size, ")",
@@ -104,24 +102,8 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
             0 <= idx < Self.size,
             "The index provided must be within the range [0, len(List) -1] when using List.unsafe_set()",
         )
-        (self._ptr + idx).destroy_pointee()
-        (self._ptr + idx).init_pointee_move(value^)
-
-    def __del__(deinit self):
-        _constrained_conforms_to[
-            conforms_to(Self.ElementType, ImplicitlyDestructible),
-            Parent=Self,
-            Element = Self.ElementType,
-            ParentConformsTo="ImplicitlyDestructible",
-        ]()
-        comptime TDestructible = downcast[
-            Self.ElementType, ImplicitlyDestructible
-        ]
-
-        comptime if not TDestructible.__del__is_trivial:
-            comptime for idx in range(Self.size):
-                var ptr = self.unsafe_ptr() + idx
-                ptr.bitcast[TDestructible]().destroy_pointee()
+        (self._data.unsafe_ptr() + idx).destroy_pointee()
+        (self._data.unsafe_ptr() + idx).init_pointee_move(value^)
 
 
 struct StackBuffer[T: Copyable & ImplicitlyDestructible, N: Int](Movable):

@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 SHA-NI implementation In Mojo.
-By Libalpm64, attribution not required.
 """
 
 from std.sys import llvm_intrinsic, CompilationTarget, prefetch, PrefetchOptions
@@ -11,7 +7,7 @@ from std.memory import UnsafePointer, bitcast
 from .utils import StackBuffer
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
-from .sha2 import SHA256_IV
+from .sha2 import SHA256_IV, sha256_transform
 
 comptime SIMD128 = SIMD[DType.uint32, 4]
 comptime PAL_0 = 1
@@ -43,7 +39,12 @@ comptime SHA256_K = SIMD[DType.uint32, 64](
 
 @always_inline
 def has_x86_sha_ni() -> Bool:
-    return CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]()
+    return CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]()
+
+
+@always_inline
+def has_arm_sha2() -> Bool:
+    return CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86()
 
 
 @always_inline("nodebug")
@@ -71,6 +72,38 @@ def _msg2(a: SIMD128, b: SIMD128) -> SIMD128:
 
 
 @always_inline("nodebug")
+def _arm_sha256h(abcd: SIMD128, efgh: SIMD128, wk: SIMD128) -> SIMD128:
+    comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86():
+        return llvm_intrinsic["llvm.aarch64.crypto.sha256h", SIMD128, has_side_effect=False](abcd, efgh, wk)
+    else:
+        return SIMD128(0)
+
+
+@always_inline("nodebug")
+def _arm_sha256h2(efgh: SIMD128, abcd: SIMD128, wk: SIMD128) -> SIMD128:
+    comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86():
+        return llvm_intrinsic["llvm.aarch64.crypto.sha256h2", SIMD128, has_side_effect=False](efgh, abcd, wk)
+    else:
+        return SIMD128(0)
+
+
+@always_inline("nodebug")
+def _arm_sha256su0(w0_3: SIMD128, w4_7: SIMD128) -> SIMD128:
+    comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86():
+        return llvm_intrinsic["llvm.aarch64.crypto.sha256su0", SIMD128, has_side_effect=False](w0_3, w4_7)
+    else:
+        return SIMD128(0)
+
+
+@always_inline("nodebug")
+def _arm_sha256su1(tw0_3: SIMD128, w8_11: SIMD128, w12_15: SIMD128) -> SIMD128:
+    comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86():
+        return llvm_intrinsic["llvm.aarch64.crypto.sha256su1", SIMD128, has_side_effect=False](tw0_3, w8_11, w12_15)
+    else:
+        return SIMD128(0)
+
+
+@always_inline("nodebug")
 def byte_swap32(v: SIMD128) -> SIMD128:
     var bytes = bitcast[DType.uint8, 16](v)
     var swapped = bytes.shuffle[3,2,1,0, 7,6,5,4, 11,10,9,8, 15,14,13,12]()
@@ -93,16 +126,61 @@ def prefetch_next_block(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]):
 
 
 def sha256ni_transform(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]) -> SIMD[DType.uint32, 8]:
+    # fall back to the scalar transform so unsupported CPUs never get zeros
+    comptime if CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]():
+        return _sha256ni_transform_x86(state, block)
+    elif CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86():
+        return _sha256ni_transform_arm(state, block)
+    else:
+        return sha256_transform(state, block)
+
+
+def _sha256ni_transform_arm(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]) -> SIMD[DType.uint32, 8]:
     var ptr = block.unsafe_ptr()
-    
-    # states:  s1 = [H, G, D, C], s0 = [F, E, B, A]
+
+    # st0 = [A, B, C, D], st1 = [E, F, G, H].
+    var st0 = SIMD128(state[0], state[1], state[2], state[3])
+    var st1 = SIMD128(state[4], state[5], state[6], state[7])
+    var old_st0 = st0
+    var old_st1 = st1
+
+    var w = InlineArray[SIMD128, 4](uninitialized=True)
+    w[0] = Load(ptr)
+    w[1] = Load(ptr + 16)
+    w[2] = Load(ptr + 32)
+    w[3] = Load(ptr + 48)
+
+    comptime for i in range(16):
+        var wk = w[i & 3] + SIMD128(SHA256_K[4 * i], SHA256_K[4 * i + 1], SHA256_K[4 * i + 2], SHA256_K[4 * i + 3])
+        comptime if i < 12:
+            w[i & 3] = _arm_sha256su1(
+                _arm_sha256su0(w[i & 3], w[(i + 1) & 3]),
+                w[(i + 2) & 3],
+                w[(i + 3) & 3],
+            )
+        var tmp = st0
+        st0 = _arm_sha256h(st0, st1, wk)
+        st1 = _arm_sha256h2(st1, tmp, wk)
+
+    st0 += old_st0
+    st1 += old_st1
+
+    return SIMD[DType.uint32, 8](
+        st0[0], st0[1], st0[2], st0[3], st1[0], st1[1], st1[2], st1[3]
+    )
+
+
+def _sha256ni_transform_x86(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]) -> SIMD[DType.uint32, 8]:
+    var ptr = block.unsafe_ptr()
+
+    # s1 = [H, G, D, C], s0 = [F, E, B, A]
     var s1 = SIMD128(state[7], state[6], state[3], state[2])
     var s0 = SIMD128(state[5], state[4], state[1], state[0])
     
     var old_s0 = s0
     var old_s1 = s1
     
-    # expand all 64 words (16 SIMD registers)
+    # expand all 64 words to 16 simd registers
     var w0 = Load(ptr)
     var w1 = Load(ptr + 16)
     var w2 = Load(ptr + 32)
@@ -193,4 +271,4 @@ def sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     return output^
 
 def has_sha_ni() -> Bool:
-    return has_x86_sha_ni()
+    return has_x86_sha_ni() or has_arm_sha2()

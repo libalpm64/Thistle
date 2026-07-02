@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 ChaCha20 stream cipher implementation per RFC 7539
-By Libalpm no attribution required
 """
 
 from std.memory import bitcast
@@ -336,13 +332,22 @@ struct ChaCha20:
         self.nonce = bitcast[DType.uint32, 3](nonce_bytes)
         self.counter = counter
 
+    def _check_counter_space(self, data_len: Int) raises:
+        var blocks_needed = UInt64((data_len + 63) // 64)
+        var space = UInt64(0x100000000) - UInt64(self.counter)
+        if blocks_needed > space:
+            raise Error("ChaCha20 counter would wrap; use a new nonce")
+
     def encrypt_into[origin: Origin[mut=True]](
         mut self,
         plaintext: Span[UInt8, ...],
         mut ciphertext: Span[mut=True, UInt8, origin],
-    ):
+    ) raises:
         """Encrypt plaintext into caller-owned ciphertext storage and advance counter."""
         var len_pt = len(plaintext)
+        if len(ciphertext) < len_pt:
+            raise Error("ChaCha20 ciphertext buffer too small")
+        self._check_counter_space(len_pt)
         var ciphertext_ptr = ciphertext.unsafe_ptr()
         var block_idx = 0
         var offset = 0
@@ -384,14 +389,15 @@ struct ChaCha20:
         mut self,
         ciphertext: Span[UInt8, ...],
         mut plaintext: Span[mut=True, UInt8, origin],
-    ):
+    ) raises:
         self.encrypt_into(ciphertext, plaintext)
 
     def encrypt_inplace[origin: Origin[mut=True]](
         mut self, mut data: Span[mut=True, UInt8, origin]
-    ):
+    ) raises:
         """Encrypt/decrypt in place and advance counter."""
         var len_data = len(data)
+        self._check_counter_space(len_data)
         var data_ptr = data.unsafe_ptr()
         var block_idx = 0
         var offset = 0

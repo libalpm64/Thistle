@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 AES-NI implementation
-By Libalpm64 no attribution required.
 """
 
 from std.sys import llvm_intrinsic, CompilationTarget

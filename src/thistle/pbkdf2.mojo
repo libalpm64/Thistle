@@ -1,10 +1,6 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 PBKDF2 (Password-Based Key Derivation Function 2) Implementation in Mojo
 SP 800-132 / FIPS 140-2 / RFC 8018
-By Libalpm64, Attribute not required.
 """
 from std.collections import List
 from std.memory import memset_zero, memcpy, UnsafePointer
@@ -126,7 +122,11 @@ struct PBKDF2SHA256(Movable):
 
 def pbkdf2_hmac_sha256(
     password: Span[UInt8, ...], salt: Span[UInt8, ...], iterations: Int, dkLen: Int
-) -> List[UInt8]:
+) raises -> List[UInt8]:
+    if iterations < 1:
+        raise Error("PBKDF2 iterations must be at least 1")
+    if dkLen < 1:
+        raise Error("PBKDF2 dkLen must be at least 1")
     var ctx = PBKDF2SHA256(password)
     return ctx.derive(salt, iterations, dkLen)
 
@@ -224,7 +224,11 @@ struct PBKDF2SHA512(Movable):
 
 def pbkdf2_hmac_sha512(
     password: Span[UInt8, ...], salt: Span[UInt8, ...], iterations: Int, dkLen: Int
-) -> List[UInt8]:
+) raises -> List[UInt8]:
+    if iterations < 1:
+        raise Error("PBKDF2 iterations must be at least 1")
+    if dkLen < 1:
+        raise Error("PBKDF2 dkLen must be at least 1")
     var ctx = PBKDF2SHA512(password)
     return ctx.derive(salt, iterations, dkLen)
 

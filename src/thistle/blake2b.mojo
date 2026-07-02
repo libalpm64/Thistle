@@ -1,10 +1,6 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 BLAKE2b Implementation in Mojo
 RFC 7693
-By Libalpm64, Attribute not required.
 """
 
 from std.collections import List
@@ -98,6 +94,7 @@ struct Blake2b(Movable):
     var key_len: Int
 
     def __init__(out self, out_len: Int = 64):
+        debug_assert(1 <= out_len <= 64, "BLAKE2b digest length must be 1..64")
         self.out_len = out_len
         self.key_len = 0
         self.h = BLAKE2B_IV
@@ -115,6 +112,8 @@ struct Blake2b(Movable):
         self.h[0] ^= p0
 
     def __init__(out self, out_len: Int, key: Span[UInt8, ...]):
+        debug_assert(1 <= out_len <= 64, "BLAKE2b digest length must be 1..64")
+        debug_assert(len(key) <= 64, "BLAKE2b key must be at most 64 bytes")
         self.out_len = out_len
         self.key_len = len(key)
         self.h = BLAKE2B_IV
@@ -274,7 +273,9 @@ def string_to_bytes(s: String) -> List[UInt8]:
     return data^
 
 
-def blake2b_hash(data: Span[UInt8, ...], out_len: Int = 64) -> List[UInt8]:
+def blake2b_hash(data: Span[UInt8, ...], out_len: Int = 64) raises -> List[UInt8]:
+    if out_len < 1 or out_len > 64:
+        raise Error("BLAKE2b digest length must be 1..64")
     var ctx = Blake2b(out_len)
     ctx.update(data)
     return ctx.finalize()
@@ -282,13 +283,17 @@ def blake2b_hash(data: Span[UInt8, ...], out_len: Int = 64) -> List[UInt8]:
 
 def blake2b_hash_keyed(
     data: Span[UInt8, ...], key: Span[UInt8, ...], out_len: Int = 64
-) -> List[UInt8]:
+) raises -> List[UInt8]:
+    if out_len < 1 or out_len > 64:
+        raise Error("BLAKE2b digest length must be 1..64")
+    if len(key) > 64:
+        raise Error("BLAKE2b key must be at most 64 bytes")
     var ctx = Blake2b(out_len, key)
     ctx.update(data)
     return ctx.finalize()
 
 
-def blake2b_hash_string(s: String, out_len: Int = 64) -> String:
+def blake2b_hash_string(s: String, out_len: Int = 64) raises -> String:
     var data = string_to_bytes(s)
     var hash = blake2b_hash(Span[UInt8, ...](data), out_len)
     return bytes_to_hex(hash)

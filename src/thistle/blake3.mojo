@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies, Martinyuvk.
-
 """
 BLAKE3 cryptographic hash function
-By Libalpm64, Martinvuyk no attribution required.
 """
 
 from std.algorithm import parallelize
@@ -105,6 +101,26 @@ def g_v[
     g_v_half1[w](a, b, c, d, x)
     g_v_half2[w](a, b, c, d, y)
 
+
+@always_inline
+def g_idx[
+    w: Int, ai: Int, bi: Int, ci: Int, di: Int
+](
+    mut v: StackInlineArray[SIMD[DType.uint32, w], 16],
+    x: SIMD[DType.uint32, w],
+    y: SIMD[DType.uint32, w],
+):
+    # copy in/out so we never hold two mut refs into the same array
+    var a = v[ai]
+    var b = v[bi]
+    var c = v[ci]
+    var d = v[di]
+    g_v[w](a, b, c, d, x, y)
+    v[ai] = a
+    v[bi] = b
+    v[ci] = c
+    v[di] = d
+
 @always_inline
 def compress_internal[
     w: Int
@@ -131,14 +147,14 @@ def compress_internal[
     @parameter
     @always_inline
     def round():
-        g_v(v[0], v[4], v[8], v[12], m[0], m[1])
-        g_v(v[1], v[5], v[9], v[13], m[2], m[3])
-        g_v(v[2], v[6], v[10], v[14], m[4], m[5])
-        g_v(v[3], v[7], v[11], v[15], m[6], m[7])
-        g_v(v[0], v[5], v[10], v[15], m[8], m[9])
-        g_v(v[1], v[6], v[11], v[12], m[10], m[11])
-        g_v(v[2], v[7], v[8], v[13], m[12], m[13])
-        g_v(v[3], v[4], v[9], v[14], m[14], m[15])
+        g_idx[w, 0, 4, 8, 12](v, m[0], m[1])
+        g_idx[w, 1, 5, 9, 13](v, m[2], m[3])
+        g_idx[w, 2, 6, 10, 14](v, m[4], m[5])
+        g_idx[w, 3, 7, 11, 15](v, m[6], m[7])
+        g_idx[w, 0, 5, 10, 15](v, m[8], m[9])
+        g_idx[w, 1, 6, 11, 12](v, m[10], m[11])
+        g_idx[w, 2, 7, 8, 13](v, m[12], m[13])
+        g_idx[w, 3, 4, 9, 14](v, m[14], m[15])
     
     @parameter
     @always_inline
@@ -158,24 +174,6 @@ def compress_internal[
     out_ptr.bitcast[UInt32]().store(
         v.unsafe_ptr().bitcast[UInt32]().load[width=w * 16]()
     )
-
-@always_inline
-def g_vertical(
-    mut a: SIMD[DType.uint32, 8],
-    mut b: SIMD[DType.uint32, 8],
-    mut c: SIMD[DType.uint32, 8],
-    mut d: SIMD[DType.uint32, 8],
-    x: SIMD[DType.uint32, 8],
-    y: SIMD[DType.uint32, 8],
-):
-    a = a + b + x
-    d = bit_rotr[16, 8](d ^ a)
-    c = c + d
-    b = bit_rotr[12, 8](b ^ c)
-    a = a + b + y
-    d = bit_rotr[8, 8](d ^ a)
-    c = c + d
-    b = bit_rotr[7, 8](b ^ c)
 
 @always_inline
 def compress_core(
@@ -232,14 +230,14 @@ def compress_internal_16way(
     @parameter
     @always_inline
     def round():
-        g_v[16](v[0], v[4], v[8], v[12], m[0], m[1])
-        g_v[16](v[1], v[5], v[9], v[13], m[2], m[3])
-        g_v[16](v[2], v[6], v[10], v[14], m[4], m[5])
-        g_v[16](v[3], v[7], v[11], v[15], m[6], m[7])
-        g_v[16](v[0], v[5], v[10], v[15], m[8], m[9])
-        g_v[16](v[1], v[6], v[11], v[12], m[10], m[11])
-        g_v[16](v[2], v[7], v[8], v[13], m[12], m[13])
-        g_v[16](v[3], v[4], v[9], v[14], m[14], m[15])
+        g_idx[16, 0, 4, 8, 12](v, m[0], m[1])
+        g_idx[16, 1, 5, 9, 13](v, m[2], m[3])
+        g_idx[16, 2, 6, 10, 14](v, m[4], m[5])
+        g_idx[16, 3, 7, 11, 15](v, m[6], m[7])
+        g_idx[16, 0, 5, 10, 15](v, m[8], m[9])
+        g_idx[16, 1, 6, 11, 12](v, m[10], m[11])
+        g_idx[16, 2, 7, 8, 13](v, m[12], m[13])
+        g_idx[16, 3, 4, 9, 14](v, m[14], m[15])
 
     @parameter
     @always_inline
@@ -296,9 +294,7 @@ def compress_parallel_8(
         for v_idx in range(len(_v_idxes_arr)):
             comptime v_i = _v_idxes_arr[v_idx]
             comptime m_i = round_idxes[v_idx]
-            g_vertical(
-                v[v_i[0]], v[v_i[1]], v[v_i[2]], v[v_i[3]], m[m_i[0]], m[m_i[1]]
-            )
+            g_idx[8, v_i[0], v_i[1], v_i[2], v_i[3]](v, m[m_i[0]], m[m_i[1]])
 
     out_ptr[0] = v[0] ^ v[8]
     out_ptr[1] = v[1] ^ v[9]
@@ -375,12 +371,8 @@ def compress_parallel_16_per_lane(
         for v_idx in range(len(_v_idxes_arr)):
             comptime v = _v_idxes_arr[v_idx]
             comptime m_i = round_idxes[v_idx]
-            g_vertical(
-                va[v[0]], va[v[1]], va[v[2]], va[v[3]], ma[m_i[0]], ma[m_i[1]]
-            )
-            g_vertical(
-                vb[v[0]], vb[v[1]], vb[v[2]], vb[v[3]], mb[m_i[0]], mb[m_i[1]]
-            )
+            g_idx[8, v[0], v[1], v[2], v[3]](va, ma[m_i[0]], ma[m_i[1]])
+            g_idx[8, v[0], v[1], v[2], v[3]](vb, mb[m_i[0]], mb[m_i[1]])
 
     var res_a: StackInlineArray[SIMD[DType.uint32, 8], 8] = [
         va[0] ^ va[8],

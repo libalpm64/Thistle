@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 KCipher-2 stream cipher implemented in Mojo.
-By Libalpm no attribution required
 """
 
 from std.utils import StaticTuple

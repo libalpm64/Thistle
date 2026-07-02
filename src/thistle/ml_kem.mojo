@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 ML-KEM primitives implementation in Mojo
-By Libalpm64, no attribution required.
 """
 
 from std.collections import List
@@ -484,7 +480,7 @@ def poly_frombytes(mut r: Poly, a: Span[UInt8, ...]) raises -> Bool:
         var t = _u24_le(a, 3 * i)
         r.coeffs[2 * i] = Int16(t & 0xFFF)
         r.coeffs[2 * i + 1] = Int16((t >> 12) & 0xFFF)
-        ok = ok and r.coeffs[2 * i] < Int16(Q) and r.coeffs[2 * i + 1] < Int16(Q)
+        ok = ok & (r.coeffs[2 * i] < Int16(Q)) & (r.coeffs[2 * i + 1] < Int16(Q))
     return ok
 
 
@@ -503,7 +499,7 @@ def polyvec_frombytes(mut r: Polyvec, a: Span[UInt8, ...], k: Int) raises -> Boo
         raise Error("ML-KEM polyvec_frombytes invalid buffer length")
     var ok = True
     for i in range(k):
-        ok = poly_frombytes(r.vec[i], a[i * POLYBYTES : (i + 1) * POLYBYTES]) and ok
+        ok = poly_frombytes(r.vec[i], a[i * POLYBYTES : (i + 1) * POLYBYTES]) & ok
     return ok
 
 
@@ -641,10 +637,9 @@ def poly_frommsg(mut r: Poly, msg: Span[UInt8, ...]) raises:
         raise Error("ML-KEM poly_frommsg invalid message length")
     for i in range(N // 8):
         for j in range(8):
-            var bit = (msg[i] >> UInt8(j)) & 1
-            r.coeffs[8 * i + j] = Int16(0)
-            if bit != 0:
-                r.coeffs[8 * i + j] = Int16((Q + 1) // 2)
+            # message bits are secret during decaps, don't branch on them
+            var mask = Int16(0) - Int16((msg[i] >> UInt8(j)) & 1)
+            r.coeffs[8 * i + j] = mask & Int16((Q + 1) // 2)
 
 
 def poly_tomsg(mut msg: List[UInt8], a: Poly):
@@ -1673,9 +1668,7 @@ def mlkem_keygen_seed(seed: Span[UInt8, ...], parameter_set: String) raises -> T
     return (ek^, dk^)
 
 
-# FIPS 203 external ML-KEM.KeyGen().
-# Generates fresh d || z inside the cryptographic module, then calls the
-# deterministic internal seed expansion used by KATs and test vectors.
+# FIPS 203 ML-KEM.KeyGen(): fresh d || z, then deterministic expansion.
 def mlkem_keygen(parameter_set: String) raises -> Tuple[List[UInt8], List[UInt8]]:
     var seed = random_bytes(2 * SYMBYTES)
     var result = mlkem_keygen_seed(Span[UInt8, ...](seed), parameter_set)
@@ -1734,10 +1727,7 @@ def mlkem1024_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
     return (ek^, dk^)
 
 
-# FIPS 203 external ML-KEM.Encaps().
-# Generates fresh m inside the cryptographic module, then calls the
-# deterministic/internal encapsulation used by KATs and test vectors.
-# Return order follows the external KEM API: (ciphertext, shared_secret, ok).
+# FIPS 203 ML-KEM.Encaps(): fresh m, returns (ciphertext, shared_secret, ok).
 def mlkem_encaps(ek_bytes: Span[UInt8, ...], parameter_set: String) raises -> Tuple[List[UInt8], List[UInt8], Bool]:
     var m = random_bytes(SYMBYTES)
     var result = mlkem_encaps_seed(ek_bytes, Span[UInt8, ...](m), parameter_set)

@@ -1,8 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
 """
 Wycheproof X25519 test suite
-By Libalpm64
 """
 from std.collections import List
 from std.python import Python
@@ -27,7 +24,7 @@ def matches32(actual: StackInlineArray[UInt8, 32], expected: List[UInt8]) -> Boo
             return False
     return True
 
-def run_case(tc_id: String, private_hex: String, public_hex: String, shared_hex: String) -> Bool:
+def run_case(tc_id: String, private_hex: String, public_hex: String, shared_hex: String) raises -> Bool:
     var private_key = hex_to_bytes(private_hex)
     var public_key = hex_to_bytes(public_hex)
     var expected = hex_to_bytes(shared_hex)

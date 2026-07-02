@@ -1,9 +1,5 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Libalpm64, Lostlab Technologies.
-
 """
 ML-DSA implementation in Mojo.
-By Libalpm64, no attribution required.
 
 Security notice:
 ML-DSA is incredibly difficult to implement safely because signing uses rejection sampling
@@ -256,8 +252,7 @@ def _ct_select_u32(false_value: UInt32, true_value: UInt32, choice: UInt32) -> U
     return false_value ^ (mask & (false_value ^ true_value))
 
 
-# Volatile stores are stronger cleanup than std.memory.memset_zero, which is ordinary stores.
-# Note: Still no formal guarantee of safety.
+# volatile stores so the wipe can't be optimized away
 def _zero_list_u8(mut data: List[UInt8]):
     var ptr = data.unsafe_ptr()
     for i in range(len(data)):
@@ -300,9 +295,9 @@ def _bytes_equal(a: Span[UInt8, ...], b: Span[UInt8, ...]) -> Bool:
 
 @always_inline
 def _field_reduce_once(a: UInt32) -> UInt32:
-    if a >= Q:
-        return a - Q
-    return a
+    # branchless: runs on secret coefficients
+    var t = a - Q
+    return t + ((UInt32(0) - (t >> 31)) & Q)
 
 
 @always_inline
@@ -349,22 +344,19 @@ def _field_from_montgomery(a: UInt32) -> UInt32:
 
 def _centered_mod(r: UInt32) -> Int32:
     var x = Int32(_field_from_montgomery(r))
-    if x <= Int32(Q // 2):
-        return x
-    return x - Int32(Q)
+    var mask = (Int32(Q // 2) - x) >> 31
+    return x + (mask & (Int32(0) - Int32(Q)))
 
 
 def _infinity_norm(r: UInt32) -> UInt32:
     var x = Int32(_field_from_montgomery(r))
-    if x <= Int32(Q // 2):
-        return UInt32(x)
-    return UInt32(Int32(Q) - x)
+    var mask = (Int32(Q // 2) - x) >> 31
+    return UInt32(x + (mask & (Int32(Q) - 2 * x)))
 
 
 def _abs_i32(x: Int32) -> UInt32:
-    if x < 0:
-        return UInt32(-x)
-    return UInt32(x)
+    var mask = x >> 31
+    return UInt32((x ^ mask) - mask)
 
 
 def _poly_add_into(mut r: List[UInt32], b: List[UInt32]):
@@ -651,25 +643,25 @@ def _decompose32(r: UInt32) -> Tuple[UInt8, Int32]:
     var x = _field_from_montgomery(r)
     var r1 = _high_bits32(x)
     var r0 = Int32(x) - Int32(r1) * 2 * Int32((Q - 1) // 32)
-    if Int32(Q // 2 + 1) <= r0:
-        r0 -= Int32(Q)
+    var mask = (r0 - Int32(Q // 2 + 1)) >> 31
+    r0 -= ~mask & Int32(Q)
     return (r1, r0)
 
 
 def _high_bits88(x: UInt32) -> UInt8:
     var r1 = (x + 127) >> 7
     r1 = (r1 * 11275 + (1 << 23)) >> 24
-    if r1 == 44:
-        r1 = 0
-    return UInt8(r1)
+    var d = r1 ^ 44
+    var nonzero_mask = UInt32(0) - ((d | (UInt32(0) - d)) >> 31)
+    return UInt8(r1 & nonzero_mask)
 
 
 def _decompose88(r: UInt32) -> Tuple[UInt8, Int32]:
     var x = _field_from_montgomery(r)
     var r1 = _high_bits88(x)
     var r0 = Int32(x) - Int32(r1) * 2 * Int32((Q - 1) // 88)
-    if Int32(Q // 2 + 1) <= r0:
-        r0 -= Int32(Q)
+    var mask = (r0 - Int32(Q // 2 + 1)) >> 31
+    r0 -= ~mask & Int32(Q)
     return (r1, r0)
 
 
@@ -1180,7 +1172,6 @@ def _compute_message_hash(tr: Span[UInt8, ...], msg: Span[UInt8, ...], context: 
     if len(context) > 255:
         raise Error("ML-DSA context too long")
 
-	# Stream buffer from SHAKE_final
     var ctx = SHA3Context(1088)
     sha3_update(ctx, tr)
 
@@ -1354,8 +1345,7 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
     var nonce = shake256(Span[UInt8, ...](ptr=h_input.ptr(), length=h_input.len()), 64)
     _zero_stack_u8(h_input)
 
-    # Signing-attempt scratch is allocated once and reused.
-    # Note: Still not constant time but reduces a lot of "noise".
+    # signing scratch allocated once and reused across attempts
     var y = DSAPolyVec[MAX_L]()
     var y_hat = DSAPolyVec[MAX_L]()
     var w = DSAPolyVec[MAX_K]()
