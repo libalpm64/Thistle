@@ -1,0 +1,10 @@
+title: Thistle
+description: High-performance cryptography library written in Mojo
+remote_theme: just-the-docs/just-the-docs
+color_scheme: dark
+url: https://libalpm64.github.io
+baseurl: /Thistle
+aux_links:
+  GitHub: https://github.com/libalpm64/Thistle
+plugins:
+  - jekyll-remote-theme
