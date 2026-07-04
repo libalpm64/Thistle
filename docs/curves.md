@@ -5,9 +5,7 @@ nav_order: 5
 
 # Curves
 
-Default: **X25519** (exchange), **Ed25519** (signatures). Constant-time
-scalar mult (mask-select ladder, no secret-dependent branches). Use
-P-256/P-384 only where NIST curves are mandated.
+Default: **X25519** for exchange and **Ed25519** for signatures. Scalar mult is constant-time via mask-select ladder with no secret-dependent branches. Use P-256/P-384 only where NIST curves are mandated.
 
 ## `thistle.x25519`
 
@@ -24,9 +22,8 @@ var shared = InlineArray[UInt8, 32](uninitialized=True)
 x25519(my_secret_span, their_public_span, shared.unsafe_ptr())
 ```
 
-- Gotcha: raises if either input span is shorter than 32 bytes.
-- Gotcha: hash the shared secret before using it as a key
-  (`sha256_hash(shared)`), don't use it raw.
+- Note: raises if either input span is shorter than 32 bytes.
+- Note: hash the shared secret before using it as a key. Don't use it raw.
 
 ## `thistle.ed25519_generate_public_key` / `ed25519_sign` / `ed25519_verify`
 
@@ -42,9 +39,8 @@ ed25519_sign(sk_span, msg, sig.unsafe_ptr())
 var ok = ed25519_verify(pk_span, msg, sig_span)
 ```
 
-- Gotcha: `private_key` must be exactly 32 bytes, or it raises (not `>=`).
-- Gotcha: strict RFC 8032 verify — non-canonical `A`/`R`, `S >= L`, or
-  small-order components are rejected. Not ZIP-215 compatible.
+- Note: `private_key` must be exactly 32 bytes. It raises otherwise.
+- Note: verify is strict RFC 8032. Non-canonical `A`/`R`, `S >= L`, and small-order components are rejected. Not ZIP-215 compatible.
 
 ## `thistle.p256_public_key` / `p256_ecdh` (also `p384_*`)
 
@@ -53,8 +49,7 @@ def p256_public_key(private_key: Span[UInt8, ...], output: UnsafePointer[UInt8, 
 def p256_ecdh(private_key: Span[UInt8, ...], public_key: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]) -> Bool
 ```
 
-Points are uncompressed `04 || X || Y` — `P256_POINT_SIZE` (65) /
-`P384_POINT_SIZE` (97) bytes. Compressed `02/03 || X` accepted on decode.
+Points are uncompressed `04 || X || Y`. Size is `P256_POINT_SIZE` (65) or `P384_POINT_SIZE` (97) bytes. Compressed `02/03 || X` is accepted on decode.
 
 ```mojo
 var pub = InlineArray[UInt8, P256_POINT_SIZE](uninitialized=True)
@@ -66,6 +61,5 @@ if not p256_ecdh(sk_span, their_point_span, shared.unsafe_ptr()):
     raise Error("invalid peer point")
 ```
 
-- Gotcha: these return `Bool`, they do not raise. Check the result —
-  `False` means invalid key/point/infinity, silently ignoring it is a bug.
-- `p384_public_key` / `p384_ecdh`: identical shape, 48-byte scalars.
+- Note: these return `Bool`. They do not raise. Check the result. `False` means invalid key/point/infinity. Silently ignoring it is a bug.
+- `p384_public_key` / `p384_ecdh` are identical in shape with 48-byte scalars.

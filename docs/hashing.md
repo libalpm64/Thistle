@@ -5,9 +5,7 @@ nav_order: 2
 
 # Hashing
 
-Default: **BLAKE3** (`blake3_hash`). Use SHA-256 for interop, `sha256ni_hash`
-if you want it hardware-accelerated (immune to cache timing — no table
-lookups, register-only).
+Default: **BLAKE3** (`blake3_hash`). Use SHA-256 for interop. Use `sha256ni_hash` for hardware acceleration. It's immune to cache timing since it runs register-only with no table lookups.
 
 ## `thistle.sha256_hash`
 
@@ -26,10 +24,9 @@ var d = sha256_hash(String("abc").as_bytes())
 def sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]
 ```
 
-Same output as `sha256_hash`. Dispatches to SHA-NI / ARMv8 crypto ext at
-compile time; falls back to scalar transform if neither is present.
+Same output as `sha256_hash`. Dispatches to SHA-NI or ARMv8 crypto ext at compile time. Falls back to the scalar transform if neither is present.
 
-- Gotcha: none — output is always correct, this is a pure perf switch.
+- Note: output is always correct. This is a pure perf switch.
 
 ## `thistle.sha3_256` / `sha3_512`
 
@@ -79,7 +76,8 @@ var d = blake2b_hash(data, out_len=32)
 var mac = blake2b_hash_keyed(data, key)
 ```
 
-- Gotcha: raises if `out_len` not in `1..64`, or `key` longer than 64 bytes.
+- Note: raises if `out_len` not in `1..64`.
+- Note: raises if `key` is longer than 64 bytes.
 
 ## Streaming SHA-256
 
@@ -94,5 +92,4 @@ var out = InlineArray[UInt8, 32](uninitialized=True)
 sha256_final_to_buffer(ctx, out.unsafe_ptr())
 ```
 
-- `SHA256Context`/`SHA512Context` have `.wipe()` — call it if the context
-  absorbed secret input.
+- `SHA256Context`/`SHA512Context` have `.wipe()`. Call it if the context absorbed secret input.

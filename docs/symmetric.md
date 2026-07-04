@@ -5,10 +5,7 @@ nav_order: 4
 
 # Symmetric
 
-Default: **ChaCha20**. ARX (add/rotate/xor) — no lookup tables, immune to
-cache-timing by construction, and faster than software AES on CPU. Use AES
-only where a spec requires it, and prefer `has_aes_ni()` when you do (the
-software S-box path is table-based, not cache-timing safe).
+Default: **ChaCha20**. It's ARX (add/rotate/xor) with no lookup tables so it's immune to cache-timing by construction. It's also faster than software AES on CPU. Use AES only where a spec requires it. Prefer `has_aes_ni()` when you do since the software S-box path is table-based and not cache-timing safe.
 
 ## `thistle.ChaCha20`
 
@@ -29,12 +26,10 @@ var dec = ChaCha20(key, nonce)     # same key + nonce
 dec.encrypt_inplace(buffer_span)   # decrypt == encrypt
 ```
 
-- Gotcha: never reuse a (key, nonce) pair across two different plaintexts.
-- Gotcha: raises past ~256 GiB encrypted under one nonce (counter wrap
-  guard) instead of reusing keystream.
-- Gotcha: `encrypt_into` raises if `ciphertext` is shorter than `plaintext`.
-- Gotcha: no authentication. Pair with `hmac_sha256` over the ciphertext if
-  you need tamper detection.
+- Note: never reuse a (key, nonce) pair across two different plaintexts.
+- Note: raises past ~256 GiB encrypted under one nonce instead of reusing keystream.
+- Note: `encrypt_into` raises if `ciphertext` is shorter than `plaintext`.
+- Note: no authentication. Pair with `hmac_sha256` over the ciphertext for tamper detection.
 
 ## `thistle.CamelliaCipher`
 
@@ -55,14 +50,14 @@ var pt = cipher.decrypt(ct)
 cipher.wipe()
 ```
 
-- Gotcha: constructor raises on any key length other than 16/24/32.
-- Gotcha: S-box lookups are table-based, not cache-timing constant-time.
+- Note: constructor raises on any key length other than 16/24/32.
+- Note: S-box lookups are table-based. Not cache-timing constant-time.
 
 ## AES
 
-`thistle.aes` — software (table-based, not cache-timing safe).
-`thistle.aes_ni` — hardware, x86 + ARM; check `has_aes_ni()`.
-`thistle.aes_gpu` — `aes_gpu_kernel_ecb/ctr/gcm` for bulk data.
+`thistle.aes` is software. Table-based and not cache-timing safe.
+`thistle.aes_ni` is hardware for x86 and ARM. Check `has_aes_ni()` first.
+`thistle.aes_gpu` has `aes_gpu_kernel_ecb/ctr/gcm` for bulk data.
 
 ## `thistle.KCipher2`
 

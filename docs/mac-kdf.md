@@ -18,8 +18,7 @@ def hmac_sha512(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]
 var tag = hmac_sha256(key, message)   # 32 bytes
 ```
 
-- Gotcha: compare tags in constant time. `==` on `List[UInt8]` is not
-  guaranteed constant-time; do a manual all-bytes XOR-accumulate compare.
+- Note: compare tags in constant time. `==` on `List[UInt8]` is not guaranteed constant-time. Do a manual all-bytes XOR-accumulate compare.
 
 ## `thistle.pbkdf2_hmac_sha256` / `pbkdf2_hmac_sha512`
 
@@ -32,7 +31,7 @@ def pbkdf2_hmac_sha512(password: Span[UInt8, ...], salt: Span[UInt8, ...], itera
 var key = pbkdf2_hmac_sha256(password, salt, 600_000, 32)
 ```
 
-- Gotcha: raises if `iterations < 1` or `dkLen < 1`.
+- Note: raises if `iterations < 1` or `dkLen < 1`.
 
 ## `thistle.Argon2id`
 
@@ -53,8 +52,10 @@ var ctx = Argon2id(salt, memory_size_kb=65536, iterations=3, parallelism=4)
 var tag = ctx.hash(password)
 ```
 
-- Gotcha: raises if `parallelism` not in `[1, 2^24)`, `tag_length < 4`,
-  `memory_size_kb < 8 * parallelism`, or `iterations < 1`.
+- Note: raises if `parallelism` is not in `[1, 2^24)`.
+- Note: raises if `tag_length < 4`.
+- Note: raises if `memory_size_kb < 8 * parallelism`.
+- Note: raises if `iterations < 1`.
 
 ## `thistle.argon2id_hash_string`
 
@@ -66,5 +67,4 @@ def argon2id_hash_string(password: String, salt: String) raises -> String
 var hex = argon2id_hash_string("hunter2", "somesalt16bytes!")
 ```
 
-Fixed defaults (parallelism=4, tag_length=32, memory=64MB, iterations=3).
-Use `Argon2id` directly for custom parameters.
+Fixed defaults are parallelism=4 tag_length=32 memory=64MB iterations=3. Use `Argon2id` directly for custom parameters.
