@@ -9,12 +9,12 @@ Default: **Argon2id** for password hashing.
 
 ## `thistle.hmac_sha256` / `hmac_sha512`
 
-```mojo
+```python
 def hmac_sha256(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]
 def hmac_sha512(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]
 ```
 
-```mojo
+```python
 var tag = hmac_sha256(key, message)   # 32 bytes
 ```
 
@@ -22,12 +22,12 @@ var tag = hmac_sha256(key, message)   # 32 bytes
 
 ## `thistle.pbkdf2_hmac_sha256` / `pbkdf2_hmac_sha512`
 
-```mojo
+```python
 def pbkdf2_hmac_sha256(password: Span[UInt8, ...], salt: Span[UInt8, ...], iterations: Int, dkLen: Int) raises -> List[UInt8]
 def pbkdf2_hmac_sha512(password: Span[UInt8, ...], salt: Span[UInt8, ...], iterations: Int, dkLen: Int) raises -> List[UInt8]
 ```
 
-```mojo
+```python
 var key = pbkdf2_hmac_sha256(password, salt, 600_000, 32)
 ```
 
@@ -35,7 +35,7 @@ var key = pbkdf2_hmac_sha256(password, salt, 600_000, 32)
 
 ## `thistle.Argon2id`
 
-```mojo
+```python
 def __init__(out self, salt: Span[UInt8, ...],
              parallelism: Int = 4, tag_length: Int = 32,
              memory_size_kb: Int = 65536, iterations: Int = 3,
@@ -47,7 +47,7 @@ def hash(self, password: Span[UInt8, ...]) -> List[UInt8]
 Second constructor overload adds `secret: Span[UInt8, ...]` (pepper) and
 `ad: Span[UInt8, ...]` before the keyword params.
 
-```mojo
+```python
 var ctx = Argon2id(salt, memory_size_kb=65536, iterations=3, parallelism=4)
 var tag = ctx.hash(password)
 ```
@@ -59,11 +59,11 @@ var tag = ctx.hash(password)
 
 ## `thistle.argon2id_hash_string`
 
-```mojo
+```python
 def argon2id_hash_string(password: String, salt: String) raises -> String
 ```
 
-```mojo
+```python
 var hex = argon2id_hash_string("hunter2", "somesalt16bytes!")
 ```
 

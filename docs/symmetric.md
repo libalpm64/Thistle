@@ -9,7 +9,7 @@ Default: **ChaCha20**. It's ARX (add/rotate/xor) with no lookup tables so it's i
 
 ## `thistle.ChaCha20`
 
-```mojo
+```python
 def __init__(out self, key_bytes: SIMD[DType.uint8, 32],
              nonce_bytes: SIMD[DType.uint8, 12], counter: UInt32 = 1)
 
@@ -18,7 +18,7 @@ def encrypt_into[origin: Origin[mut=True]](mut self, plaintext: Span[UInt8, ...]
 def decrypt_into[origin: Origin[mut=True]](mut self, ciphertext: Span[UInt8, ...], mut plaintext: Span[mut=True, UInt8, origin]) raises
 ```
 
-```mojo
+```python
 var enc = ChaCha20(key, nonce)
 enc.encrypt_inplace(buffer_span)   # buffer_span is Span[mut=True, UInt8]
 
@@ -33,7 +33,7 @@ dec.encrypt_inplace(buffer_span)   # decrypt == encrypt
 
 ## `thistle.CamelliaCipher`
 
-```mojo
+```python
 def __init__(out self, key: Span[UInt8, ...]) raises   # 16, 24, or 32 bytes
 def encrypt(self, block: SIMD[DType.uint8, 16]) -> SIMD[DType.uint8, 16]
 def decrypt(self, block: SIMD[DType.uint8, 16]) -> SIMD[DType.uint8, 16]
@@ -43,7 +43,7 @@ def wipe(mut self)
 `Span[UInt8, ...]` overloads of `encrypt`/`decrypt` also exist (raise if
 not exactly 16 bytes).
 
-```mojo
+```python
 var cipher = CamelliaCipher(key)
 var ct = cipher.encrypt(block)
 var pt = cipher.decrypt(ct)

@@ -7,12 +7,12 @@ nav_order: 7
 
 ## `thistle.random_bytes` / `random_fill`
 
-```mojo
+```python
 def random_bytes(n: Int) raises -> List[UInt8]
 def random_fill(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) raises
 ```
 
-```mojo
+```python
 var key = random_bytes(32)
 random_fill(existing_buf.unsafe_ptr(), 64)
 ```

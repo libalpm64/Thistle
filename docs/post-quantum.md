@@ -9,13 +9,13 @@ FIPS 203 for ML-KEM and FIPS 204 for ML-DSA. Default parameter set is **768** fo
 
 ## `thistle.mlkem768_keygen` / `mlkem768_encaps` / `mlkem768_decaps`
 
-```mojo
+```python
 def mlkem768_keygen() raises -> Tuple[List[UInt8], List[UInt8]]                                   # (ek, dk)
 def mlkem768_encaps(ek_bytes: Span[UInt8, ...]) raises -> Tuple[List[UInt8], List[UInt8], Bool]   # (ct, ss, ok)
 def mlkem768_decaps(dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...]) raises -> Tuple[List[UInt8], Bool]  # (ss, ok)
 ```
 
-```mojo
+```python
 var keys = mlkem768_keygen()
 var enc = mlkem768_encaps(keys[0])
 var dec = mlkem768_decaps(keys[1], enc[0])
@@ -27,13 +27,13 @@ var dec = mlkem768_decaps(keys[1], enc[0])
 
 ## `thistle.mldsa65_keygen` / `mldsa_sign_hedged` / `mldsa_verify`
 
-```mojo
+```python
 def mldsa65_keygen() raises -> MLDSAPrivateKey
 def mldsa_sign_hedged(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Span[UInt8, ...]) raises -> List[UInt8]
 def mldsa_verify(pub: MLDSAPublicKey, msg: Span[UInt8, ...], sig: Span[UInt8, ...], context: Span[UInt8, ...]) raises -> Bool
 ```
 
-```mojo
+```python
 var priv = mldsa65_keygen()
 var ctx = Span[UInt8, ...](ptr=p, length=0)   # empty context if unused
 var sig = mldsa_sign_hedged(priv, msg, ctx)
