@@ -5,78 +5,48 @@ nav_order: 6
 
 # Post-Quantum
 
-A large quantum computer would break the [curve-based](curves) algorithms.
-Nobody has one yet, but data recorded today can be decrypted later —
-so anything that must stay secret for decades should start using
-quantum-resistant algorithms now. These are the two NIST picked as
-standards in 2024.
+FIPS 203 (ML-KEM) / FIPS 204 (ML-DSA). Default parameter set: **768** /
+**65**.
 
-**Which sizes?** `768` for ML-KEM and `65` for ML-DSA are the recommended
-middle settings. The smaller ones trade safety margin for speed, the bigger
-ones the reverse.
-
-## Quantum-safe key exchange (ML-KEM)
-
-Works like a locked mailbox rather than a handshake: the receiver publishes
-a public key, the sender uses it to produce a ciphertext plus a shared
-secret, and only the receiver can open the ciphertext to get the same
-secret.
+## `thistle.mlkem768_keygen` / `mlkem768_encaps` / `mlkem768_decaps`
 
 ```mojo
-from thistle import mlkem768_keygen, mlkem768_encaps, mlkem768_decaps
-
-def main() raises:
-    # receiver: make a key pair, publish public_key
-    var keys = mlkem768_keygen()
-    var public_key = keys[0]
-    var secret_key = keys[1]
-
-    # sender: lock a fresh secret to the public key
-    var enc = mlkem768_encaps(Span[UInt8, ...](public_key))
-    var ciphertext = enc[0]      # send this to the receiver
-    var sender_secret = enc[1]   # keep this — it's your shared key
-    # enc[2] is True on success
-
-    # receiver: unlock
-    var dec = mlkem768_decaps(Span[UInt8, ...](secret_key), Span[UInt8, ...](ciphertext))
-    var receiver_secret = dec[0]
-    # dec[1] is True on success; sender_secret == receiver_secret
+def mlkem768_keygen() raises -> Tuple[List[UInt8], List[UInt8]]                                   # (ek, dk)
+def mlkem768_encaps(ek_bytes: Span[UInt8, ...]) raises -> Tuple[List[UInt8], List[UInt8], Bool]   # (ct, ss, ok)
+def mlkem768_decaps(dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...]) raises -> Tuple[List[UInt8], Bool]  # (ss, ok)
 ```
-
-Check the success flags. A corrupted ciphertext doesn't produce an error —
-by design it decapsulates to a *different* random-looking secret, so
-attackers can't probe why handshakes fail.
-
-Belt and suspenders: many deployments run X25519 **and** ML-KEM and hash the
-two secrets together, so both would have to fall.
-
-## Quantum-safe signatures (ML-DSA)
-
-Same sign/verify shape as Ed25519, bigger keys and signatures (an ML-DSA-65
-signature is ~3.3 KB versus Ed25519's 64 bytes).
 
 ```mojo
-from thistle import mldsa65_keygen, mldsa_sign_hedged, mldsa_verify
-
-def main() raises:
-    var message = String("abc").as_bytes()
-    var empty = Span[UInt8, ...](ptr=message.unsafe_ptr(), length=0)
-
-    var private_key = mldsa65_keygen()
-
-    var signature = mldsa_sign_hedged(private_key, message, empty)
-    var ok = mldsa_verify(private_key.pub, message, Span[UInt8, ...](signature), empty)
+var keys = mlkem768_keygen()
+var enc = mlkem768_encaps(keys[0])
+var dec = mlkem768_decaps(keys[1], enc[0])
+# enc[1] == dec[0] when enc[2] and dec[1] are True
 ```
 
-The third argument is an optional "context" — a label (up to 255 bytes)
-that binds signatures to a purpose, so a signature made for one system
-can't be replayed in another. Pass an empty span if you don't need it, but
-sign and verify must use the same one.
+- Gotcha: check `ok`. An invalid ciphertext does not raise or return a
+  distinguishable failure — decapsulation returns a pseudorandom secret
+  (FIPS 203 implicit rejection). Don't branch protocol behavior on
+  "decaps failed"; there's no such signal.
+- 512/1024 variants: `mlkem512_*`, `mlkem1024_*`, identical shape.
 
-- `mldsa_sign_hedged` — the default. Use this.
-- `mldsa_sign_deterministic` — same signature every time for the same
-  message; only for devices without a random number generator.
+## `thistle.mldsa65_keygen` / `mldsa_sign_hedged` / `mldsa_verify`
 
-Key and signature sizes are exported as constants
-(`MLDSA65_PUBLICKEYBYTES`, `MLDSA65_BYTES`, ...), and encoded public keys
-load with `mldsa65_public_key(bytes)`.
+```mojo
+def mldsa65_keygen() raises -> MLDSAPrivateKey
+def mldsa_sign_hedged(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Span[UInt8, ...]) raises -> List[UInt8]
+def mldsa_verify(pub: MLDSAPublicKey, msg: Span[UInt8, ...], sig: Span[UInt8, ...], context: Span[UInt8, ...]) raises -> Bool
+```
+
+```mojo
+var priv = mldsa65_keygen()
+var ctx = Span[UInt8, ...](ptr=p, length=0)   # empty context if unused
+var sig = mldsa_sign_hedged(priv, msg, ctx)
+var ok = mldsa_verify(priv.pub, msg, sig, ctx)
+```
+
+- Gotcha: `context` max 255 bytes; sign and verify must use the same one.
+- `mldsa_sign_deterministic`: same signature every call for the same
+  message — only for environments without an RNG.
+- Load a public key from bytes: `mldsa65_public_key(pk_bytes)`.
+- Sizes: `MLDSA65_PUBLICKEYBYTES`, `MLDSA65_SECRETKEYBYTES`, `MLDSA65_BYTES`
+  (signature size). 44/87 variants follow the same naming.

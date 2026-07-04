@@ -5,47 +5,36 @@ nav_order: 8
 
 # Security Notes
 
-What Thistle takes care of, and what remains your job.
+## Constant-time
 
-## What Thistle does for you
+X25519, Ed25519, P-256, P-384: mask-select ladders, branchless field
+arithmetic. ML-KEM: branchless message encoding, constant-time implicit
+rejection. ML-DSA: flag-accumulated rejection sampling.
 
-**Tested against the world's test suites.** 20,000+ vectors from NIST
-(CAVP/ACVP) and Google's Wycheproof, which specifically probes edge cases
-and known implementation bugs.
+Not constant-time: software AES, Camellia (table-based S-boxes, cache
+observable). Use AES-NI or ChaCha20 for secret-key material on shared
+hardware.
 
-**Timing-attack resistance.** Code that touches secret keys runs in the
-same amount of time regardless of what the secret is, so attackers can't
-learn key bits with a stopwatch. This holds for X25519, Ed25519,
-P-256/P-384, ML-KEM, and ML-DSA. Two documented exceptions: software AES
-and Camellia use lookup tables that a co-tenant on shared hardware could
-observe through the CPU cache — use the AES-NI path (`has_aes_ni()`) or
-ChaCha20 there.
+Source-level constant-time is not a compiler guarantee. Crypto entry
+points are `@no_inline` to keep codegen stable. For a formal claim, inspect
+emitted assembly or run a dudect-style harness.
 
-**Input checking.** Wrong key lengths, out-of-range parameters, undersized
-buffers, cipher limits — public functions validate and raise. The
-`True`/`False` APIs (P-256/P-384) must have their result checked.
+## Validation
 
-**Key cleanup.** Key schedules, secret scratch, and hash state that
-absorbed secrets are erased from memory after use.
+Every public entry point validates length/range and raises. Exceptions:
+P-256/P-384 return `Bool` instead of raising — check it.
 
-## What's still your job
+## Zeroization
 
-- **Keep private keys private.** Thistle has no key storage; where keys
-  live is up to you.
-- **Fresh nonces.** Stream ciphers break if a (key, nonce) pair is ever
-  reused. Thistle catches counter overflow, but it can't know you used the
-  same nonce twice across runs.
-- **Hash shared secrets before using them as keys** (one `sha256_hash`
-  call).
-- **Authenticate your ciphertext.** ChaCha20 hides data but doesn't detect
-  tampering — add an [HMAC](mac-kdf).
-- **Compare secrets in constant time.** Checking an HMAC tag with `==`
-  leaks through timing; compare all bytes unconditionally.
+Key schedules, hash contexts that absorbed secrets, and signing scratch are
+wiped with volatile stores (`.wipe()` methods, internal cleanup on drop).
+This is best-effort — no guarantee against register/stack-spill copies.
 
-## Honest limits
+## Out of scope
 
-- No protocol layer: Thistle is primitives, not TLS/Noise/sessions.
-- Memory erasure is best-effort — the language gives no guarantee that no
-  copy of a secret ever existed in a register or spilled to the stack.
-- Not yet independently audited. The test coverage is extensive; an audit
-  is a different kind of assurance.
+No protocol layer (TLS/Noise/session management), no key storage. ECDH/KEM
+outputs need a KDF pass before use as a key. ChaCha20 has no built-in
+authentication — pair with HMAC.
+
+Not independently audited. Test coverage: 20,000+ NIST CAVP/ACVP and
+Wycheproof vectors.

@@ -1,84 +1,70 @@
 ---
-title: Passwords & Keys
+title: MAC / KDF
 nav_order: 3
 ---
 
-# Passwords & Keys
+# MAC / KDF
 
-Two everyday jobs live here: storing passwords so a database leak doesn't
-expose them, and proving a message wasn't tampered with by someone who
-doesn't know your key.
+Default: **Argon2id** for password hashing.
 
-## Store a password (Argon2id)
-
-Never store passwords, and never store plain hashes of them either. Argon2id
-is deliberately slow and memory-hungry, so guessing attacks cost real money.
-It's the current best practice.
+## `thistle.hmac_sha256` / `hmac_sha512`
 
 ```mojo
-from thistle import argon2id_hash_string
-
-def main() raises:
-    # store this string in your database instead of the password
-    var stored = argon2id_hash_string("hunter2", "somesalt16bytes!")
-
-    # at login: recompute with the same salt and compare
-    var attempt = argon2id_hash_string("hunter2", "somesalt16bytes!")
-    var ok = attempt == stored
+def hmac_sha256(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]
+def hmac_sha512(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]
 ```
-
-The salt should be random and unique per user — 16 bytes from
-[`random_bytes`](random) is right. Store it next to the hash; it is not a
-secret.
-
-Need more control (memory cost, iterations, output length)?
 
 ```mojo
-from thistle import Argon2id
-
-var ctx = Argon2id(salt, parallelism=4, tag_length=32,
-                   memory_size_kb=65536, iterations=3)
-var hash = ctx.hash(password)
+var tag = hmac_sha256(key, message)   # 32 bytes
 ```
 
-Out-of-range parameters raise an error instead of quietly weakening the
-hash.
+- Gotcha: compare tags in constant time. `==` on `List[UInt8]` is not
+  guaranteed constant-time; do a manual all-bytes XOR-accumulate compare.
 
-## Prove a message wasn't tampered with (HMAC)
-
-An HMAC is a hash that only someone holding the key can compute. Send the
-tag along with the message; the receiver recomputes it with the shared key
-and compares.
+## `thistle.pbkdf2_hmac_sha256` / `pbkdf2_hmac_sha512`
 
 ```mojo
-from thistle import hmac_sha256
-
-def main() raises:
-    var key = String("my secret key").as_bytes()
-    var message = String("abc").as_bytes()
-
-    var tag = hmac_sha256(key, message)   # 32 bytes, send with the message
+def pbkdf2_hmac_sha256(password: Span[UInt8, ...], salt: Span[UInt8, ...], iterations: Int, dkLen: Int) raises -> List[UInt8]
+def pbkdf2_hmac_sha512(password: Span[UInt8, ...], salt: Span[UInt8, ...], iterations: Int, dkLen: Int) raises -> List[UInt8]
 ```
-
-When comparing a received tag with your own, compare **every byte** rather
-than stopping at the first difference, so timing doesn't leak how close a
-forgery got.
-
-## Turn a password into an encryption key (PBKDF2)
-
-Encryption needs a random-looking key, and "hunter2" isn't one. PBKDF2
-stretches a password into key material:
 
 ```mojo
-from thistle import pbkdf2_hmac_sha256
-
-def main() raises:
-    var password = String("correct horse battery staple").as_bytes()
-    var salt = random_bytes(16)
-
-    var key = pbkdf2_hmac_sha256(password, Span[UInt8, ...](salt), 600_000, 32)
+var key = pbkdf2_hmac_sha256(password, salt, 600_000, 32)
 ```
 
-600,000 iterations is the current OWASP recommendation. Fewer than 1 raises
-an error. If you're choosing fresh today and don't need PBKDF2
-compatibility, prefer Argon2id for this job too.
+- Gotcha: raises if `iterations < 1` or `dkLen < 1`.
+
+## `thistle.Argon2id`
+
+```mojo
+def __init__(out self, salt: Span[UInt8, ...],
+             parallelism: Int = 4, tag_length: Int = 32,
+             memory_size_kb: Int = 65536, iterations: Int = 3,
+             version: Int = 0x13) raises
+
+def hash(self, password: Span[UInt8, ...]) -> List[UInt8]
+```
+
+Second constructor overload adds `secret: Span[UInt8, ...]` (pepper) and
+`ad: Span[UInt8, ...]` before the keyword params.
+
+```mojo
+var ctx = Argon2id(salt, memory_size_kb=65536, iterations=3, parallelism=4)
+var tag = ctx.hash(password)
+```
+
+- Gotcha: raises if `parallelism` not in `[1, 2^24)`, `tag_length < 4`,
+  `memory_size_kb < 8 * parallelism`, or `iterations < 1`.
+
+## `thistle.argon2id_hash_string`
+
+```mojo
+def argon2id_hash_string(password: String, salt: String) raises -> String
+```
+
+```mojo
+var hex = argon2id_hash_string("hunter2", "somesalt16bytes!")
+```
+
+Fixed defaults (parallelism=4, tag_length=32, memory=64MB, iterations=3).
+Use `Argon2id` directly for custom parameters.

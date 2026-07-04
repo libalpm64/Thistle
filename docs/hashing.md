@@ -5,69 +5,83 @@ nav_order: 2
 
 # Hashing
 
-A hash turns any amount of data into a short, fixed-size fingerprint. The
-same input always gives the same fingerprint, and no two different inputs
-should ever share one. Use it to check files for corruption, deduplicate
-data, or build integrity checks.
+Default: **BLAKE3** (`blake3_hash`). Use SHA-256 for interop, `sha256ni_hash`
+if you want it hardware-accelerated (immune to cache timing — no table
+lookups, register-only).
 
-**Which one?**
-
-- **BLAKE3** — secure, internally parallel (tree hashing); recommended for
-  both speed and security.
-- **SHA-256** — the compatibility default, and on modern CPUs
-  `sha256ni_hash` lowers directly to the hardware SHA instructions via LLVM
-  intrinsics — register-only, no table lookups, immune to cache attacks.
-
-## Hash a string
+## `thistle.sha256_hash`
 
 ```mojo
-from thistle import sha256_hash, sha3_256, blake3_hash, blake2b_hash
-
-def main() raises:
-    var message = String("abc").as_bytes()
-
-    var a = sha256_hash(message)    # 32 bytes
-    var b = sha3_256(message)       # 32 bytes
-    var c = blake3_hash(message)    # 32 bytes
-    var d = blake2b_hash(message)   # 64 bytes
+def sha256_hash(data: Span[UInt8, ...]) -> List[UInt8]
 ```
-
-For `"abc"` these produce (in hex):
-
-| Function | Result |
-|---|---|
-| `sha256_hash` | `ba7816bf8f01cfea...b410ff61f20015ad` |
-| `sha3_256` | `3a985da74fe225b2...5b46bfe24511431532` |
-| `blake3_hash` | `6437b3ac38465133...fd359c6cd5bd9d85` |
-
-If your output matches these, everything is working.
-
-## Hash a large file fast
-
-`blake3_parallel_hash` splits the work across CPU cores — around 10 GB/s on
-a modern laptop:
 
 ```mojo
-from thistle import blake3_parallel_hash
-
-var digest = blake3_parallel_hash(big_data)   # same result as blake3_hash
+var d = sha256_hash(String("abc").as_bytes())
+# hex(d) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 ```
 
-`sha256ni_hash` compiles to the dedicated SHA instructions — `sha256rnds2`
-/ `sha256msg1/2` on x86 (SHA-NI), `sha256h/h2/su0/su1` on ARMv8 (Apple
-Silicon and other CPUs with the crypto extension) — via LLVM intrinsics,
-selected at compile time. Roughly 4-5x scalar throughput, byte-identical
-output, and a scalar fallback on CPUs without the extension:
+## `thistle.sha256ni_hash`
 
 ```mojo
-from thistle import sha256ni_hash
-
-var digest = sha256ni_hash(data)
+def sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]
 ```
 
-## Hash data that arrives in pieces
+Same output as `sha256_hash`. Dispatches to SHA-NI / ARMv8 crypto ext at
+compile time; falls back to scalar transform if neither is present.
 
-If you can't hold everything in memory at once, feed it in chunks:
+- Gotcha: none — output is always correct, this is a pure perf switch.
+
+## `thistle.sha3_256` / `sha3_512`
+
+```mojo
+def sha3_256(data: Span[UInt8, ...]) -> List[UInt8]
+def sha3_512(data: Span[UInt8, ...]) -> List[UInt8]
+```
+
+```mojo
+var d = sha3_256(data)
+# hex(d) == "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532" for "abc"
+```
+
+## `thistle.shake128` / `shake256`
+
+```mojo
+def shake256(data: Span[UInt8, ...], output_len_bytes: Int) -> List[UInt8]
+```
+
+```mojo
+var out = shake256(data, 100)   # arbitrary output length
+```
+
+## `thistle.blake3_hash` / `blake3_parallel_hash`
+
+```mojo
+def blake3_hash(input: Span[UInt8, ...], out_len: Int = 32) -> List[UInt8]
+def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) -> List[UInt8]
+```
+
+```mojo
+var d = blake3_hash(data)
+# hex(d) == "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85" for "abc"
+
+var d2 = blake3_parallel_hash(large_data)   # ~10 GB/s, multi-threaded, same output as blake3_hash
+```
+
+## `thistle.blake2b_hash` / `blake2b_hash_keyed`
+
+```mojo
+def blake2b_hash(data: Span[UInt8, ...], out_len: Int = 64) raises -> List[UInt8]
+def blake2b_hash_keyed(data: Span[UInt8, ...], key: Span[UInt8, ...], out_len: Int = 64) raises -> List[UInt8]
+```
+
+```mojo
+var d = blake2b_hash(data, out_len=32)
+var mac = blake2b_hash_keyed(data, key)
+```
+
+- Gotcha: raises if `out_len` not in `1..64`, or `key` longer than 64 bytes.
+
+## Streaming SHA-256
 
 ```mojo
 from thistle import SHA256Context
@@ -76,25 +90,9 @@ from thistle.sha2 import sha256_update, sha256_final_to_buffer
 var ctx = SHA256Context()
 sha256_update(ctx, chunk1)
 sha256_update(ctx, chunk2)
-var digest = InlineArray[UInt8, 32](uninitialized=True)
-sha256_final_to_buffer(ctx, digest.unsafe_ptr())
+var out = InlineArray[UInt8, 32](uninitialized=True)
+sha256_final_to_buffer(ctx, out.unsafe_ptr())
 ```
 
-## Variable-length output
-
-SHAKE lets you ask for as many output bytes as you want:
-
-```mojo
-from thistle import shake256
-
-var out = shake256(data, 100)   # any length you like
-```
-
-## Common mistakes
-
-- **Don't hash passwords with these.** Plain hashes are fast — which means
-  attackers can guess billions of passwords per second. Use
-  [Argon2id](mac-kdf) instead.
-- **A hash is not a signature.** Anyone can compute a hash of tampered data.
-  If you need to prove *who* produced data, you want an
-  [HMAC](mac-kdf) or a [signature](curves).
+- `SHA256Context`/`SHA512Context` have `.wipe()` — call it if the context
+  absorbed secret input.

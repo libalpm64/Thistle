@@ -1,87 +1,70 @@
 ---
-title: Encryption
+title: Symmetric
 nav_order: 4
 ---
 
-# Encryption
+# Symmetric
 
-Symmetric encryption scrambles data with a key; the same key unscrambles
-it. Both sides must already share the key — see
-[Signatures & Key Exchange](curves) for how two parties get one.
+Default: **ChaCha20**. ARX (add/rotate/xor) — no lookup tables, immune to
+cache-timing by construction, and faster than software AES on CPU. Use AES
+only where a spec requires it, and prefer `has_aes_ni()` when you do (the
+software S-box path is table-based, not cache-timing safe).
 
-**Which one?** **ChaCha20**, unless a spec forces AES. Its ARX design is
-inherently bitsliced — additions, rotations, XORs, no lookup tables — which
-makes it immune to cache-timing attacks by construction, where AES needs
-hardware support (AES-NI) or careful bitslicing to get the same property.
-It's also faster than software AES on CPUs.
-
-## Encrypt and decrypt with ChaCha20
-
-The key is 32 bytes, the nonce is 12 bytes. Decryption is literally the same
-operation as encryption.
+## `thistle.ChaCha20`
 
 ```mojo
-from thistle import ChaCha20
+def __init__(out self, key_bytes: SIMD[DType.uint8, 32],
+             nonce_bytes: SIMD[DType.uint8, 12], counter: UInt32 = 1)
 
-def main() raises:
-    var key = SIMD[DType.uint8, 32](7)      # use random_bytes(32) in real code!
-    var nonce = SIMD[DType.uint8, 12](9)    # unique per message, never reused
-
-    var secret_note = String("meet me at noon").as_bytes()
-    var buffer = List[UInt8](capacity=len(secret_note))
-    for i in range(len(secret_note)):
-        buffer.append(secret_note[i])
-    var buffer_span = Span[mut=True, UInt8](buffer)
-
-    var enc = ChaCha20(key, nonce)
-    enc.encrypt_inplace(buffer_span)        # buffer is now ciphertext
-
-    var dec = ChaCha20(key, nonce)          # same key + nonce
-    dec.encrypt_inplace(buffer_span)        # buffer is plaintext again
+def encrypt_inplace[origin: Origin[mut=True]](mut self, mut data: Span[mut=True, UInt8, origin]) raises
+def encrypt_into[origin: Origin[mut=True]](mut self, plaintext: Span[UInt8, ...], mut ciphertext: Span[mut=True, UInt8, origin]) raises
+def decrypt_into[origin: Origin[mut=True]](mut self, ciphertext: Span[UInt8, ...], mut plaintext: Span[mut=True, UInt8, origin]) raises
 ```
-
-There's also `encrypt_into(plaintext, ciphertext)` when you want the output
-in a separate buffer (it raises if the output buffer is too small).
-
-**The one rule of ChaCha20:** never encrypt two different messages with the
-same key *and* the same nonce. Give every message a fresh nonce (a counter
-or `random_bytes(12)` both work). Thistle also refuses to encrypt more than
-256 GiB under one nonce — it raises rather than repeat itself.
-
-**Encryption alone doesn't detect tampering.** An attacker can flip bits in
-the ciphertext without knowing the key. Send an
-[HMAC](mac-kdf) of the ciphertext along with it, and check the HMAC before
-decrypting.
-
-## Camellia (16-byte block cipher)
-
-An ISO/NESSIE-approved cipher used in some Japanese and European systems.
-It encrypts exactly 16 bytes at a time:
 
 ```mojo
-from thistle import CamelliaCipher, random_bytes
+var enc = ChaCha20(key, nonce)
+enc.encrypt_inplace(buffer_span)   # buffer_span is Span[mut=True, UInt8]
 
-def main() raises:
-    var key = random_bytes(16)              # 16, 24, or 32 bytes; anything else raises
-    var cipher = CamelliaCipher(Span[UInt8, ...](key))
-
-    var block = SIMD[DType.uint8, 16](42)
-    var encrypted = cipher.encrypt(block)
-    var decrypted = cipher.decrypt(encrypted)   # == block
-
-    cipher.wipe()                           # erase the key schedule when done
+var dec = ChaCha20(key, nonce)     # same key + nonce
+dec.encrypt_inplace(buffer_span)   # decrypt == encrypt
 ```
+
+- Gotcha: never reuse a (key, nonce) pair across two different plaintexts.
+- Gotcha: raises past ~256 GiB encrypted under one nonce (counter wrap
+  guard) instead of reusing keystream.
+- Gotcha: `encrypt_into` raises if `ciphertext` is shorter than `plaintext`.
+- Gotcha: no authentication. Pair with `hmac_sha256` over the ciphertext if
+  you need tamper detection.
+
+## `thistle.CamelliaCipher`
+
+```mojo
+def __init__(out self, key: Span[UInt8, ...]) raises   # 16, 24, or 32 bytes
+def encrypt(self, block: SIMD[DType.uint8, 16]) -> SIMD[DType.uint8, 16]
+def decrypt(self, block: SIMD[DType.uint8, 16]) -> SIMD[DType.uint8, 16]
+def wipe(mut self)
+```
+
+`Span[UInt8, ...]` overloads of `encrypt`/`decrypt` also exist (raise if
+not exactly 16 bytes).
+
+```mojo
+var cipher = CamelliaCipher(key)
+var ct = cipher.encrypt(block)
+var pt = cipher.decrypt(ct)
+cipher.wipe()
+```
+
+- Gotcha: constructor raises on any key length other than 16/24/32.
+- Gotcha: S-box lookups are table-based, not cache-timing constant-time.
 
 ## AES
 
-Thistle ships three AES tiers: hardware AES-NI (x86 and ARM), GPU kernels
-for bulk data (`aes_gpu_kernel_ecb/ctr/gcm`), and a software fallback. Check
-`has_aes_ni()` and prefer hardware — the software table implementation can
-leak key information through CPU cache timing on shared machines. The mode
-implementations live in `thistle.aes`, `thistle.aes_ni`, and
-`thistle.aes_gpu`.
+`thistle.aes` — software (table-based, not cache-timing safe).
+`thistle.aes_ni` — hardware, x86 + ARM; check `has_aes_ni()`.
+`thistle.aes_gpu` — `aes_gpu_kernel_ecb/ctr/gcm` for bulk data.
 
-## KCipher-2
+## `thistle.KCipher2`
 
-A stream cipher standardized in Japan (ISO/IEC 18033-4), exported as
-`KCipher2`. Unless a spec requires it, use ChaCha20.
+ISO/IEC 18033-4 stream cipher. Fixed-width SIMD key/IV constructor. No
+reason to use it unless a spec requires it.

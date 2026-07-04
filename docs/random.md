@@ -1,36 +1,28 @@
 ---
-title: Random Numbers
+title: Random
 nav_order: 7
 ---
 
-# Random Numbers
+# Random
 
-`thistle.random` is the CSPRNG interface: it pulls entropy straight from
-the kernel, which fuses hardware sources (RDRAND/RNDR), interrupt timing,
-and other OS-collected input.
+## `thistle.random_bytes` / `random_fill`
 
 ```mojo
-from thistle import random_bytes, random_fill
-
-def main() raises:
-    var key = random_bytes(32)
-    var nonce = random_bytes(12)
-
-    # or fill a buffer you already own
-    random_fill(buf.unsafe_ptr(), 64)
+def random_bytes(n: Int) raises -> List[UInt8]
+def random_fill(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) raises
 ```
 
-Implementation details that matter:
+```mojo
+var key = random_bytes(32)
+random_fill(existing_buf.unsafe_ptr(), 64)
+```
 
-- Raw syscalls — `getrandom(2)` on Linux, `getentropy(2)` on macOS. No
-  `/dev/urandom` file descriptor to exhaust, race, or have redirected in a
-  sandbox.
-- Failures raise; short reads are retried; platforms without a secure
-  source fail at **compile time** rather than falling back to something
-  weak.
+Direct syscalls: `getrandom(2)` (Linux, EINTR-retried), `getentropy(2)`
+(macOS, chunked at 256 bytes). No `/dev/urandom` fd. Platforms without a
+secure source fail to compile — no weak fallback path exists.
 
-**When to use what:** for keys, nonces, salts, and anything an attacker
-must not predict, use this module. For bulk non-secret randomness where
-throughput matters (simulations, fuzzing, shuffling), use a PRNG like
-`std.random` — it's orders of magnitude faster and reproducibility is a
-feature there, not a bug.
+- Gotcha: raises on kernel failure — always in a `raises` context.
+- Gotcha: this is not a PRNG. For bulk non-secret randomness where
+  throughput/reproducibility matters (sims, fuzzing, shuffling), use
+  `std.random` instead — this module is syscall-bound and orders of
+  magnitude slower for that use case.
