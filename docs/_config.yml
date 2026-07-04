@@ -8,3 +8,12 @@ aux_links:
   GitHub: https://github.com/libalpm64/Thistle
 plugins:
   - jekyll-remote-theme
+
+markdown: kramdown
+highlighter: rouge
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    block:
+      line_numbers: false
