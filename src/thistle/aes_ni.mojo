@@ -727,7 +727,6 @@ def aes_gcm_ctr_kernel(
     j0_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int
 ) -> None:
-    """GCM CTR (GCTR) kernel over full 16-byte blocks; block i uses inc32^(i+1)(J0)."""
     var counter_block = StackBuffer[UInt8, 16]()
     var cp = counter_block.ptr()
 
@@ -765,8 +764,6 @@ def _be_store64(p: UnsafePointer[UInt8, MutAnyOrigin], off: Int, v: UInt64):
 
 
 struct _GHash:
-    """Streaming GHASH_H accumulator over 128-bit blocks."""
-
     var h_hi: UInt64
     var h_lo: UInt64
     var y_hi: UInt64
@@ -950,11 +947,10 @@ def aes_gcm_encrypt(
     key: Span[UInt8, ...], iv: Span[UInt8, ...],
     plaintext: Span[UInt8, ...], aad: Span[UInt8, ...],
 ) raises -> Tuple[List[UInt8], List[UInt8]]:
-    """AES-GCM seal. Returns (ciphertext, 16-byte tag)."""
     if not _valid_gcm_key(key):
-        raise Error("AES-GCM key must be 16, 24, or 32 bytes")
+        raise Error("invalid key size")
     if len(iv) == 0:
-        raise Error("AES-GCM IV must be non-empty")
+        raise Error("invalid iv size")
 
     var n = len(plaintext)
     var ciphertext = List[UInt8](unsafe_uninit_length=n)
@@ -977,14 +973,12 @@ def aes_gcm_decrypt(
     key: Span[UInt8, ...], iv: Span[UInt8, ...],
     ciphertext: Span[UInt8, ...], aad: Span[UInt8, ...], tag: Span[UInt8, ...],
 ) raises -> Tuple[List[UInt8], Bool]:
-    """AES-GCM open. Returns (plaintext, ok). `ok` is False on tag mismatch;
-    on failure the returned plaintext is empty and never released to the caller."""
     if not _valid_gcm_key(key):
-        raise Error("AES-GCM key must be 16, 24, or 32 bytes")
+        raise Error("invalid key size")
     if len(iv) == 0:
-        raise Error("AES-GCM IV must be non-empty")
+        raise Error("invalid iv size")
     if len(tag) != 16:
-        raise Error("AES-GCM tag must be 16 bytes")
+        raise Error("invalid tag size")
 
     var n = len(ciphertext)
     var plaintext = List[UInt8](unsafe_uninit_length=n)
