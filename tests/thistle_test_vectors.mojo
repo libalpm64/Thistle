@@ -2,7 +2,7 @@ from std.python import Python, PythonObject
 from std.collections import List
 from std.memory import alloc
 from std.memory.unsafe_pointer import UnsafePointer
-from std.builtin.type_aliases import MutExternalOrigin
+from std.builtin.type_aliases import MutUntrackedOrigin
 from thistle.sha2 import (
     bytes_to_hex,
     string_to_bytes,
@@ -249,9 +249,9 @@ def test_chacha20(data: PythonObject, py: PythonObject) raises -> TestResult:
         var expected_ct = hex_to_bytes(String(v["ciphertext"]))
         if len(pt_bytes) == 0:
             var null_ptr = UnsafePointer[
-                UInt8, MutExternalOrigin
+                UInt8, MutUntrackedOrigin
             ].unsafe_dangling()
-            var out_span = Span[mut=True, UInt8, MutExternalOrigin](
+            var out_span = Span[mut=True, UInt8, MutUntrackedOrigin](
                 ptr=null_ptr, length=0
             )
             cipher.encrypt_into(Span[UInt8, ...](ptr=null_ptr, length=0), out_span)
@@ -264,7 +264,7 @@ def test_chacha20(data: PythonObject, py: PythonObject) raises -> TestResult:
                 )
         else:
             var ct_ptr = alloc[UInt8](len(pt_bytes))
-            var ct_span = Span[mut=True, UInt8, MutExternalOrigin](
+            var ct_span = Span[mut=True, UInt8, MutUntrackedOrigin](
                 ptr=ct_ptr, length=len(pt_bytes)
             )
             cipher.encrypt_into(Span[UInt8, ...](pt_bytes), ct_span)
@@ -604,7 +604,6 @@ def test_aes_gcm(data: PythonObject, py: PythonObject) raises -> TestResult:
 
             var ok: Bool
             if valid:
-                ok = False
                 try:
                     var enc = aes_gcm_encrypt(
                         Span[UInt8, ...](key), Span[UInt8, ...](iv),
