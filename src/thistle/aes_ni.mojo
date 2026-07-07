@@ -4,7 +4,7 @@ AES-NI implementation
 
 from std.collections import List
 from std.sys import llvm_intrinsic, CompilationTarget
-from std.memory import alloc, bitcast, memset_zero, memcpy, UnsafePointer
+from std.memory import alloc, bitcast, memset_zero, memcpy, UnsafePointer, Span
 from std.utils import StaticTuple
 from .aes import cpu_aes_encrypt, expand_key_128, expand_key_192, expand_key_256, SBOX
 from .utils import StackBuffer
