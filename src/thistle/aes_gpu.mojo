@@ -222,48 +222,22 @@ def aes_encrypt_ctr[rounds: Int](
 
 
 @always_inline
-def aes_encrypt_gcm[rounds: Int](
-    input_data: UnsafePointer[UInt8, MutAnyOrigin],
-    output_data: UnsafePointer[UInt8, MutAnyOrigin],
-    round_keys_data: UnsafePointer[UInt32, MutAnyOrigin],
-    sbox_buffer: UnsafePointer[UInt8, MutAnyOrigin],
-    num_blocks: Int,
-    nonce: UnsafePointer[UInt8, MutAnyOrigin],
-    scratch: UnsafePointer[UInt8, MutAnyOrigin],
-) -> None:
+def _gcm_counter_from_j0(
+    j0: UnsafePointer[UInt8, MutAnyOrigin], block_index: Int
+) -> StaticTuple[UInt8, 16]:
     var counter = StaticTuple[UInt8, 16]()
     for i in range(12):
-        counter[i] = nonce[i]
-    counter[12] = 0
-    counter[13] = 0
-    counter[14] = 0
-    counter[15] = 2
-
-    var pt = StaticTuple[UInt8, 16]()
-
-    for i in range(num_blocks):
-        var ip = input_data + i * 16
-        var op = output_data + i * 16
-
-        for j in range(16):
-            pt[j] = ip[j]
-
-        for j in range(16):
-            scratch[j] = 0
-
-        aes_encrypt_block[rounds](
-            counter[0], counter[1], counter[2],  counter[3],
-            counter[4], counter[5], counter[6],  counter[7],
-            counter[8], counter[9], counter[10], counter[11],
-            counter[12],counter[13],counter[14], counter[15],
-            round_keys_data, sbox_buffer, scratch,
-        )
-
-        for j in range(16):
-            op[j] = scratch[j] ^ pt[j]
-
-        incr_counter(counter)
-
+        counter[i] = j0[i]
+    var base = (
+        (UInt32(j0[12]) << 24) | (UInt32(j0[13]) << 16)
+        | (UInt32(j0[14]) << 8) | UInt32(j0[15])
+    )
+    var ctr = base + UInt32(1) + UInt32(block_index & 0xFFFFFFFF)
+    counter[12] = UInt8((ctr >> 24) & 0xFF)
+    counter[13] = UInt8((ctr >> 16) & 0xFF)
+    counter[14] = UInt8((ctr >> 8) & 0xFF)
+    counter[15] = UInt8(ctr & 0xFF)
+    return counter
 
 def incr_counter(mut counter: StaticTuple[UInt8, 16]) -> None:
     var carry: UInt8 = 1
@@ -332,24 +306,16 @@ def aes_gpu_kernel_gcm(
     round_keys_data: UnsafePointer[UInt32, MutAnyOrigin],
     sbox_buffer: UnsafePointer[UInt8, MutAnyOrigin],
     n: Int,
-    nonce: UnsafePointer[UInt8, MutAnyOrigin],
+    j0: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int,
 ) -> None:
-    # CTR encryption part of GCM only. GHASH/tag generation is not done here.
     var tid = global_idx.x
     if tid >= n:
         return
     var bp = input_data + tid * 16
     var op = output_data + tid * 16
 
-    var counter = StaticTuple[UInt8, 16]()
-    for i in range(12):
-        counter[i] = nonce[i]
-    counter[12] = 0
-    counter[13] = 0
-    counter[14] = 0
-    counter[15] = 2
-    add_counter_offset(counter, tid)
+    var counter = _gcm_counter_from_j0(j0, Int(tid))
 
     var scratch = stack_allocation[16, UInt8, address_space=AddressSpace.LOCAL]()
 

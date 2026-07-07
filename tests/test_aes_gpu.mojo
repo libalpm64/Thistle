@@ -280,8 +280,12 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
                 var nonce_bytes = hex_to_bytes(nonce_hex)
                 for j in range(12):
                     nonce_ptr.store(j, nonce_bytes[j])
-            
-            var nonce_buffer = ctx.enqueue_create_buffer[DType.uint8](12)
+            nonce_ptr[12] = 0
+            nonce_ptr[13] = 0
+            nonce_ptr[14] = 0
+            nonce_ptr[15] = 1
+
+            var nonce_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
             ctx.enqueue_copy(nonce_buffer, nonce_ptr)
             ctx.enqueue_function[aes_gpu_kernel_gcm](
                 input_buffer.unsafe_ptr(),

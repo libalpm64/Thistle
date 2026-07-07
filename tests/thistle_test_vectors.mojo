@@ -18,7 +18,7 @@ from thistle.chacha20 import ChaCha20
 from thistle.kcipher2 import KCipher2
 from thistle.pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
 from thistle.aes import cpu_aes_encrypt, expand_key_128
-from thistle.aes_ni import aes_encrypt, has_aes_ni, has_x86_aes_ni
+from thistle.aes_ni import aes_encrypt, has_aes_ni, has_x86_aes_ni, aes_gcm_encrypt, aes_gcm_decrypt
 from thistle.sha_ni import sha256ni_hash, has_sha_ni
 
 
@@ -587,6 +587,61 @@ def test_sha_ni(data: PythonObject, py: PythonObject) raises -> TestResult:
     return TestResult(passed, failed, failures^)
 
 
+def test_aes_gcm(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var passed, failed = 0, 0
+    var failures = List[String]()
+    var groups = data["testGroups"]
+    for g in groups:
+        for t in g["tests"]:
+            var tc_id = String(t["tcId"])
+            var key = hex_to_bytes(String(t["key"]))
+            var iv = hex_to_bytes(String(t["iv"]))
+            var aad = hex_to_bytes(String(t["aad"]))
+            var msg = hex_to_bytes(String(t["msg"]))
+            var ct = hex_to_bytes(String(t["ct"]))
+            var tag = hex_to_bytes(String(t["tag"]))
+            var valid = String(t["result"]) == "valid"
+
+            var ok: Bool
+            if valid:
+                ok = False
+                try:
+                    var enc = aes_gcm_encrypt(
+                        Span[UInt8, ...](key), Span[UInt8, ...](iv),
+                        Span[UInt8, ...](msg), Span[UInt8, ...](aad),
+                    )
+                    var dec = aes_gcm_decrypt(
+                        Span[UInt8, ...](key), Span[UInt8, ...](iv),
+                        Span[UInt8, ...](ct), Span[UInt8, ...](aad),
+                        Span[UInt8, ...](tag),
+                    )
+                    ok = (
+                        bytes_to_hex(enc[0]) == bytes_to_hex(ct)
+                        and bytes_to_hex(enc[1]) == bytes_to_hex(tag)
+                        and dec[1]
+                        and bytes_to_hex(dec[0]) == bytes_to_hex(msg)
+                    )
+                except:
+                    ok = False
+            else:
+                try:
+                    var dec = aes_gcm_decrypt(
+                        Span[UInt8, ...](key), Span[UInt8, ...](iv),
+                        Span[UInt8, ...](ct), Span[UInt8, ...](aad),
+                        Span[UInt8, ...](tag),
+                    )
+                    ok = (not dec[1]) and len(dec[0]) == 0
+                except:
+                    ok = True
+
+            if ok:
+                passed += 1
+            else:
+                failed += 1
+                failures.append("AES-GCM tc" + tc_id)
+    return TestResult(passed, failed, failures^)
+
+
 def print_result(
     name: String, result: TestResult, mut tp: Int, mut tf: Int, mut af: Bool
 ):
@@ -759,6 +814,20 @@ def main() raises:
         )
     except e:
         print("AES-128-NI [error] " + String(e))
+        af = True
+    print()
+
+    try:
+        print("Loading AES-GCM Wycheproof vectors...")
+        print_result(
+            "AES-GCM",
+            test_aes_gcm(load_json("tests/Wycheproof/aes_gcm_test.json", py), py),
+            tp,
+            tf,
+            af,
+        )
+    except e:
+        print("AES-GCM [error] " + String(e))
         af = True
     print()
 
