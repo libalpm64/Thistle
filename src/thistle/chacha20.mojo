@@ -4,7 +4,7 @@ ChaCha20 stream cipher implementation per RFC 7539
 
 from std.memory import bitcast
 from std.memory.unsafe_pointer import UnsafePointer
-from std.builtin.type_aliases import MutExternalOrigin
+from std.builtin.type_aliases import MutUntrackedOrigin
 from std.bit import rotate_bits_left
 
 comptime CHACHA_CONSTANTS = SIMD[DType.uint32, 4](

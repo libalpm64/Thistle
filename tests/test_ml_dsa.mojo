@@ -62,7 +62,7 @@ def zero_random() -> List[UInt8]:
 
 def load_json(path: String, py: PythonObject) raises -> PythonObject:
     var builtins = Python.import_module("builtins")
-    var fh = builtins.open(path, "r")
+    var fh = builtins.open(path, "r", encoding="utf-8")
     try:
         var root = py.load(fh)
         return root

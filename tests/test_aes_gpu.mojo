@@ -237,6 +237,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
             rounds = 14
         
         var nonce_ptr = alloc[UInt8](16)
+        var nonce_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
         if "ECB" in mode:
             ctx.enqueue_function[aes_gpu_kernel_ecb](
                 input_buffer.unsafe_ptr(),
@@ -257,8 +258,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
                 var iv_bytes = hex_to_bytes(iv_hex)
                 for j in range(16):
                     nonce_ptr.store(j, iv_bytes[j])
-            
-            var nonce_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
+
             ctx.enqueue_copy(nonce_buffer, nonce_ptr)
             ctx.enqueue_function[aes_gpu_kernel_ctr](
                 input_buffer.unsafe_ptr(),
@@ -285,7 +285,6 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
             nonce_ptr[14] = 0
             nonce_ptr[15] = 1
 
-            var nonce_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
             ctx.enqueue_copy(nonce_buffer, nonce_ptr)
             ctx.enqueue_function[aes_gpu_kernel_gcm](
                 input_buffer.unsafe_ptr(),
@@ -313,7 +312,10 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
         ctx.synchronize()
         ctx.enqueue_copy(ct_ptr, output_buffer)
         ctx.synchronize()
-        
+        _ = nonce_buffer
+        _ = input_buffer
+        _ = round_keys_buffer
+
         var correct = True
         var expected_len = expected_ct.byte_length() // 2
         if expected_len != total_bytes:

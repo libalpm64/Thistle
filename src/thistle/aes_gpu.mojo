@@ -13,7 +13,7 @@ def gpu_gf_mul2(a: UInt8) -> UInt8:
     return (a << UInt8(1)) ^ (UInt8(0x1b) & (UInt8(0) - (a >> UInt8(7))))
 
 @always_inline
-def add_counter_offset(mut counter: StaticTuple[UInt8, 16], offset: Int) -> None:
+def add_counter_offset(counter: UnsafePointer[UInt8, MutAnyOrigin], offset: Int) -> None:
     var carry = offset
     for i in range(15, -1, -1):
         if carry == 0:
@@ -191,21 +191,12 @@ def aes_encrypt_ctr[rounds: Int](
     round_keys_data: UnsafePointer[UInt32, MutAnyOrigin],
     sbox_buffer: UnsafePointer[UInt8, MutAnyOrigin],
     num_blocks: Int,
-    nonce: StaticTuple[UInt8, 16],
+    counter: UnsafePointer[UInt8, MutAnyOrigin],
     scratch: UnsafePointer[UInt8, MutAnyOrigin],
 ) -> None:
-    var counter = nonce
-    var pt = StaticTuple[UInt8, 16]()
-
     for i in range(num_blocks):
         var ip = input_data + i * 16
         var op = output_data + i * 16
-
-        for j in range(16):
-            pt[j] = ip[j]
-
-        for j in range(16):
-            scratch[j] = 0
 
         aes_encrypt_block[rounds](
             counter[0], counter[1], counter[2],  counter[3],
@@ -216,16 +207,17 @@ def aes_encrypt_ctr[rounds: Int](
         )
 
         for j in range(16):
-            op[j] = scratch[j] ^ pt[j]
+            op[j] = scratch[j] ^ ip[j]
 
         incr_counter(counter)
 
 
 @always_inline
 def _gcm_counter_from_j0(
-    j0: UnsafePointer[UInt8, MutAnyOrigin], block_index: Int
-) -> StaticTuple[UInt8, 16]:
-    var counter = StaticTuple[UInt8, 16]()
+    j0: UnsafePointer[UInt8, MutAnyOrigin],
+    block_index: Int,
+    counter: UnsafePointer[UInt8, MutAnyOrigin],
+) -> None:
     for i in range(12):
         counter[i] = j0[i]
     var base = (
@@ -237,9 +229,8 @@ def _gcm_counter_from_j0(
     counter[13] = UInt8((ctr >> 16) & 0xFF)
     counter[14] = UInt8((ctr >> 8) & 0xFF)
     counter[15] = UInt8(ctr & 0xFF)
-    return counter
 
-def incr_counter(mut counter: StaticTuple[UInt8, 16]) -> None:
+def incr_counter(counter: UnsafePointer[UInt8, MutAnyOrigin]) -> None:
     var carry: UInt8 = 1
     for i in range(15, -1, -1):
         var new_val = counter[i] + carry
@@ -285,19 +276,19 @@ def aes_gpu_kernel_ctr(
     var bp = input_data + tid * 16
     var op = output_data + tid * 16
 
-    var counter = StaticTuple[UInt8, 16]()
+    var counter = stack_allocation[16, UInt8]()
     for i in range(16):
         counter[i] = nonce[i]
-    add_counter_offset(counter, tid)
+    add_counter_offset(counter, Int(tid))
 
-    var scratch = stack_allocation[16, UInt8, address_space=AddressSpace.LOCAL]()
+    var scratch = stack_allocation[16, UInt8]()
 
     if rounds == 10:
-        aes_encrypt_ctr[10](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch.address_space_cast[AddressSpace.GENERIC]())
+        aes_encrypt_ctr[10](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch)
     elif rounds == 12:
-        aes_encrypt_ctr[12](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch.address_space_cast[AddressSpace.GENERIC]())
+        aes_encrypt_ctr[12](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch)
     else:
-        aes_encrypt_ctr[14](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch.address_space_cast[AddressSpace.GENERIC]())
+        aes_encrypt_ctr[14](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch)
 
 @always_inline
 def aes_gpu_kernel_gcm(
@@ -315,15 +306,16 @@ def aes_gpu_kernel_gcm(
     var bp = input_data + tid * 16
     var op = output_data + tid * 16
 
-    var counter = _gcm_counter_from_j0(j0, Int(tid))
+    var counter = stack_allocation[16, UInt8]()
+    _gcm_counter_from_j0(j0, Int(tid), counter)
 
-    var scratch = stack_allocation[16, UInt8, address_space=AddressSpace.LOCAL]()
+    var scratch = stack_allocation[16, UInt8]()
 
     if rounds == 10:
-        aes_encrypt_ctr[10](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch.address_space_cast[AddressSpace.GENERIC]())
+        aes_encrypt_ctr[10](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch)
     elif rounds == 12:
-        aes_encrypt_ctr[12](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch.address_space_cast[AddressSpace.GENERIC]())
+        aes_encrypt_ctr[12](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch)
     else:
-        aes_encrypt_ctr[14](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch.address_space_cast[AddressSpace.GENERIC]())
+        aes_encrypt_ctr[14](bp, op, round_keys_data, sbox_buffer, 1, counter, scratch)
 
 
