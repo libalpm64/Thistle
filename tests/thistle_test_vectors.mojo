@@ -106,7 +106,7 @@ struct TestResult(Copyable, Movable):
 
 def load_json(path: String, py: PythonObject) raises -> PythonObject:
     var builtins = Python.import_module("builtins")
-    var f = builtins.open(path, "r")
+    var f = builtins.open(path, "r", encoding="utf-8")
     var data = py.loads(f.read())
     f.close()
     return data

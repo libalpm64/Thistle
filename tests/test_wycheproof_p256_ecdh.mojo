@@ -154,7 +154,7 @@ def main() raises:
     var py = Python.import_module("json")
     var builtins = Python.import_module("builtins")
 
-    var fh = builtins.open("tests/Wycheproof/ecdh_secp256r1_test.json", "r")
+    var fh = builtins.open("tests/Wycheproof/ecdh_secp256r1_test.json", "r", encoding="utf-8")
     var root = py.load(fh)
     fh.close()
 
