@@ -14,7 +14,7 @@ from .pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
 from .argon2 import Argon2id, argon2id_hash_string
 
 from .aes import AESKey, expand_key_128, expand_key_192, expand_key_256
-from .aes_ni import has_aes_ni
+from .aes_ni import has_aes_ni, aes_gcm_ctr_kernel, aes_gcm_encrypt, aes_gcm_decrypt
 from .aes_gpu import aes_gpu_kernel_ecb, aes_gpu_kernel_ctr, aes_gpu_kernel_gcm
 from .camellia import CamelliaCipher
 from .chacha20 import ChaCha20, chacha20_block
