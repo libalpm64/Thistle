@@ -87,7 +87,9 @@ def _write_counter_be32(
 
     var carry = block_index
     var pos = 15
-    while pos >= 12:
+    while pos >= 0:
+        if carry == 0:
+            break
         var sum = Int(counter_ptr.load(pos)) + (carry & 0xFF)
         counter_ptr.store(pos, UInt8(sum & 0xFF))
         carry = (carry >> 8) + (sum >> 8)
