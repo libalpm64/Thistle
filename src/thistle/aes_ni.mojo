@@ -728,6 +728,7 @@ def aes_gcm_ctr_kernel(
     rounds: Int
 ) -> None:
     comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
+        _hw_gcm_ctr_kernel(input_ptr, output_ptr, round_keys, num_blocks, j0_ptr, rounds)
     else:
         comptime if CompilationTarget._has_feature["crypto"]() or CompilationTarget._has_feature["aes"]():
             _hw_gcm_ctr_kernel(input_ptr, output_ptr, round_keys, num_blocks, j0_ptr, rounds)

@@ -291,7 +291,10 @@ def benchmark_argon2(duration_secs: Float64) raises -> String:
 def benchmark_aes_cpu(duration_secs: Float64) raises -> String:
     var key = AESKey(TEST_KEY)
     var round_keys = key.round_keys()
-    var pt_bytes = alloc[UInt8](16)
+    var skey = cpu_aes_ct_skey(round_keys, ROUNDS_128)
+    var blocks = alloc[UInt8](256)
+    for i in range(256):
+        blocks.store(i, TEST_PT[i % 16])
 
     # Warmup
     for _ in range(100):
