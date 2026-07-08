@@ -14,7 +14,7 @@ from thistle.kcipher2 import KCipher2
 from thistle.sha2 import sha256_hash, sha512_hash
 from thistle.sha_ni import sha256ni_hash, has_sha_ni
 from thistle.sha3 import sha3_256
-from thistle.aes import AESKey, SBOX, cpu_aes_encrypt, ROUNDS_128, expand_key_128
+from thistle.aes import AESKey, cpu_aes_ct_encrypt16, cpu_aes_ct_skey, ROUNDS_128, expand_key_128
 from thistle.x25519 import x25519
 from thistle.ed25519 import ed25519_sign, ed25519_verify, ed25519_generate_public_key
 from thistle.utils import StackInlineArray
@@ -295,22 +295,18 @@ def benchmark_aes_cpu(duration_secs: Float64) raises -> String:
 
     # Warmup
     for _ in range(100):
-        for i in range(16):
-            pt_bytes.store(i, TEST_PT[i])
-        cpu_aes_encrypt(pt_bytes, round_keys)
+        cpu_aes_ct_encrypt16(blocks, skey, ROUNDS_128)
 
     var count = 0
     var start = perf_counter()
     while perf_counter() - start < duration_secs:
-        for i in range(16):
-            pt_bytes.store(i, TEST_PT[i])
-        cpu_aes_encrypt(pt_bytes, round_keys)
-        count += 1
+        cpu_aes_ct_encrypt16(blocks, skey, ROUNDS_128)
+        count += 16
     var end = perf_counter()
     var duration = end - start
-    
-    pt_bytes.free()
-    
+
+    blocks.free()
+
     var mbps = Float64(count * 16) / (1024 * 1024) / duration
     return "aes-128-cpu | throughput: " + String(mbps)[byte=:6] + " mb/s, blocks: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
@@ -339,16 +335,11 @@ def benchmark_aes_gpu_ecb() raises -> String:
     with DeviceContext() as ctx:
         var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
         var output_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
-        var round_keys_buffer = ctx.enqueue_create_buffer[DType.uint32](44)
+        var skey_host = cpu_aes_ct_skey(round_keys, 10)
+        var skey_buffer = ctx.enqueue_create_buffer[DType.uint64](88)
+        ctx.enqueue_copy(skey_buffer, skey_host.unsafe_ptr())
         
-        var sbox_host = alloc[Scalar[DType.uint8]](256)
-        for i in range(256):
-            sbox_host[i] = SBOX[i]
-        var sbox_buffer = ctx.enqueue_create_buffer[DType.uint8](256)
-
         ctx.enqueue_copy(input_buffer, input_host)
-        ctx.enqueue_copy(round_keys_buffer, round_keys)
-        ctx.enqueue_copy(sbox_buffer, sbox_host)
         ctx.synchronize()
 
         var block_dim = 256
@@ -357,8 +348,7 @@ def benchmark_aes_gpu_ecb() raises -> String:
         ctx.enqueue_function[aes_gpu_kernel_ecb](
             input_buffer.unsafe_ptr(),
             output_buffer.unsafe_ptr(),
-            round_keys_buffer.unsafe_ptr(),
-            sbox_buffer.unsafe_ptr(),
+            skey_buffer.unsafe_ptr(),
             num_blocks,
             10,
             grid_dim=grid_dim,
@@ -372,8 +362,7 @@ def benchmark_aes_gpu_ecb() raises -> String:
             ctx.enqueue_function[aes_gpu_kernel_ecb](
                 input_buffer.unsafe_ptr(),
                 output_buffer.unsafe_ptr(),
-                round_keys_buffer.unsafe_ptr(),
-                sbox_buffer.unsafe_ptr(),
+                skey_buffer.unsafe_ptr(),
                 num_blocks,
                 10,
                 grid_dim=grid_dim,
@@ -388,7 +377,6 @@ def benchmark_aes_gpu_ecb() raises -> String:
         
         input_host.free()
         output_host.free()
-        sbox_host.free()
         round_keys.free()
         key_ptr.free()
         
@@ -422,17 +410,12 @@ def benchmark_aes_gpu_ctr() raises -> String:
     with DeviceContext() as ctx:
         var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
         var output_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
-        var round_keys_buffer = ctx.enqueue_create_buffer[DType.uint32](44)
+        var skey_host = cpu_aes_ct_skey(round_keys, 10)
+        var skey_buffer = ctx.enqueue_create_buffer[DType.uint64](88)
+        ctx.enqueue_copy(skey_buffer, skey_host.unsafe_ptr())
         var nonce_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
         
-        var sbox_host = alloc[Scalar[DType.uint8]](256)
-        for i in range(256):
-            sbox_host[i] = SBOX[i]
-        var sbox_buffer = ctx.enqueue_create_buffer[DType.uint8](256)
-
         ctx.enqueue_copy(input_buffer, input_host)
-        ctx.enqueue_copy(round_keys_buffer, round_keys)
-        ctx.enqueue_copy(sbox_buffer, sbox_host)
         ctx.enqueue_copy(nonce_buffer, nonce_host)
         ctx.synchronize()
 
@@ -442,8 +425,7 @@ def benchmark_aes_gpu_ctr() raises -> String:
         ctx.enqueue_function[aes_gpu_kernel_ctr](
             input_buffer.unsafe_ptr(),
             output_buffer.unsafe_ptr(),
-            round_keys_buffer.unsafe_ptr(),
-            sbox_buffer.unsafe_ptr(),
+            skey_buffer.unsafe_ptr(),
             num_blocks,
             nonce_buffer.unsafe_ptr(),
             10,
@@ -458,8 +440,7 @@ def benchmark_aes_gpu_ctr() raises -> String:
             ctx.enqueue_function[aes_gpu_kernel_ctr](
                 input_buffer.unsafe_ptr(),
                 output_buffer.unsafe_ptr(),
-                round_keys_buffer.unsafe_ptr(),
-                sbox_buffer.unsafe_ptr(),
+                skey_buffer.unsafe_ptr(),
                 num_blocks,
                 nonce_buffer.unsafe_ptr(),
                 10,
@@ -476,7 +457,6 @@ def benchmark_aes_gpu_ctr() raises -> String:
         input_host.free()
         output_host.free()
         nonce_host.free()
-        sbox_host.free()
         round_keys.free()
         key_ptr.free()
         
@@ -514,17 +494,12 @@ def benchmark_aes_gpu_gcm() raises -> String:
     with DeviceContext() as ctx:
         var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
         var output_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
-        var round_keys_buffer = ctx.enqueue_create_buffer[DType.uint32](44)
+        var skey_host = cpu_aes_ct_skey(round_keys, 10)
+        var skey_buffer = ctx.enqueue_create_buffer[DType.uint64](88)
+        ctx.enqueue_copy(skey_buffer, skey_host.unsafe_ptr())
         var nonce_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
         
-        var sbox_host = alloc[Scalar[DType.uint8]](256)
-        for i in range(256):
-            sbox_host[i] = SBOX[i]
-        var sbox_buffer = ctx.enqueue_create_buffer[DType.uint8](256)
-
         ctx.enqueue_copy(input_buffer, input_host)
-        ctx.enqueue_copy(round_keys_buffer, round_keys)
-        ctx.enqueue_copy(sbox_buffer, sbox_host)
         ctx.enqueue_copy(nonce_buffer, nonce_host)
         ctx.synchronize()
 
@@ -534,8 +509,7 @@ def benchmark_aes_gpu_gcm() raises -> String:
         ctx.enqueue_function[aes_gpu_kernel_gcm](
             input_buffer.unsafe_ptr(),
             output_buffer.unsafe_ptr(),
-            round_keys_buffer.unsafe_ptr(),
-            sbox_buffer.unsafe_ptr(),
+            skey_buffer.unsafe_ptr(),
             num_blocks,
             nonce_buffer.unsafe_ptr(),
             10,
@@ -550,8 +524,7 @@ def benchmark_aes_gpu_gcm() raises -> String:
             ctx.enqueue_function[aes_gpu_kernel_gcm](
                 input_buffer.unsafe_ptr(),
                 output_buffer.unsafe_ptr(),
-                round_keys_buffer.unsafe_ptr(),
-                sbox_buffer.unsafe_ptr(),
+                skey_buffer.unsafe_ptr(),
                 num_blocks,
                 nonce_buffer.unsafe_ptr(),
                 10,
@@ -568,7 +541,6 @@ def benchmark_aes_gpu_gcm() raises -> String:
         input_host.free()
         output_host.free()
         nonce_host.free()
-        sbox_host.free()
         round_keys.free()
         key_ptr.free()
         

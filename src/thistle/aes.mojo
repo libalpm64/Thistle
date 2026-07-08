@@ -3,6 +3,7 @@ AES CPU implementation
 """
 
 from std.builtin.globals import global_constant
+from std.bit import byte_swap
 from std.memory import alloc, memset_zero
 from std.utils import StaticTuple
 from .utils import StackBuffer
@@ -12,149 +13,30 @@ comptime ROUNDS_128: Int = 10
 comptime BLOCK_SIZE: Int = 16
 
 @always_inline
-def gf_mul2(a: UInt8) -> UInt8:
-    return (a << UInt8(1)) ^ (UInt8(0x1b) & (UInt8(0) - (a >> UInt8(7))))
-
-@always_inline
 def sbox_lookup(idx: UInt8) -> UInt8:
     ref sbox = global_constant[SBOX]()
     return sbox._unsafe_ref(Int(idx))
 
-comptime TE0: InlineArray[UInt32, 256] = [
-    0xc66363a5, 0xf87c7c84, 0xee777799, 0xf67b7b8d, 0xfff2f20d, 0xd66b6bbd, 0xde6f6fb1, 0x91c5c554,
-    0x60303050, 0x02010103, 0xce6767a9, 0x562b2b7d, 0xe7fefe19, 0xb5d7d762, 0x4dababe6, 0xec76769a,
-    0x8fcaca45, 0x1f82829d, 0x89c9c940, 0xfa7d7d87, 0xeffafa15, 0xb25959eb, 0x8e4747c9, 0xfbf0f00b,
-    0x41adadec, 0xb3d4d467, 0x5fa2a2fd, 0x45afafea, 0x239c9cbf, 0x53a4a4f7, 0xe4727296, 0x9bc0c05b,
-    0x75b7b7c2, 0xe1fdfd1c, 0x3d9393ae, 0x4c26266a, 0x6c36365a, 0x7e3f3f41, 0xf5f7f702, 0x83cccc4f,
-    0x6834345c, 0x51a5a5f4, 0xd1e5e534, 0xf9f1f108, 0xe2717193, 0xabd8d873, 0x62313153, 0x2a15153f,
-    0x0804040c, 0x95c7c752, 0x46232365, 0x9dc3c35e, 0x30181828, 0x379696a1, 0x0a05050f, 0x2f9a9ab5,
-    0x0e070709, 0x24121236, 0x1b80809b, 0xdfe2e23d, 0xcdebeb26, 0x4e272769, 0x7fb2b2cd, 0xea75759f,
-    0x1209091b, 0x1d83839e, 0x582c2c74, 0x341a1a2e, 0x361b1b2d, 0xdc6e6eb2, 0xb45a5aee, 0x5ba0a0fb,
-    0xa45252f6, 0x763b3b4d, 0xb7d6d661, 0x7db3b3ce, 0x5229297b, 0xdde3e33e, 0x5e2f2f71, 0x13848497,
-    0xa65353f5, 0xb9d1d168, 0x00000000, 0xc1eded2c, 0x40202060, 0xe3fcfc1f, 0x79b1b1c8, 0xb65b5bed,
-    0xd46a6abe, 0x8dcbcb46, 0x67bebed9, 0x7239394b, 0x944a4ade, 0x984c4cd4, 0xb05858e8, 0x85cfcf4a,
-    0xbbd0d06b, 0xc5efef2a, 0x4faaaae5, 0xedfbfb16, 0x864343c5, 0x9a4d4dd7, 0x66333355, 0x11858594,
-    0x8a4545cf, 0xe9f9f910, 0x04020206, 0xfe7f7f81, 0xa05050f0, 0x783c3c44, 0x259f9fba, 0x4ba8a8e3,
-    0xa25151f3, 0x5da3a3fe, 0x804040c0, 0x058f8f8a, 0x3f9292ad, 0x219d9dbc, 0x70383848, 0xf1f5f504,
-    0x63bcbcdf, 0x77b6b6c1, 0xafdada75, 0x42212163, 0x20101030, 0xe5ffff1a, 0xfdf3f30e, 0xbfd2d26d,
-    0x81cdcd4c, 0x180c0c14, 0x26131335, 0xc3ecec2f, 0xbe5f5fe1, 0x359797a2, 0x884444cc, 0x2e171739,
-    0x93c4c457, 0x55a7a7f2, 0xfc7e7e82, 0x7a3d3d47, 0xc86464ac, 0xba5d5de7, 0x3219192b, 0xe6737395,
-    0xc06060a0, 0x19818198, 0x9e4f4fd1, 0xa3dcdc7f, 0x44222266, 0x542a2a7e, 0x3b9090ab, 0x0b888883,
-    0x8c4646ca, 0xc7eeee29, 0x6bb8b8d3, 0x2814143c, 0xa7dede79, 0xbc5e5ee2, 0x160b0b1d, 0xaddbdb76,
-    0xdbe0e03b, 0x64323256, 0x743a3a4e, 0x140a0a1e, 0x924949db, 0x0c06060a, 0x4824246c, 0xb85c5ce4,
-    0x9fc2c25d, 0xbdd3d36e, 0x43acacef, 0xc46262a6, 0x399191a8, 0x319595a4, 0xd3e4e437, 0xf279798b,
-    0xd5e7e732, 0x8bc8c843, 0x6e373759, 0xda6d6db7, 0x018d8d8c, 0xb1d5d564, 0x9c4e4ed2, 0x49a9a9e0,
-    0xd86c6cb4, 0xac5656fa, 0xf3f4f407, 0xcfeaea25, 0xca6565af, 0xf47a7a8e, 0x47aeaee9, 0x10080818,
-    0x6fbabad5, 0xf0787888, 0x4a25256f, 0x5c2e2e72, 0x381c1c24, 0x57a6a6f1, 0x73b4b4c7, 0x97c6c651,
-    0xcbe8e823, 0xa1dddd7c, 0xe874749c, 0x3e1f1f21, 0x964b4bdd, 0x61bdbddc, 0x0d8b8b86, 0x0f8a8a85,
-    0xe0707090, 0x7c3e3e42, 0x71b5b5c4, 0xcc6666aa, 0x904848d8, 0x06030305, 0xf7f6f601, 0x1c0e0e12,
-    0xc26161a3, 0x6a35355f, 0xae5757f9, 0x69b9b9d0, 0x17868691, 0x99c1c158, 0x3a1d1d27, 0x279e9eb9,
-    0xd9e1e138, 0xebf8f813, 0x2b9898b3, 0x22111133, 0xd26969bb, 0xa9d9d970, 0x078e8e89, 0x339494a7,
-    0x2d9b9bb6, 0x3c1e1e22, 0x15878792, 0xc9e9e920, 0x87cece49, 0xaa5555ff, 0x50282878, 0xa5dfdf7a,
-    0x038c8c8f, 0x59a1a1f8, 0x09898980, 0x1a0d0d17, 0x65bfbfda, 0xd7e6e631, 0x844242c6, 0xd06868b8,
-    0x824141c3, 0x299999b0, 0x5a2d2d77, 0x1e0f0f11, 0x7bb0b0cb, 0xa85454fc, 0x6dbbbbd6, 0x2c16163a
-]
-
 @always_inline
-def _te(idx: UInt32) -> UInt32:
-    ref t = global_constant[TE0]()
-    return t.unsafe_ptr()[Int(idx)]
-
-@always_inline
-def _rotr[n: Int](x: UInt32) -> UInt32:
-    return (x >> UInt32(n)) | (x << UInt32(32 - n))
-
-@always_inline
-def _sb(idx: UInt32) -> UInt32:
-    return UInt32(sbox_lookup(UInt8(idx)))
-
-@always_inline
-def _cpu_aes_encrypt[rounds: Int](
-    pt_bytes: UnsafePointer[UInt8, MutAnyOrigin],
-    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+def _ct_encrypt1(
+    block: UnsafePointer[UInt8, MutAnyOrigin],
+    skey: List[UInt64],
+    rounds: Int,
 ) -> None:
-    var c0 = (
-        (UInt32(pt_bytes.load(0)) << 24) | (UInt32(pt_bytes.load(1)) << 16)
-        | (UInt32(pt_bytes.load(2)) << 8) | UInt32(pt_bytes.load(3))
-    ) ^ round_keys.load(0)
-    var c1 = (
-        (UInt32(pt_bytes.load(4)) << 24) | (UInt32(pt_bytes.load(5)) << 16)
-        | (UInt32(pt_bytes.load(6)) << 8) | UInt32(pt_bytes.load(7))
-    ) ^ round_keys.load(1)
-    var c2 = (
-        (UInt32(pt_bytes.load(8)) << 24) | (UInt32(pt_bytes.load(9)) << 16)
-        | (UInt32(pt_bytes.load(10)) << 8) | UInt32(pt_bytes.load(11))
-    ) ^ round_keys.load(2)
-    var c3 = (
-        (UInt32(pt_bytes.load(12)) << 24) | (UInt32(pt_bytes.load(13)) << 16)
-        | (UInt32(pt_bytes.load(14)) << 8) | UInt32(pt_bytes.load(15))
-    ) ^ round_keys.load(3)
-
-    comptime for r in range(1, rounds):
-        var rk = round_keys + r * 4
-        var t0 = (
-            _te(c0 >> 24) ^ _rotr[8](_te((c1 >> 16) & 0xFF))
-            ^ _rotr[16](_te((c2 >> 8) & 0xFF)) ^ _rotr[24](_te(c3 & 0xFF))
-        ) ^ rk.load(0)
-        var t1 = (
-            _te(c1 >> 24) ^ _rotr[8](_te((c2 >> 16) & 0xFF))
-            ^ _rotr[16](_te((c3 >> 8) & 0xFF)) ^ _rotr[24](_te(c0 & 0xFF))
-        ) ^ rk.load(1)
-        var t2 = (
-            _te(c2 >> 24) ^ _rotr[8](_te((c3 >> 16) & 0xFF))
-            ^ _rotr[16](_te((c0 >> 8) & 0xFF)) ^ _rotr[24](_te(c1 & 0xFF))
-        ) ^ rk.load(2)
-        var t3 = (
-            _te(c3 >> 24) ^ _rotr[8](_te((c0 >> 16) & 0xFF))
-            ^ _rotr[16](_te((c1 >> 8) & 0xFF)) ^ _rotr[24](_te(c2 & 0xFF))
-        ) ^ rk.load(3)
-        c0 = t0
-        c1 = t1
-        c2 = t2
-        c3 = t3
-
-    var frk = round_keys + rounds * 4
-    var o0 = (
-        (_sb(c0 >> 24) << 24) | (_sb((c1 >> 16) & 0xFF) << 16)
-        | (_sb((c2 >> 8) & 0xFF) << 8) | _sb(c3 & 0xFF)
-    ) ^ frk.load(0)
-    var o1 = (
-        (_sb(c1 >> 24) << 24) | (_sb((c2 >> 16) & 0xFF) << 16)
-        | (_sb((c3 >> 8) & 0xFF) << 8) | _sb(c0 & 0xFF)
-    ) ^ frk.load(1)
-    var o2 = (
-        (_sb(c2 >> 24) << 24) | (_sb((c3 >> 16) & 0xFF) << 16)
-        | (_sb((c0 >> 8) & 0xFF) << 8) | _sb(c1 & 0xFF)
-    ) ^ frk.load(2)
-    var o3 = (
-        (_sb(c3 >> 24) << 24) | (_sb((c0 >> 16) & 0xFF) << 16)
-        | (_sb((c1 >> 8) & 0xFF) << 8) | _sb(c2 & 0xFF)
-    ) ^ frk.load(3)
-
-    pt_bytes.store(0, UInt8(o0 >> 24))
-    pt_bytes.store(1, UInt8((o0 >> 16) & 0xFF))
-    pt_bytes.store(2, UInt8((o0 >> 8) & 0xFF))
-    pt_bytes.store(3, UInt8(o0 & 0xFF))
-    pt_bytes.store(4, UInt8(o1 >> 24))
-    pt_bytes.store(5, UInt8((o1 >> 16) & 0xFF))
-    pt_bytes.store(6, UInt8((o1 >> 8) & 0xFF))
-    pt_bytes.store(7, UInt8(o1 & 0xFF))
-    pt_bytes.store(8, UInt8(o2 >> 24))
-    pt_bytes.store(9, UInt8((o2 >> 16) & 0xFF))
-    pt_bytes.store(10, UInt8((o2 >> 8) & 0xFF))
-    pt_bytes.store(11, UInt8(o2 & 0xFF))
-    pt_bytes.store(12, UInt8(o3 >> 24))
-    pt_bytes.store(13, UInt8((o3 >> 16) & 0xFF))
-    pt_bytes.store(14, UInt8((o3 >> 8) & 0xFF))
-    pt_bytes.store(15, UInt8(o3 & 0xFF))
+    var buf = InlineArray[UInt8, 64](fill=0)
+    var bp = buf.unsafe_ptr()
+    for i in range(16):
+        bp[i] = block[i]
+    cpu_aes_ct_encrypt4(bp, skey, rounds)
+    for i in range(16):
+        block[i] = bp[i]
 
 @always_inline
-# Not Constant Time
 def cpu_aes_encrypt(
     pt_bytes: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
 ) -> None:
-    _cpu_aes_encrypt[10](pt_bytes, round_keys)
+    cpu_aes_encrypt(pt_bytes, round_keys, 10)
 
 @always_inline
 def cpu_aes_encrypt(
@@ -162,12 +44,8 @@ def cpu_aes_encrypt(
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
     rounds: Int,
 ) -> None:
-    if rounds == 10:
-        _cpu_aes_encrypt[10](pt_bytes, round_keys)
-    elif rounds == 12:
-        _cpu_aes_encrypt[12](pt_bytes, round_keys)
-    else:
-        _cpu_aes_encrypt[14](pt_bytes, round_keys)
+    var skey = cpu_aes_ct_skey(round_keys, rounds)
+    _ct_encrypt1(pt_bytes, skey, rounds)
 
 @always_inline
 def cpu_aes_ecb_kernel(
@@ -177,22 +55,20 @@ def cpu_aes_ecb_kernel(
     num_blocks: Int,
     rounds: Int
 ) -> None:
+    var skey = cpu_aes_ct_skey(round_keys, rounds)
+    var scratch = InlineArray[UInt8, 256](fill=0)
+    var sp = scratch.unsafe_ptr()
     var i = 0
     while i < num_blocks:
-        var block_ptr = input_ptr + i * 16
-        var out_ptr = output_ptr + i * 16
-
-        for j in range(16):
-            out_ptr.store(j, block_ptr.load(j))
-
-        if rounds == 10:
-            _cpu_aes_encrypt[10](out_ptr, round_keys)
-        elif rounds == 12:
-            _cpu_aes_encrypt[12](out_ptr, round_keys)
-        else:
-            _cpu_aes_encrypt[14](out_ptr, round_keys)
-
-        i += 1
+        var n = num_blocks - i
+        if n > 16:
+            n = 16
+        for j in range(n * 16):
+            sp[j] = input_ptr[i * 16 + j]
+        cpu_aes_ct_encrypt16(sp, skey, rounds)
+        for j in range(n * 16):
+            output_ptr[i * 16 + j] = sp[j]
+        i += n
 
 @always_inline
 def cpu_aes_cbc_kernel(
@@ -203,6 +79,7 @@ def cpu_aes_cbc_kernel(
     iv_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int
 ) -> None:
+    var skey = cpu_aes_ct_skey(round_keys, rounds)
     var prev_block = StaticTuple[UInt8, 16](
         iv_ptr[0], iv_ptr[1], iv_ptr[2], iv_ptr[3],
         iv_ptr[4], iv_ptr[5], iv_ptr[6], iv_ptr[7],
@@ -218,17 +95,29 @@ def cpu_aes_cbc_kernel(
         for j in range(16):
             out_ptr.store(j, block_ptr.load(j) ^ prev_block[j])
 
-        if rounds == 10:
-            _cpu_aes_encrypt[10](out_ptr, round_keys)
-        elif rounds == 12:
-            _cpu_aes_encrypt[12](out_ptr, round_keys)
-        else:
-            _cpu_aes_encrypt[14](out_ptr, round_keys)
+        _ct_encrypt1(out_ptr, skey, rounds)
 
         for j in range(16):
             prev_block[j] = out_ptr.load(j)
 
         i += 1
+
+@always_inline
+def _ctr_write_block(
+    dst: UnsafePointer[UInt8, MutAnyOrigin],
+    nonce_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    offset: Int,
+) -> None:
+    for j in range(16):
+        dst.store(j, nonce_ptr[j])
+    var carry = UInt64(offset)
+    for j in range(15, -1, -1):
+        if carry == 0:
+            break
+        var total = UInt64(dst.load(j)) + (carry & 0xFF)
+        dst.store(j, UInt8(total & 0xFF))
+        carry = (carry >> 8) + (total >> 8)
+
 
 @always_inline
 def cpu_aes_ctr_kernel(
@@ -239,33 +128,23 @@ def cpu_aes_ctr_kernel(
     nonce_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int
 ) -> None:
+    var skey = cpu_aes_ct_skey(round_keys, rounds)
+    var ks = InlineArray[UInt8, 256](fill=0)
+    var kp = ks.unsafe_ptr()
     var i = 0
     while i < num_blocks:
-        var temp_block = StackBuffer[UInt8, 16]()
-        var tp = temp_block.ptr()
-        for j in range(16):
-            tp.store(j, nonce_ptr[j])
-
-        var carry = UInt64(i)
-        for j in range(15, -1, -1):
-            if carry == 0:
-                break
-            var total = UInt64(tp.load(j)) + (carry & 0xFF)
-            tp.store(j, UInt8(total & 0xFF))
-            carry = (carry >> 8) + (total >> 8)
-
-        if rounds == 10:
-            _cpu_aes_encrypt[10](tp, round_keys)
-        elif rounds == 12:
-            _cpu_aes_encrypt[12](tp, round_keys)
-        else:
-            _cpu_aes_encrypt[14](tp, round_keys)
-
-        var in_block = input_ptr + i * 16
-        var out_block = output_ptr + i * 16
-        for j in range(16):
-            out_block.store(j, in_block.load(j) ^ tp.load(j))
-        i += 1
+        var n = num_blocks - i
+        if n > 16:
+            n = 16
+        for k in range(16):
+            _ctr_write_block(kp + k * 16, nonce_ptr, i + (k if k < n else 0))
+        cpu_aes_ct_encrypt16(kp, skey, rounds)
+        for k in range(n):
+            var in_block = input_ptr + (i + k) * 16
+            var out_block = output_ptr + (i + k) * 16
+            for j in range(16):
+                out_block.store(j, in_block.load(j) ^ kp.load(k * 16 + j))
+        i += n
 
 @always_inline
 def cpu_xts_mul_alpha_inplace(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> None:
@@ -287,17 +166,14 @@ def cpu_aes_xts_kernel(
     tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int
 ) -> None:
+    var skey1 = cpu_aes_ct_skey(round_keys1, rounds)
+    var skey2 = cpu_aes_ct_skey(round_keys2, rounds)
     var tweak = StackBuffer[UInt8, 16]()
     var wp = tweak.ptr()
     for j in range(16):
         wp.store(j, tweak_ptr[j])
 
-    if rounds == 10:
-        _cpu_aes_encrypt[10](wp, round_keys2)
-    elif rounds == 12:
-        _cpu_aes_encrypt[12](wp, round_keys2)
-    else:
-        _cpu_aes_encrypt[14](wp, round_keys2)
+    _ct_encrypt1(wp, skey2, rounds)
 
     var i = 0
     while i < num_blocks:
@@ -309,12 +185,7 @@ def cpu_aes_xts_kernel(
         for j in range(16):
             xp.store(j, in_block.load(j) ^ wp.load(j))
 
-        if rounds == 10:
-            _cpu_aes_encrypt[10](xp, round_keys1)
-        elif rounds == 12:
-            _cpu_aes_encrypt[12](xp, round_keys1)
-        else:
-            _cpu_aes_encrypt[14](xp, round_keys1)
+        _ct_encrypt1(xp, skey1, rounds)
 
         for j in range(16):
             out_block.store(j, xp.load(j) ^ wp.load(j))
@@ -454,3 +325,407 @@ struct AESKey:
 
     def round_keys(mut self) -> UnsafePointer[UInt32, MutAnyOrigin]:
         return self._round_keys.ptr()
+
+
+@always_inline
+def _ct_interleave_in[W: Int](
+    w0: SIMD[DType.uint64, W], w1: SIMD[DType.uint64, W],
+    w2: SIMD[DType.uint64, W], w3: SIMD[DType.uint64, W],
+) -> Tuple[SIMD[DType.uint64, W], SIMD[DType.uint64, W]]:
+    var x0 = w0
+    var x1 = w1
+    var x2 = w2
+    var x3 = w3
+    x0 |= x0 << 16
+    x1 |= x1 << 16
+    x2 |= x2 << 16
+    x3 |= x3 << 16
+    x0 &= 0x0000FFFF0000FFFF
+    x1 &= 0x0000FFFF0000FFFF
+    x2 &= 0x0000FFFF0000FFFF
+    x3 &= 0x0000FFFF0000FFFF
+    x0 |= x0 << 8
+    x1 |= x1 << 8
+    x2 |= x2 << 8
+    x3 |= x3 << 8
+    x0 &= 0x00FF00FF00FF00FF
+    x1 &= 0x00FF00FF00FF00FF
+    x2 &= 0x00FF00FF00FF00FF
+    x3 &= 0x00FF00FF00FF00FF
+    return (x0 | (x2 << 8), x1 | (x3 << 8))
+
+
+@always_inline
+def _ct_interleave_out[W: Int](
+    q0: SIMD[DType.uint64, W], q1: SIMD[DType.uint64, W]
+) -> Tuple[
+    SIMD[DType.uint64, W], SIMD[DType.uint64, W],
+    SIMD[DType.uint64, W], SIMD[DType.uint64, W],
+]:
+    var x0 = q0 & 0x00FF00FF00FF00FF
+    var x1 = q1 & 0x00FF00FF00FF00FF
+    var x2 = (q0 >> 8) & 0x00FF00FF00FF00FF
+    var x3 = (q1 >> 8) & 0x00FF00FF00FF00FF
+    x0 |= x0 >> 8
+    x1 |= x1 >> 8
+    x2 |= x2 >> 8
+    x3 |= x3 >> 8
+    x0 &= 0x0000FFFF0000FFFF
+    x1 &= 0x0000FFFF0000FFFF
+    x2 &= 0x0000FFFF0000FFFF
+    x3 &= 0x0000FFFF0000FFFF
+    x0 |= x0 >> 16
+    x1 |= x1 >> 16
+    x2 |= x2 >> 16
+    x3 |= x3 >> 16
+    return (
+        x0 & 0xFFFFFFFF, x1 & 0xFFFFFFFF, x2 & 0xFFFFFFFF, x3 & 0xFFFFFFFF
+    )
+
+
+@always_inline
+def _ct_swapn[W: Int](
+    cl: UInt64, s: Int, x: SIMD[DType.uint64, W], y: SIMD[DType.uint64, W]
+) -> Tuple[SIMD[DType.uint64, W], SIMD[DType.uint64, W]]:
+    return (
+        (x & cl) | ((y & cl) << s),
+        ((x & ~cl) >> s) | (y & ~cl),
+    )
+
+
+@always_inline
+def _ct_ortho[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
+    var p01 = _ct_swapn(0x5555555555555555, 1, q[0], q[1])
+    var p23 = _ct_swapn(0x5555555555555555, 1, q[2], q[3])
+    var p45 = _ct_swapn(0x5555555555555555, 1, q[4], q[5])
+    var p67 = _ct_swapn(0x5555555555555555, 1, q[6], q[7])
+    var p02 = _ct_swapn(0x3333333333333333, 2, p01[0], p23[0])
+    var p13 = _ct_swapn(0x3333333333333333, 2, p01[1], p23[1])
+    var p46 = _ct_swapn(0x3333333333333333, 2, p45[0], p67[0])
+    var p57 = _ct_swapn(0x3333333333333333, 2, p45[1], p67[1])
+    var p04 = _ct_swapn(0x0F0F0F0F0F0F0F0F, 4, p02[0], p46[0])
+    var p15 = _ct_swapn(0x0F0F0F0F0F0F0F0F, 4, p13[0], p57[0])
+    var p26 = _ct_swapn(0x0F0F0F0F0F0F0F0F, 4, p02[1], p46[1])
+    var p37 = _ct_swapn(0x0F0F0F0F0F0F0F0F, 4, p13[1], p57[1])
+    q[0] = p04[0]
+    q[1] = p15[0]
+    q[2] = p26[0]
+    q[3] = p37[0]
+    q[4] = p04[1]
+    q[5] = p15[1]
+    q[6] = p26[1]
+    q[7] = p37[1]
+
+
+@always_inline
+def _ct_sbox[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
+    var x0 = q[7]
+    var x1 = q[6]
+    var x2 = q[5]
+    var x3 = q[4]
+    var x4 = q[3]
+    var x5 = q[2]
+    var x6 = q[1]
+    var x7 = q[0]
+
+    var y14 = x3 ^ x5
+    var y13 = x0 ^ x6
+    var y9 = x0 ^ x3
+    var y8 = x0 ^ x5
+    var t0 = x1 ^ x2
+    var y1 = t0 ^ x7
+    var y4 = y1 ^ x3
+    var y12 = y13 ^ y14
+    var y2 = y1 ^ x0
+    var y5 = y1 ^ x6
+    var y3 = y5 ^ y8
+    var t1 = x4 ^ y12
+    var y15 = t1 ^ x5
+    var y20 = t1 ^ x1
+    var y6 = y15 ^ x7
+    var y10 = y15 ^ t0
+    var y11 = y20 ^ y9
+    var y7 = x7 ^ y11
+    var y17 = y10 ^ y11
+    var y19 = y10 ^ y8
+    var y16 = t0 ^ y11
+    var y21 = y13 ^ y16
+    var y18 = x0 ^ y16
+
+    var t2 = y12 & y15
+    var t3 = y3 & y6
+    var t4 = t3 ^ t2
+    var t5 = y4 & x7
+    var t6 = t5 ^ t2
+    var t7 = y13 & y16
+    var t8 = y5 & y1
+    var t9 = t8 ^ t7
+    var t10 = y2 & y7
+    var t11 = t10 ^ t7
+    var t12 = y9 & y11
+    var t13 = y14 & y17
+    var t14 = t13 ^ t12
+    var t15 = y8 & y10
+    var t16 = t15 ^ t12
+    var t17 = t4 ^ t14
+    var t18 = t6 ^ t16
+    var t19 = t9 ^ t14
+    var t20 = t11 ^ t16
+    var t21 = t17 ^ y20
+    var t22 = t18 ^ y19
+    var t23 = t19 ^ y21
+    var t24 = t20 ^ y18
+
+    var t25 = t21 ^ t22
+    var t26 = t21 & t23
+    var t27 = t24 ^ t26
+    var t28 = t25 & t27
+    var t29 = t28 ^ t22
+    var t30 = t23 ^ t24
+    var t31 = t22 ^ t26
+    var t32 = t31 & t30
+    var t33 = t32 ^ t24
+    var t34 = t23 ^ t33
+    var t35 = t27 ^ t33
+    var t36 = t24 & t35
+    var t37 = t36 ^ t34
+    var t38 = t27 ^ t36
+    var t39 = t29 & t38
+    var t40 = t25 ^ t39
+
+    var t41 = t40 ^ t37
+    var t42 = t29 ^ t33
+    var t43 = t29 ^ t40
+    var t44 = t33 ^ t37
+    var t45 = t42 ^ t41
+    var z0 = t44 & y15
+    var z1 = t37 & y6
+    var z2 = t33 & x7
+    var z3 = t43 & y16
+    var z4 = t40 & y1
+    var z5 = t29 & y7
+    var z6 = t42 & y11
+    var z7 = t45 & y17
+    var z8 = t41 & y10
+    var z9 = t44 & y12
+    var z10 = t37 & y3
+    var z11 = t33 & y4
+    var z12 = t43 & y13
+    var z13 = t40 & y5
+    var z14 = t29 & y2
+    var z15 = t42 & y9
+    var z16 = t45 & y14
+    var z17 = t41 & y8
+
+    var t46 = z15 ^ z16
+    var t47 = z10 ^ z11
+    var t48 = z5 ^ z13
+    var t49 = z9 ^ z10
+    var t50 = z2 ^ z12
+    var t51 = z2 ^ z5
+    var t52 = z7 ^ z8
+    var t53 = z0 ^ z3
+    var t54 = z6 ^ z7
+    var t55 = z16 ^ z17
+    var t56 = z12 ^ t48
+    var t57 = t50 ^ t53
+    var t58 = z4 ^ t46
+    var t59 = z3 ^ t54
+    var t60 = t46 ^ t57
+    var t61 = z14 ^ t57
+    var t62 = t52 ^ t58
+    var t63 = t49 ^ t58
+    var t64 = z4 ^ t59
+    var t65 = t61 ^ t62
+    var t66 = z1 ^ t63
+    var s0 = t59 ^ t63
+    var s6 = t56 ^ ~t62
+    var s7 = t48 ^ ~t60
+    var t67 = t64 ^ t65
+    var s3 = t53 ^ t66
+    var s4 = t51 ^ t66
+    var s5 = t47 ^ t65
+    var s1 = t64 ^ ~s3
+    var s2 = t55 ^ ~t67
+
+    q[7] = s0
+    q[6] = s1
+    q[5] = s2
+    q[4] = s3
+    q[3] = s4
+    q[2] = s5
+    q[1] = s6
+    q[0] = s7
+
+
+@always_inline
+def _ct_shift_rows[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
+    comptime for i in range(8):
+        var x = q[i]
+        q[i] = (
+            (x & 0x000000000000FFFF)
+            | ((x & 0x00000000FFF00000) >> 4)
+            | ((x & 0x00000000000F0000) << 12)
+            | ((x & 0x0000FF0000000000) >> 8)
+            | ((x & 0x000000FF00000000) << 8)
+            | ((x & 0xF000000000000000) >> 12)
+            | ((x & 0x0FFF000000000000) << 4)
+        )
+
+
+@always_inline
+def _ct_rotr32[W: Int](x: SIMD[DType.uint64, W]) -> SIMD[DType.uint64, W]:
+    return (x << 32) | (x >> 32)
+
+
+@always_inline
+def _ct_mix_columns[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
+    var q0 = q[0]
+    var q1 = q[1]
+    var q2 = q[2]
+    var q3 = q[3]
+    var q4 = q[4]
+    var q5 = q[5]
+    var q6 = q[6]
+    var q7 = q[7]
+    var r0 = (q0 >> 16) | (q0 << 48)
+    var r1 = (q1 >> 16) | (q1 << 48)
+    var r2 = (q2 >> 16) | (q2 << 48)
+    var r3 = (q3 >> 16) | (q3 << 48)
+    var r4 = (q4 >> 16) | (q4 << 48)
+    var r5 = (q5 >> 16) | (q5 << 48)
+    var r6 = (q6 >> 16) | (q6 << 48)
+    var r7 = (q7 >> 16) | (q7 << 48)
+
+    q[0] = q7 ^ r7 ^ r0 ^ _ct_rotr32(q0 ^ r0)
+    q[1] = q0 ^ r0 ^ q7 ^ r7 ^ r1 ^ _ct_rotr32(q1 ^ r1)
+    q[2] = q1 ^ r1 ^ r2 ^ _ct_rotr32(q2 ^ r2)
+    q[3] = q2 ^ r2 ^ q7 ^ r7 ^ r3 ^ _ct_rotr32(q3 ^ r3)
+    q[4] = q3 ^ r3 ^ q7 ^ r7 ^ r4 ^ _ct_rotr32(q4 ^ r4)
+    q[5] = q4 ^ r4 ^ r5 ^ _ct_rotr32(q5 ^ r5)
+    q[6] = q5 ^ r5 ^ r6 ^ _ct_rotr32(q6 ^ r6)
+    q[7] = q6 ^ r6 ^ r7 ^ _ct_rotr32(q7 ^ r7)
+
+
+def cpu_aes_ct_skey(
+    round_keys: UnsafePointer[UInt32, MutAnyOrigin], rounds: Int
+) -> List[UInt64]:
+    var skey = List[UInt64](capacity=(rounds + 1) * 8)
+    for r in range(rounds + 1):
+        var w0 = SIMD[DType.uint64, 1](UInt64(byte_swap(round_keys.load(r * 4))))
+        var w1 = SIMD[DType.uint64, 1](UInt64(byte_swap(round_keys.load(r * 4 + 1))))
+        var w2 = SIMD[DType.uint64, 1](UInt64(byte_swap(round_keys.load(r * 4 + 2))))
+        var w3 = SIMD[DType.uint64, 1](UInt64(byte_swap(round_keys.load(r * 4 + 3))))
+        var q = InlineArray[SIMD[DType.uint64, 1], 8](fill=0)
+        for i in range(4):
+            var pair = _ct_interleave_in(w0, w1, w2, w3)
+            q[i] = pair[0]
+            q[i + 4] = pair[1]
+        _ct_ortho(q)
+        for i in range(8):
+            skey.append(UInt64(q[i]))
+    return skey^
+
+
+@always_inline
+def _ct_le32(p: UnsafePointer[UInt8, MutAnyOrigin], off: Int) -> UInt64:
+    return (
+        UInt64(p.load(off))
+        | (UInt64(p.load(off + 1)) << 8)
+        | (UInt64(p.load(off + 2)) << 16)
+        | (UInt64(p.load(off + 3)) << 24)
+    )
+
+
+@always_inline
+def _ct_store_le32(p: UnsafePointer[UInt8, MutAnyOrigin], off: Int, w: UInt64):
+    p.store(off, UInt8(w & 0xFF))
+    p.store(off + 1, UInt8((w >> 8) & 0xFF))
+    p.store(off + 2, UInt8((w >> 16) & 0xFF))
+    p.store(off + 3, UInt8((w >> 24) & 0xFF))
+
+
+@always_inline
+def _ct_encrypt_blocks[W: Int](
+    blocks: UnsafePointer[UInt8, MutAnyOrigin],
+    skp: UnsafePointer[UInt64, ImmutAnyOrigin],
+    rounds: Int,
+) -> None:
+    var q = InlineArray[SIMD[DType.uint64, W], 8](fill=0)
+    for i in range(4):
+        var w0 = SIMD[DType.uint64, W](0)
+        var w1 = SIMD[DType.uint64, W](0)
+        var w2 = SIMD[DType.uint64, W](0)
+        var w3 = SIMD[DType.uint64, W](0)
+        comptime for l in range(W):
+            var base = (i + 4 * l) * 16
+            w0[l] = _ct_le32(blocks, base)
+            w1[l] = _ct_le32(blocks, base + 4)
+            w2[l] = _ct_le32(blocks, base + 8)
+            w3[l] = _ct_le32(blocks, base + 12)
+        var pair = _ct_interleave_in(w0, w1, w2, w3)
+        q[i] = pair[0]
+        q[i + 4] = pair[1]
+    _ct_ortho(q)
+
+    comptime for i in range(8):
+        q[i] ^= SIMD[DType.uint64, W](skp[i])
+    for r in range(1, rounds):
+        _ct_sbox(q)
+        _ct_shift_rows(q)
+        _ct_mix_columns(q)
+        comptime for i in range(8):
+            q[i] ^= SIMD[DType.uint64, W](skp[r * 8 + i])
+    _ct_sbox(q)
+    _ct_shift_rows(q)
+    comptime for i in range(8):
+        q[i] ^= SIMD[DType.uint64, W](skp[rounds * 8 + i])
+
+    _ct_ortho(q)
+    for i in range(4):
+        var ws = _ct_interleave_out(q[i], q[i + 4])
+        comptime for l in range(W):
+            var base = (i + 4 * l) * 16
+            _ct_store_le32(blocks, base, UInt64(ws[0][l]))
+            _ct_store_le32(blocks, base + 4, UInt64(ws[1][l]))
+            _ct_store_le32(blocks, base + 8, UInt64(ws[2][l]))
+            _ct_store_le32(blocks, base + 12, UInt64(ws[3][l]))
+
+
+def cpu_aes_ct_encrypt4(
+    blocks: UnsafePointer[UInt8, MutAnyOrigin],
+    skey: List[UInt64],
+    rounds: Int,
+) -> None:
+    _ct_encrypt_blocks[1](blocks, skey.unsafe_ptr(), rounds)
+
+
+def cpu_aes_ct_encrypt8(
+    blocks: UnsafePointer[UInt8, MutAnyOrigin],
+    skey: List[UInt64],
+    rounds: Int,
+) -> None:
+    _ct_encrypt_blocks[2](blocks, skey.unsafe_ptr(), rounds)
+
+
+def cpu_aes_ct_encrypt16(
+    blocks: UnsafePointer[UInt8, MutAnyOrigin],
+    skey: List[UInt64],
+    rounds: Int,
+) -> None:
+    _ct_encrypt_blocks[4](blocks, skey.unsafe_ptr(), rounds)
+
+
+def cpu_aes_ct_encrypt(
+    pt_bytes: UnsafePointer[UInt8, MutAnyOrigin],
+    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    rounds: Int = 10,
+) -> None:
+    var skey = cpu_aes_ct_skey(round_keys, rounds)
+    var buf = InlineArray[UInt8, 64](fill=0)
+    var bp = buf.unsafe_ptr()
+    for i in range(16):
+        bp[i] = pt_bytes[i]
+    cpu_aes_ct_encrypt4(bp, skey, rounds)
+    for i in range(16):
+        pt_bytes[i] = bp[i]

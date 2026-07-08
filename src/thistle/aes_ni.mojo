@@ -6,7 +6,7 @@ from std.collections import List
 from std.sys import llvm_intrinsic, CompilationTarget
 from std.memory import alloc, bitcast, memset_zero, memcpy, UnsafePointer, Span
 from std.utils import StaticTuple
-from .aes import cpu_aes_encrypt, expand_key_128, expand_key_192, expand_key_256, SBOX
+from .aes import cpu_aes_encrypt, cpu_aes_ct_encrypt, cpu_aes_ct_encrypt16, cpu_aes_ct_skey, expand_key_128, expand_key_192, expand_key_256
 from .utils import StackBuffer
 
 comptime SIMD16 = SIMD[DType.uint8, 16]
@@ -727,6 +727,23 @@ def aes_gcm_ctr_kernel(
     j0_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int
 ) -> None:
+    comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
+    else:
+        comptime if CompilationTarget._has_feature["crypto"]() or CompilationTarget._has_feature["aes"]():
+            _hw_gcm_ctr_kernel(input_ptr, output_ptr, round_keys, num_blocks, j0_ptr, rounds)
+        else:
+            _soft_gcm_ctr_kernel(input_ptr, output_ptr, round_keys, num_blocks, j0_ptr, rounds)
+
+
+@always_inline
+def _hw_gcm_ctr_kernel(
+    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    num_blocks: Int,
+    j0_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    rounds: Int
+) -> None:
     var counter_block = StackBuffer[UInt8, 16]()
     var cp = counter_block.ptr()
 
@@ -741,6 +758,34 @@ def aes_gcm_ctr_kernel(
             out_block.store(j, in_block.load(j) ^ cp.load(j))
 
         i += 1
+
+
+@always_inline
+def _soft_gcm_ctr_kernel(
+    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    num_blocks: Int,
+    j0_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    rounds: Int
+) -> None:
+    var skey = cpu_aes_ct_skey(round_keys, rounds)
+    var ks = InlineArray[UInt8, 256](fill=0)
+    var kp = ks.unsafe_ptr()
+    var i = 0
+    while i < num_blocks:
+        var n = num_blocks - i
+        if n > 16:
+            n = 16
+        for k in range(16):
+            _write_gcm_counter(kp + k * 16, j0_ptr, i + (k if k < n else 0))
+        cpu_aes_ct_encrypt16(kp, skey, rounds)
+        for k in range(n):
+            var in_block = input_ptr + (i + k) * 16
+            var out_block = output_ptr + (i + k) * 16
+            for j in range(16):
+                out_block.store(j, in_block.load(j) ^ kp.load(k * 16 + j))
+        i += n
 
 @always_inline
 def has_aes_ni() -> Bool:
@@ -840,7 +885,13 @@ def _encrypt_block(
 ):
     for i in range(16):
         dst[i] = src[i]
-    aes_encrypt(dst, rk, rounds)
+    comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
+        aes_encrypt(dst, rk, rounds)
+    else:
+        comptime if CompilationTarget._has_feature["crypto"]() or CompilationTarget._has_feature["aes"]():
+            aes_encrypt(dst, rk, rounds)
+        else:
+            cpu_aes_ct_encrypt(dst, rk, rounds)
 
 
 def _derive_j0(
