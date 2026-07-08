@@ -633,7 +633,7 @@ def sha512_update(mut ctx: SHA512Context, data: Span[UInt8, ...]):
 
 def sha512_final(mut ctx: SHA512Context) -> List[UInt8]:
     var output = List[UInt8](capacity=64)
-    for i in range(64):
+    for _ in range(64):
         output.append(0)
     sha512_final_to_buffer(ctx, output.unsafe_ptr())
     return output^
