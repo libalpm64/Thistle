@@ -342,6 +342,29 @@ def _field_from_montgomery(a: UInt32) -> UInt32:
     return _montgomery_reduce(UInt64(a))
 
 
+comptime _VW = 4
+comptime _U32v = SIMD[DType.uint32, _VW]
+comptime _U64v = SIMD[DType.uint64, _VW]
+
+
+@always_inline
+def _field_reduce_once_v(a: _U32v) -> _U32v:
+    var t = a - _U32v(Q)
+    return t + ((_U32v(0) - (t >> 31)) & _U32v(Q))
+
+
+@always_inline
+def _montgomery_reduce_v(x: _U64v) -> _U32v:
+    var t = x.cast[DType.uint32]() * _U32v(Q_NEG_INV)
+    var u = ((x + t.cast[DType.uint64]() * _U64v(UInt64(Q))) >> 32).cast[DType.uint32]()
+    return _field_reduce_once_v(u)
+
+
+@always_inline
+def _montgomery_mul_v(a: _U32v, b: _U32v) -> _U32v:
+    return _montgomery_reduce_v(a.cast[DType.uint64]() * b.cast[DType.uint64]())
+
+
 def _centered_mod(r: UInt32) -> Int32:
     var x = Int32(_field_from_montgomery(r))
     var mask = (Int32(Q // 2) - x) >> 31
@@ -393,19 +416,28 @@ def _ntt_mul_into(mut r: List[UInt32], a: List[UInt32], b: List[UInt32]):
         r[i] = _montgomery_mul(a[i], b[i])
 
 
+@always_inline
+def _ntt_mul_ptrs(
+    r: UnsafePointer[UInt32, MutAnyOrigin],
+    a: UnsafePointer[UInt32, ImmutAnyOrigin],
+    b: UnsafePointer[UInt32, ImmutAnyOrigin],
+):
+    var i = 0
+    while i < N:
+        r.store(i, _montgomery_mul_v(a.load[width=_VW](i), b.load[width=_VW](i)))
+        i += _VW
+
+
 def _dsa_ntt_mul_into(mut r: DSAPoly, a: DSAPoly, b: DSAPoly):
-    for i in range(N):
-        r[i] = _montgomery_mul(a[i], b[i])
+    _ntt_mul_ptrs(r.unsafe_ptr(), a.unsafe_ptr(), b.unsafe_ptr())
 
 
 def _dsa_ntt_mul_into(mut r: DSAPoly, a: List[UInt32], b: DSAPoly):
-    for i in range(N):
-        r[i] = _montgomery_mul(a[i], b[i])
+    _ntt_mul_ptrs(r.unsafe_ptr(), a.unsafe_ptr(), b.unsafe_ptr())
 
 
 def _dsa_ntt_mul_into(mut r: DSAPoly, a: DSAPoly, b: List[UInt32]):
-    for i in range(N):
-        r[i] = _montgomery_mul(a[i], b[i])
+    _ntt_mul_ptrs(r.unsafe_ptr(), a.unsafe_ptr(), b.unsafe_ptr())
 
 
 def _ntt_inplace(mut f: List[UInt32]):
@@ -427,6 +459,7 @@ def _ntt_inplace(mut f: List[UInt32]):
 
 
 def _dsa_ntt_inplace(mut f: DSAPoly):
+    var p = f.unsafe_ptr()
     var m = 0
     var length = 128
     while length >= 1:
@@ -434,12 +467,23 @@ def _dsa_ntt_inplace(mut f: DSAPoly):
         while start < 256:
             m += 1
             var zeta = _zeta(m)
-            var j = start
-            while j < start + length:
-                var t = _montgomery_mul(zeta, f[j + length])
-                f[j + length] = _field_sub(f[j], t)
-                f[j] = _field_add(f[j], t)
-                j += 1
+            if length >= _VW:
+                var zv = _U32v(zeta).cast[DType.uint64]()
+                var j = start
+                while j < start + length:
+                    var a = p.load[width=_VW](j)
+                    var b = p.load[width=_VW](j + length)
+                    var t = _montgomery_reduce_v(zv * b.cast[DType.uint64]())
+                    p.store(j + length, _field_reduce_once_v(a - t + _U32v(Q)))
+                    p.store(j, _field_reduce_once_v(a + t))
+                    j += _VW
+            else:
+                var j = start
+                while j < start + length:
+                    var t = _montgomery_mul(zeta, f[j + length])
+                    f[j + length] = _field_sub(f[j], t)
+                    f[j] = _field_add(f[j], t)
+                    j += 1
             start += 2 * length
         length //= 2
 
@@ -470,6 +514,7 @@ def _inverse_ntt_inplace(mut f: List[UInt32]):
 
 
 def _dsa_inverse_ntt_inplace(mut f: DSAPoly):
+    var p = f.unsafe_ptr()
     var m = 255
     var length = 1
     while length < 256:
@@ -477,16 +522,33 @@ def _dsa_inverse_ntt_inplace(mut f: DSAPoly):
         while start < 256:
             var zeta = _zeta(m)
             m -= 1
-            var j = start
-            while j < start + length:
-                var t = f[j]
-                f[j] = _field_add(t, f[j + length])
-                f[j + length] = _montgomery_mul_sub(zeta, f[j + length], t)
-                j += 1
+            if length >= _VW:
+                var zv = _U32v(zeta).cast[DType.uint64]()
+                var j = start
+                while j < start + length:
+                    var a = p.load[width=_VW](j)
+                    var b = p.load[width=_VW](j + length)
+                    p.store(j, _field_reduce_once_v(a + b))
+                    p.store(
+                        j + length,
+                        _montgomery_reduce_v(
+                            zv * (b - a + _U32v(Q)).cast[DType.uint64]()
+                        ),
+                    )
+                    j += _VW
+            else:
+                var j = start
+                while j < start + length:
+                    var t = f[j]
+                    f[j] = _field_add(t, f[j + length])
+                    f[j + length] = _montgomery_mul_sub(zeta, f[j + length], t)
+                    j += 1
             start += 2 * length
         length *= 2
-    for i in range(N):
-        f[i] = _montgomery_mul(f[i], 16382)
+    var i = 0
+    while i < N:
+        p.store(i, _montgomery_mul_v(p.load[width=_VW](i), _U32v(16382)))
+        i += _VW
 
 
 def _inverse_ntt(var f: List[UInt32]) -> List[UInt32]:

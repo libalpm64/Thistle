@@ -14,4 +14,4 @@ bench = "mojo run -I src/ tests/benchmark.mojo"
 [dependencies]
 python = "3.12.*"
 max = "==26.4.0"
-mojo = "==1.0.0b2"
+mojo = ">=1.0.0b2,<2"
