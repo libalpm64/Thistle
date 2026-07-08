@@ -2,6 +2,7 @@
 KCipher-2 stream cipher implemented in Mojo.
 """
 
+from std.builtin.globals import global_constant
 from std.utils import StaticTuple
 
 comptime SBOX = StaticTuple[UInt32, 256](
@@ -25,7 +26,8 @@ comptime SBOX = StaticTuple[UInt32, 256](
 
 @always_inline
 def _sbox(idx: Int) -> UInt8:
-    return UInt8(SBOX._unsafe_ref(idx))
+    ref t = global_constant[SBOX]()
+    return UInt8(t._unsafe_ref(idx))
 
 comptime AMUL0 = StaticTuple[UInt32, 256](
     0x00000000, 0xB6086D1A, 0xAF10DA34, 0x1918B72E, 0x9D207768, 0x2B281A72, 0x3230AD5C, 0x8438C046,
@@ -64,7 +66,8 @@ comptime AMUL0 = StaticTuple[UInt32, 256](
 
 @always_inline
 def _amul0(idx: Int) -> UInt32:
-    return AMUL0._unsafe_ref(idx)
+    ref t = global_constant[AMUL0]()
+    return t._unsafe_ref(idx)
 
 comptime AMUL1 = StaticTuple[UInt32, 256](
     0x00000000, 0xA0F5FC2E, 0x6DC7D55C, 0xCD322972, 0xDAA387B8, 0x7A567B96, 0xB76452E4, 0x1791AECA,
@@ -104,7 +107,8 @@ comptime AMUL1 = StaticTuple[UInt32, 256](
 
 @always_inline
 def _amul1(idx: Int) -> UInt32:
-    return AMUL1._unsafe_ref(idx)
+    ref t = global_constant[AMUL1]()
+    return t._unsafe_ref(idx)
 
 
 comptime AMUL2 = StaticTuple[UInt32, 256](
@@ -144,7 +148,8 @@ comptime AMUL2 = StaticTuple[UInt32, 256](
 
 @always_inline
 def _amul2(idx: Int) -> UInt32:
-    return AMUL2._unsafe_ref(idx)
+    ref t = global_constant[AMUL2]()
+    return t._unsafe_ref(idx)
 
 comptime AMUL3 = StaticTuple[UInt32, 256](
     0x00000000, 0x4559568B, 0x8AB2AC73, 0xCFEBFAF8, 0x71013DE6, 0x34586B6D, 0xFBB39195, 0xBEEAC71E,
@@ -183,7 +188,8 @@ comptime AMUL3 = StaticTuple[UInt32, 256](
 
 @always_inline
 def _amul3(idx: Int) -> UInt32:
-    return AMUL3._unsafe_ref(idx)
+    ref t = global_constant[AMUL3]()
+    return t._unsafe_ref(idx)
 
 @always_inline
 def gf_mult_by_2(t: UInt8) -> UInt8:

@@ -5,6 +5,7 @@ Camellia block cipher implementation per RFC 3713
 from std.memory import bitcast, UnsafePointer
 from std.bit import byte_swap, rotate_bits_left
 from std.collections import InlineArray
+from std.builtin.globals import global_constant
 from std.utils import StaticTuple
 
 comptime SBOX1: StaticTuple[UInt8, 256] = StaticTuple[UInt8, 256](
@@ -85,19 +86,23 @@ comptime SBOX4: StaticTuple[UInt8, 256] = StaticTuple[UInt8, 256](
 
 @always_inline
 def sbox1_lookup(idx: UInt8) -> UInt8:
-    return SBOX1._unsafe_ref(Int(idx))
+    ref t = global_constant[SBOX1]()
+    return t._unsafe_ref(Int(idx))
 
 @always_inline
 def sbox2_lookup(idx: UInt8) -> UInt8:
-    return SBOX2._unsafe_ref(Int(idx))
+    ref t = global_constant[SBOX2]()
+    return t._unsafe_ref(Int(idx))
 
 @always_inline
 def sbox3_lookup(idx: UInt8) -> UInt8:
-    return SBOX3._unsafe_ref(Int(idx))
+    ref t = global_constant[SBOX3]()
+    return t._unsafe_ref(Int(idx))
 
 @always_inline
 def sbox4_lookup(idx: UInt8) -> UInt8:
-    return SBOX4._unsafe_ref(Int(idx))
+    ref t = global_constant[SBOX4]()
+    return t._unsafe_ref(Int(idx))
 
 comptime SIGMA1 = 0xA09E667F3BCC908B
 comptime SIGMA2 = 0xB67AE8584CAA73B2

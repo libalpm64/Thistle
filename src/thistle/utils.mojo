@@ -110,66 +110,83 @@ struct StackBuffer[T: Copyable & ImplicitlyDestructible, N: Int](Movable):
     var _data: InlineArray[Self.T, Self.N]
     var _len: Int
 
+    @always_inline
     def __init__(out self):
         comptime assert Self.T.__del__is_trivial, "StackBuffer requires trivially destructible types (UInt8, UInt32, UInt64, etc)"
         self._data = InlineArray[Self.T, Self.N](uninitialized=True)
         self._len = 0
 
+    @always_inline
     def __init__(out self, *, var fill: Self.T):
         self._data = InlineArray[Self.T, Self.N](fill=fill^)
         self._len = 0
 
+    @always_inline
     def __init__(out self, *, deinit take: Self):
         self._data = take._data^
         self._len = take._len
 
+    @always_inline
     def len(self) -> Int:
         return self._len
 
+    @always_inline
     def capacity(self) -> Int:
         return Self.N
 
+    @always_inline
     def remaining(self) -> Int:
         return Self.N - self._len
 
+    @always_inline
     def push(mut self, var val: Self.T):
         debug_assert(self._len < Self.N, "StackBuffer overflow")
         self._data[self._len] = val^
         self._len += 1
 
+    @always_inline
     def push_unchecked(mut self, var val: Self.T):
         self._data[self._len] = val^
         self._len += 1
 
+    @always_inline
     def pop(mut self) -> Self.T:
         debug_assert(self._len > 0, "StackBuffer underflow")
         self._len -= 1
         return self._data[self._len].copy()
 
+    @always_inline
     def top(ref self) -> ref[self._data] Self.T:
         debug_assert(self._len > 0, "StackBuffer empty")
         return self._data[self._len - 1]
 
+    @always_inline
     def clear(mut self):
         self._len = 0
 
+    @always_inline
     def set_len_unchecked(mut self, new_len: Int):
         debug_assert(0 <= new_len <= Self.N, "StackBuffer set_len_unchecked out of bounds")
         self._len = new_len
 
+    @always_inline
     def reset(mut self):
         self.clear()
 
+    @always_inline
     def __getitem__(ref self, i: Int) -> ref[self._data] Self.T:
         debug_assert(0 <= i < Self.N, "StackBuffer index out of bounds")
         return self._data[i]
 
+    @always_inline
     def __setitem__(mut self, i: Int, var val: Self.T):
         debug_assert(0 <= i < Self.N, "StackBuffer index out of bounds")
         self._data[i] = val^
 
+    @always_inline
     def ptr(mut self) -> UnsafePointer[Self.T, MutAnyOrigin]:
         return self._data.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
 
+    @always_inline
     def const_ptr(mut self) -> UnsafePointer[Self.T, MutAnyOrigin]:
         return self.ptr()

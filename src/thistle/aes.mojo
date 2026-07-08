@@ -2,6 +2,7 @@
 AES CPU implementation
 """
 
+from std.builtin.globals import global_constant
 from std.memory import alloc, memset_zero
 from std.utils import StaticTuple
 from .utils import StackBuffer
@@ -16,221 +17,136 @@ def gf_mul2(a: UInt8) -> UInt8:
 
 @always_inline
 def sbox_lookup(idx: UInt8) -> UInt8:
-    return SBOX._unsafe_ref(Int(idx))
+    ref sbox = global_constant[SBOX]()
+    return sbox._unsafe_ref(Int(idx))
+
+comptime TE0: InlineArray[UInt32, 256] = [
+    0xc66363a5, 0xf87c7c84, 0xee777799, 0xf67b7b8d, 0xfff2f20d, 0xd66b6bbd, 0xde6f6fb1, 0x91c5c554,
+    0x60303050, 0x02010103, 0xce6767a9, 0x562b2b7d, 0xe7fefe19, 0xb5d7d762, 0x4dababe6, 0xec76769a,
+    0x8fcaca45, 0x1f82829d, 0x89c9c940, 0xfa7d7d87, 0xeffafa15, 0xb25959eb, 0x8e4747c9, 0xfbf0f00b,
+    0x41adadec, 0xb3d4d467, 0x5fa2a2fd, 0x45afafea, 0x239c9cbf, 0x53a4a4f7, 0xe4727296, 0x9bc0c05b,
+    0x75b7b7c2, 0xe1fdfd1c, 0x3d9393ae, 0x4c26266a, 0x6c36365a, 0x7e3f3f41, 0xf5f7f702, 0x83cccc4f,
+    0x6834345c, 0x51a5a5f4, 0xd1e5e534, 0xf9f1f108, 0xe2717193, 0xabd8d873, 0x62313153, 0x2a15153f,
+    0x0804040c, 0x95c7c752, 0x46232365, 0x9dc3c35e, 0x30181828, 0x379696a1, 0x0a05050f, 0x2f9a9ab5,
+    0x0e070709, 0x24121236, 0x1b80809b, 0xdfe2e23d, 0xcdebeb26, 0x4e272769, 0x7fb2b2cd, 0xea75759f,
+    0x1209091b, 0x1d83839e, 0x582c2c74, 0x341a1a2e, 0x361b1b2d, 0xdc6e6eb2, 0xb45a5aee, 0x5ba0a0fb,
+    0xa45252f6, 0x763b3b4d, 0xb7d6d661, 0x7db3b3ce, 0x5229297b, 0xdde3e33e, 0x5e2f2f71, 0x13848497,
+    0xa65353f5, 0xb9d1d168, 0x00000000, 0xc1eded2c, 0x40202060, 0xe3fcfc1f, 0x79b1b1c8, 0xb65b5bed,
+    0xd46a6abe, 0x8dcbcb46, 0x67bebed9, 0x7239394b, 0x944a4ade, 0x984c4cd4, 0xb05858e8, 0x85cfcf4a,
+    0xbbd0d06b, 0xc5efef2a, 0x4faaaae5, 0xedfbfb16, 0x864343c5, 0x9a4d4dd7, 0x66333355, 0x11858594,
+    0x8a4545cf, 0xe9f9f910, 0x04020206, 0xfe7f7f81, 0xa05050f0, 0x783c3c44, 0x259f9fba, 0x4ba8a8e3,
+    0xa25151f3, 0x5da3a3fe, 0x804040c0, 0x058f8f8a, 0x3f9292ad, 0x219d9dbc, 0x70383848, 0xf1f5f504,
+    0x63bcbcdf, 0x77b6b6c1, 0xafdada75, 0x42212163, 0x20101030, 0xe5ffff1a, 0xfdf3f30e, 0xbfd2d26d,
+    0x81cdcd4c, 0x180c0c14, 0x26131335, 0xc3ecec2f, 0xbe5f5fe1, 0x359797a2, 0x884444cc, 0x2e171739,
+    0x93c4c457, 0x55a7a7f2, 0xfc7e7e82, 0x7a3d3d47, 0xc86464ac, 0xba5d5de7, 0x3219192b, 0xe6737395,
+    0xc06060a0, 0x19818198, 0x9e4f4fd1, 0xa3dcdc7f, 0x44222266, 0x542a2a7e, 0x3b9090ab, 0x0b888883,
+    0x8c4646ca, 0xc7eeee29, 0x6bb8b8d3, 0x2814143c, 0xa7dede79, 0xbc5e5ee2, 0x160b0b1d, 0xaddbdb76,
+    0xdbe0e03b, 0x64323256, 0x743a3a4e, 0x140a0a1e, 0x924949db, 0x0c06060a, 0x4824246c, 0xb85c5ce4,
+    0x9fc2c25d, 0xbdd3d36e, 0x43acacef, 0xc46262a6, 0x399191a8, 0x319595a4, 0xd3e4e437, 0xf279798b,
+    0xd5e7e732, 0x8bc8c843, 0x6e373759, 0xda6d6db7, 0x018d8d8c, 0xb1d5d564, 0x9c4e4ed2, 0x49a9a9e0,
+    0xd86c6cb4, 0xac5656fa, 0xf3f4f407, 0xcfeaea25, 0xca6565af, 0xf47a7a8e, 0x47aeaee9, 0x10080818,
+    0x6fbabad5, 0xf0787888, 0x4a25256f, 0x5c2e2e72, 0x381c1c24, 0x57a6a6f1, 0x73b4b4c7, 0x97c6c651,
+    0xcbe8e823, 0xa1dddd7c, 0xe874749c, 0x3e1f1f21, 0x964b4bdd, 0x61bdbddc, 0x0d8b8b86, 0x0f8a8a85,
+    0xe0707090, 0x7c3e3e42, 0x71b5b5c4, 0xcc6666aa, 0x904848d8, 0x06030305, 0xf7f6f601, 0x1c0e0e12,
+    0xc26161a3, 0x6a35355f, 0xae5757f9, 0x69b9b9d0, 0x17868691, 0x99c1c158, 0x3a1d1d27, 0x279e9eb9,
+    0xd9e1e138, 0xebf8f813, 0x2b9898b3, 0x22111133, 0xd26969bb, 0xa9d9d970, 0x078e8e89, 0x339494a7,
+    0x2d9b9bb6, 0x3c1e1e22, 0x15878792, 0xc9e9e920, 0x87cece49, 0xaa5555ff, 0x50282878, 0xa5dfdf7a,
+    0x038c8c8f, 0x59a1a1f8, 0x09898980, 0x1a0d0d17, 0x65bfbfda, 0xd7e6e631, 0x844242c6, 0xd06868b8,
+    0x824141c3, 0x299999b0, 0x5a2d2d77, 0x1e0f0f11, 0x7bb0b0cb, 0xa85454fc, 0x6dbbbbd6, 0x2c16163a
+]
+
+@always_inline
+def _te(idx: UInt32) -> UInt32:
+    ref t = global_constant[TE0]()
+    return t.unsafe_ptr()[Int(idx)]
+
+@always_inline
+def _rotr[n: Int](x: UInt32) -> UInt32:
+    return (x >> UInt32(n)) | (x << UInt32(32 - n))
+
+@always_inline
+def _sb(idx: UInt32) -> UInt32:
+    return UInt32(sbox_lookup(UInt8(idx)))
 
 @always_inline
 def _cpu_aes_encrypt[rounds: Int](
     pt_bytes: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin],
 ) -> None:
-    var s0 = pt_bytes.load(0)
-    var s1 = pt_bytes.load(1)
-    var s2 = pt_bytes.load(2)
-    var s3 = pt_bytes.load(3)
-    var s4 = pt_bytes.load(4)
-    var s5 = pt_bytes.load(5)
-    var s6 = pt_bytes.load(6)
-    var s7 = pt_bytes.load(7)
-    var s8 = pt_bytes.load(8)
-    var s9 = pt_bytes.load(9)
-    var s10 = pt_bytes.load(10)
-    var s11 = pt_bytes.load(11)
-    var s12 = pt_bytes.load(12)
-    var s13 = pt_bytes.load(13)
-    var s14 = pt_bytes.load(14)
-    var s15 = pt_bytes.load(15)
-
-    var w0 = round_keys.load(0)
-    s0 ^= UInt8((w0 >> 24) & 0xff)
-    s1 ^= UInt8((w0 >> 16) & 0xff)
-    s2 ^= UInt8((w0 >> 8) & 0xff)
-    s3 ^= UInt8(w0 & 0xff)
-    var w1 = round_keys.load(1)
-    s4 ^= UInt8((w1 >> 24) & 0xff)
-    s5 ^= UInt8((w1 >> 16) & 0xff)
-    s6 ^= UInt8((w1 >> 8) & 0xff)
-    s7 ^= UInt8(w1 & 0xff)
-    var w2 = round_keys.load(2)
-    s8 ^= UInt8((w2 >> 24) & 0xff)
-    s9 ^= UInt8((w2 >> 16) & 0xff)
-    s10 ^= UInt8((w2 >> 8) & 0xff)
-    s11 ^= UInt8(w2 & 0xff)
-    var w3 = round_keys.load(3)
-    s12 ^= UInt8((w3 >> 24) & 0xff)
-    s13 ^= UInt8((w3 >> 16) & 0xff)
-    s14 ^= UInt8((w3 >> 8) & 0xff)
-    s15 ^= UInt8(w3 & 0xff)
+    var c0 = (
+        (UInt32(pt_bytes.load(0)) << 24) | (UInt32(pt_bytes.load(1)) << 16)
+        | (UInt32(pt_bytes.load(2)) << 8) | UInt32(pt_bytes.load(3))
+    ) ^ round_keys.load(0)
+    var c1 = (
+        (UInt32(pt_bytes.load(4)) << 24) | (UInt32(pt_bytes.load(5)) << 16)
+        | (UInt32(pt_bytes.load(6)) << 8) | UInt32(pt_bytes.load(7))
+    ) ^ round_keys.load(1)
+    var c2 = (
+        (UInt32(pt_bytes.load(8)) << 24) | (UInt32(pt_bytes.load(9)) << 16)
+        | (UInt32(pt_bytes.load(10)) << 8) | UInt32(pt_bytes.load(11))
+    ) ^ round_keys.load(2)
+    var c3 = (
+        (UInt32(pt_bytes.load(12)) << 24) | (UInt32(pt_bytes.load(13)) << 16)
+        | (UInt32(pt_bytes.load(14)) << 8) | UInt32(pt_bytes.load(15))
+    ) ^ round_keys.load(3)
 
     comptime for r in range(1, rounds):
-        var rk_ptr = round_keys + (r * 4)
+        var rk = round_keys + r * 4
+        var t0 = (
+            _te(c0 >> 24) ^ _rotr[8](_te((c1 >> 16) & 0xFF))
+            ^ _rotr[16](_te((c2 >> 8) & 0xFF)) ^ _rotr[24](_te(c3 & 0xFF))
+        ) ^ rk.load(0)
+        var t1 = (
+            _te(c1 >> 24) ^ _rotr[8](_te((c2 >> 16) & 0xFF))
+            ^ _rotr[16](_te((c3 >> 8) & 0xFF)) ^ _rotr[24](_te(c0 & 0xFF))
+        ) ^ rk.load(1)
+        var t2 = (
+            _te(c2 >> 24) ^ _rotr[8](_te((c3 >> 16) & 0xFF))
+            ^ _rotr[16](_te((c0 >> 8) & 0xFF)) ^ _rotr[24](_te(c1 & 0xFF))
+        ) ^ rk.load(2)
+        var t3 = (
+            _te(c3 >> 24) ^ _rotr[8](_te((c0 >> 16) & 0xFF))
+            ^ _rotr[16](_te((c1 >> 8) & 0xFF)) ^ _rotr[24](_te(c2 & 0xFF))
+        ) ^ rk.load(3)
+        c0 = t0
+        c1 = t1
+        c2 = t2
+        c3 = t3
 
-        s0 = sbox_lookup(s0)
-        s1 = sbox_lookup(s1)
-        s2 = sbox_lookup(s2)
-        s3 = sbox_lookup(s3)
-        s4 = sbox_lookup(s4)
-        s5 = sbox_lookup(s5)
-        s6 = sbox_lookup(s6)
-        s7 = sbox_lookup(s7)
-        s8 = sbox_lookup(s8)
-        s9 = sbox_lookup(s9)
-        s10 = sbox_lookup(s10)
-        s11 = sbox_lookup(s11)
-        s12 = sbox_lookup(s12)
-        s13 = sbox_lookup(s13)
-        s14 = sbox_lookup(s14)
-        s15 = sbox_lookup(s15)
+    var frk = round_keys + rounds * 4
+    var o0 = (
+        (_sb(c0 >> 24) << 24) | (_sb((c1 >> 16) & 0xFF) << 16)
+        | (_sb((c2 >> 8) & 0xFF) << 8) | _sb(c3 & 0xFF)
+    ) ^ frk.load(0)
+    var o1 = (
+        (_sb(c1 >> 24) << 24) | (_sb((c2 >> 16) & 0xFF) << 16)
+        | (_sb((c3 >> 8) & 0xFF) << 8) | _sb(c0 & 0xFF)
+    ) ^ frk.load(1)
+    var o2 = (
+        (_sb(c2 >> 24) << 24) | (_sb((c3 >> 16) & 0xFF) << 16)
+        | (_sb((c0 >> 8) & 0xFF) << 8) | _sb(c1 & 0xFF)
+    ) ^ frk.load(2)
+    var o3 = (
+        (_sb(c3 >> 24) << 24) | (_sb((c0 >> 16) & 0xFF) << 16)
+        | (_sb((c1 >> 8) & 0xFF) << 8) | _sb(c2 & 0xFF)
+    ) ^ frk.load(3)
 
-        var t1 = s1
-        s1 = s5
-        s5 = s9
-        s9 = s13
-        s13 = t1
-        var t2 = s2
-        s2 = s10
-        s10 = t2
-        var t6 = s6
-        s6 = s14
-        s14 = t6
-        var t15 = s15
-        s15 = s11
-        s11 = s7
-        s7 = s3
-        s3 = t15
-
-        var a00 = s0; var a01 = s1; var a02 = s2; var a03 = s3
-        var m200 = gf_mul2(a00)
-        var m201 = gf_mul2(a01)
-        var m202 = gf_mul2(a02)
-        var m203 = gf_mul2(a03)
-        s0 = m200 ^ (a01 ^ m201) ^ a02 ^ a03
-        s1 = a00 ^ m201 ^ (a02 ^ m202) ^ a03
-        s2 = a00 ^ a01 ^ m202 ^ (a03 ^ m203)
-        s3 = (a00 ^ m200) ^ a01 ^ a02 ^ m203
-
-        a00 = s4; a01 = s5; a02 = s6; a03 = s7
-        m200 = gf_mul2(a00)
-        m201 = gf_mul2(a01)
-        m202 = gf_mul2(a02)
-        m203 = gf_mul2(a03)
-        s4 = m200 ^ (a01 ^ m201) ^ a02 ^ a03
-        s5 = a00 ^ m201 ^ (a02 ^ m202) ^ a03
-        s6 = a00 ^ a01 ^ m202 ^ (a03 ^ m203)
-        s7 = (a00 ^ m200) ^ a01 ^ a02 ^ m203
-
-        a00 = s8; a01 = s9; a02 = s10; a03 = s11
-        m200 = gf_mul2(a00)
-        m201 = gf_mul2(a01)
-        m202 = gf_mul2(a02)
-        m203 = gf_mul2(a03)
-        s8 = m200 ^ (a01 ^ m201) ^ a02 ^ a03
-        s9 = a00 ^ m201 ^ (a02 ^ m202) ^ a03
-        s10 = a00 ^ a01 ^ m202 ^ (a03 ^ m203)
-        s11 = (a00 ^ m200) ^ a01 ^ a02 ^ m203
-
-        a00 = s12; a01 = s13; a02 = s14; a03 = s15
-        m200 = gf_mul2(a00)
-        m201 = gf_mul2(a01)
-        m202 = gf_mul2(a02)
-        m203 = gf_mul2(a03)
-        s12 = m200 ^ (a01 ^ m201) ^ a02 ^ a03
-        s13 = a00 ^ m201 ^ (a02 ^ m202) ^ a03
-        s14 = a00 ^ a01 ^ m202 ^ (a03 ^ m203)
-        s15 = (a00 ^ m200) ^ a01 ^ a02 ^ m203
-
-        w0 = rk_ptr.load(0)
-        s0 ^= UInt8((w0 >> 24) & 0xff)
-        s1 ^= UInt8((w0 >> 16) & 0xff)
-        s2 ^= UInt8((w0 >> 8) & 0xff)
-        s3 ^= UInt8(w0 & 0xff)
-        w1 = rk_ptr.load(1)
-        s4 ^= UInt8((w1 >> 24) & 0xff)
-        s5 ^= UInt8((w1 >> 16) & 0xff)
-        s6 ^= UInt8((w1 >> 8) & 0xff)
-        s7 ^= UInt8(w1 & 0xff)
-        w2 = rk_ptr.load(2)
-        s8 ^= UInt8((w2 >> 24) & 0xff)
-        s9 ^= UInt8((w2 >> 16) & 0xff)
-        s10 ^= UInt8((w2 >> 8) & 0xff)
-        s11 ^= UInt8(w2 & 0xff)
-        w3 = rk_ptr.load(3)
-        s12 ^= UInt8((w3 >> 24) & 0xff)
-        s13 ^= UInt8((w3 >> 16) & 0xff)
-        s14 ^= UInt8((w3 >> 8) & 0xff)
-        s15 ^= UInt8(w3 & 0xff)
-
-    var final_rk = round_keys + (rounds * 4)
-    s0 = sbox_lookup(s0)
-    s1 = sbox_lookup(s1)
-    s2 = sbox_lookup(s2)
-    s3 = sbox_lookup(s3)
-    s4 = sbox_lookup(s4)
-    s5 = sbox_lookup(s5)
-    s6 = sbox_lookup(s6)
-    s7 = sbox_lookup(s7)
-    s8 = sbox_lookup(s8)
-    s9 = sbox_lookup(s9)
-    s10 = sbox_lookup(s10)
-    s11 = sbox_lookup(s11)
-    s12 = sbox_lookup(s12)
-    s13 = sbox_lookup(s13)
-    s14 = sbox_lookup(s14)
-    s15 = sbox_lookup(s15)
-
-    var ft1 = s1
-    s1 = s5
-    s5 = s9
-    s9 = s13
-    s13 = ft1
-    var ft2 = s2
-    s2 = s10
-    s10 = ft2
-    var ft6 = s6
-    s6 = s14
-    s14 = ft6
-    var ft15 = s15
-    s15 = s11
-    s11 = s7
-    s7 = s3
-    s3 = ft15
-
-    w0 = final_rk.load(0)
-    s0 ^= UInt8((w0 >> 24) & 0xff)
-    s1 ^= UInt8((w0 >> 16) & 0xff)
-    s2 ^= UInt8((w0 >> 8) & 0xff)
-    s3 ^= UInt8(w0 & 0xff)
-    w1 = final_rk.load(1)
-    s4 ^= UInt8((w1 >> 24) & 0xff)
-    s5 ^= UInt8((w1 >> 16) & 0xff)
-    s6 ^= UInt8((w1 >> 8) & 0xff)
-    s7 ^= UInt8(w1 & 0xff)
-    w2 = final_rk.load(2)
-    s8 ^= UInt8((w2 >> 24) & 0xff)
-    s9 ^= UInt8((w2 >> 16) & 0xff)
-    s10 ^= UInt8((w2 >> 8) & 0xff)
-    s11 ^= UInt8(w2 & 0xff)
-    w3 = final_rk.load(3)
-    s12 ^= UInt8((w3 >> 24) & 0xff)
-    s13 ^= UInt8((w3 >> 16) & 0xff)
-    s14 ^= UInt8((w3 >> 8) & 0xff)
-    s15 ^= UInt8(w3 & 0xff)
-
-    pt_bytes.store(0, s0)
-    pt_bytes.store(1, s1)
-    pt_bytes.store(2, s2)
-    pt_bytes.store(3, s3)
-    pt_bytes.store(4, s4)
-    pt_bytes.store(5, s5)
-    pt_bytes.store(6, s6)
-    pt_bytes.store(7, s7)
-    pt_bytes.store(8, s8)
-    pt_bytes.store(9, s9)
-    pt_bytes.store(10, s10)
-    pt_bytes.store(11, s11)
-    pt_bytes.store(12, s12)
-    pt_bytes.store(13, s13)
-    pt_bytes.store(14, s14)
-    pt_bytes.store(15, s15)
+    pt_bytes.store(0, UInt8(o0 >> 24))
+    pt_bytes.store(1, UInt8((o0 >> 16) & 0xFF))
+    pt_bytes.store(2, UInt8((o0 >> 8) & 0xFF))
+    pt_bytes.store(3, UInt8(o0 & 0xFF))
+    pt_bytes.store(4, UInt8(o1 >> 24))
+    pt_bytes.store(5, UInt8((o1 >> 16) & 0xFF))
+    pt_bytes.store(6, UInt8((o1 >> 8) & 0xFF))
+    pt_bytes.store(7, UInt8(o1 & 0xFF))
+    pt_bytes.store(8, UInt8(o2 >> 24))
+    pt_bytes.store(9, UInt8((o2 >> 16) & 0xFF))
+    pt_bytes.store(10, UInt8((o2 >> 8) & 0xFF))
+    pt_bytes.store(11, UInt8(o2 & 0xFF))
+    pt_bytes.store(12, UInt8(o3 >> 24))
+    pt_bytes.store(13, UInt8((o3 >> 16) & 0xFF))
+    pt_bytes.store(14, UInt8((o3 >> 8) & 0xFF))
+    pt_bytes.store(15, UInt8(o3 & 0xFF))
 
 @always_inline
 # Not Constant Time
