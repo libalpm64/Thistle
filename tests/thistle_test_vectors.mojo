@@ -17,7 +17,10 @@ from thistle.camellia import CamelliaCipher
 from thistle.chacha20 import ChaCha20
 from thistle.kcipher2 import KCipher2
 from thistle.pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
-from thistle.aes import cpu_aes_encrypt, expand_key_128
+from thistle.aes import (
+    cpu_aes_encrypt, cpu_aes_ecb_kernel, cpu_aes_cbc_kernel, cpu_aes_ctr_kernel,
+    cpu_aes_xts_kernel, expand_key_128, expand_key_192, expand_key_256,
+)
 from thistle.aes_ni import aes_encrypt, has_aes_ni, has_x86_aes_ni, aes_gcm_encrypt, aes_gcm_decrypt
 from thistle.sha_ni import sha256ni_hash, has_sha_ni
 
@@ -488,13 +491,12 @@ def test_aes_cpu(data: PythonObject, py: PythonObject) raises -> TestResult:
         var key_bytes = hex_to_bytes(String(v["key"]))
         var pt_bytes = hex_to_bytes(String(v["plaintext"]))
         var expected_ct = String(v["ciphertext"])
-        var key_ptr = alloc[UInt8](16)
+        var rounds = 10 if len(key_bytes) == 16 else (12 if len(key_bytes) == 24 else 14)
         var pt_ptr = alloc[UInt8](16)
         for j in range(16):
-            key_ptr.store(j, key_bytes[j])
             pt_ptr.store(j, pt_bytes[j])
-        var round_keys = expand_key_128(key_ptr)
-        cpu_aes_encrypt(pt_ptr, round_keys)
+        var round_keys = _expand_aes_key(key_bytes)
+        cpu_aes_encrypt(pt_ptr, round_keys, rounds)
         var got = ptr_to_hex(pt_ptr, 16)
         if got == expected_ct:
             passed += 1
@@ -508,7 +510,6 @@ def test_aes_cpu(data: PythonObject, py: PythonObject) raises -> TestResult:
                 + ", got "
                 + got
             )
-        key_ptr.free()
         round_keys.free()
         pt_ptr.free()
     return TestResult(passed, failed, failures^)
@@ -528,13 +529,12 @@ def test_aes_ni(data: PythonObject, py: PythonObject) raises -> TestResult:
         var key_bytes = hex_to_bytes(String(v["key"]))
         var pt_bytes = hex_to_bytes(String(v["plaintext"]))
         var expected_ct = String(v["ciphertext"])
-        var key_ptr = alloc[UInt8](16)
+        var rounds = 10 if len(key_bytes) == 16 else (12 if len(key_bytes) == 24 else 14)
         var pt_ptr = alloc[UInt8](16)
         for j in range(16):
-            key_ptr.store(j, key_bytes[j])
             pt_ptr.store(j, pt_bytes[j])
-        var round_keys = expand_key_128(key_ptr)
-        aes_encrypt(pt_ptr, round_keys, 10)
+        var round_keys = _expand_aes_key(key_bytes)
+        aes_encrypt(pt_ptr, round_keys, rounds)
         var got = ptr_to_hex(pt_ptr, 16)
         if got == expected_ct:
             passed += 1
@@ -548,7 +548,6 @@ def test_aes_ni(data: PythonObject, py: PythonObject) raises -> TestResult:
                 + ", got "
                 + got
             )
-        key_ptr.free()
         round_keys.free()
         pt_ptr.free()
     return TestResult(passed, failed, failures^)
@@ -638,6 +637,106 @@ def test_aes_gcm(data: PythonObject, py: PythonObject) raises -> TestResult:
             else:
                 failed += 1
                 failures.append("AES-GCM tc" + tc_id)
+    return TestResult(passed, failed, failures^)
+
+
+def _expand_aes_key(key: List[UInt8]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
+    var kp = alloc[UInt8](len(key))
+    for i in range(len(key)):
+        kp[i] = key[i]
+    var rk: UnsafePointer[UInt32, MutAnyOrigin]
+    if len(key) == 16:
+        rk = expand_key_128(kp)
+    elif len(key) == 24:
+        rk = expand_key_192(kp)
+    else:
+        rk = expand_key_256(kp)
+    kp.free()
+    return rk
+
+
+def test_aes_cpu_modes(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var passed, failed = 0, 0
+    var failures = List[String]()
+
+    for mode_key in data:
+        var mode = String(mode_key)
+        var vectors = data[mode_key]
+        for i in range(Int(py=vectors.__len__())):
+            var tv = vectors[i]
+            var key = hex_to_bytes(String(tv["key"]))
+            var pt = hex_to_bytes(String(tv["plaintext"]))
+            var ct_exp = hex_to_bytes(String(tv["ciphertext"]))
+            var n = len(pt)
+            var ok: Bool
+
+            if "GCM" in mode:
+                var nonce = hex_to_bytes(String(tv["nonce"]))
+                var tag_exp = hex_to_bytes(String(tv["tag"]))
+                var aad = List[UInt8]()
+                var enc = aes_gcm_encrypt(
+                    Span[UInt8, ...](key), Span[UInt8, ...](nonce),
+                    Span[UInt8, ...](pt), Span[UInt8, ...](aad),
+                )
+                ok = bytes_to_hex(enc[0]) == bytes_to_hex(ct_exp)
+                if len(tag_exp) == 16:
+                    ok = ok and bytes_to_hex(enc[1]) == bytes_to_hex(tag_exp)
+            else:
+                var nblocks = n // 16
+                var ip = alloc[UInt8](n)
+                var op = alloc[UInt8](n)
+                for j in range(n):
+                    ip[j] = pt[j]
+                    op[j] = 0
+
+                if "XTS" in mode:
+                    var half = len(key) // 2
+                    var k1 = List[UInt8]()
+                    var k2 = List[UInt8]()
+                    for j in range(half):
+                        k1.append(key[j])
+                        k2.append(key[half + j])
+                    var rk1 = _expand_aes_key(k1)
+                    var rk2 = _expand_aes_key(k2)
+                    var rounds = 10 if half == 16 else 14
+                    var tweak = hex_to_bytes(String(tv["tweak"]))
+                    var twp = alloc[UInt8](16)
+                    for j in range(16):
+                        twp[j] = tweak[j]
+                    cpu_aes_xts_kernel(ip, op, rk1, rk2, nblocks, twp, rounds)
+                    rk1.free()
+                    rk2.free()
+                    twp.free()
+                else:
+                    var rk = _expand_aes_key(key)
+                    var rounds = 10 if len(key) == 16 else (12 if len(key) == 24 else 14)
+                    if "CBC" in mode:
+                        var iv = hex_to_bytes(String(tv["iv"]))
+                        var ivp = alloc[UInt8](16)
+                        for j in range(16):
+                            ivp[j] = iv[j]
+                        cpu_aes_cbc_kernel(ip, op, rk, nblocks, ivp, rounds)
+                        ivp.free()
+                    elif "CTR" in mode:
+                        var iv = hex_to_bytes(String(tv["iv"]))
+                        var ivp = alloc[UInt8](16)
+                        for j in range(16):
+                            ivp[j] = iv[j]
+                        cpu_aes_ctr_kernel(ip, op, rk, nblocks, ivp, rounds)
+                        ivp.free()
+                    else:
+                        cpu_aes_ecb_kernel(ip, op, rk, nblocks, rounds)
+                    rk.free()
+
+                ok = ptr_to_hex(op, n) == bytes_to_hex(ct_exp)
+                ip.free()
+                op.free()
+
+            if ok:
+                passed += 1
+            else:
+                failed += 1
+                failures.append(mode + " vector " + String(i))
     return TestResult(passed, failed, failures^)
 
 
@@ -791,28 +890,42 @@ def main() raises:
     try:
         print("Loading AES vectors...")
         print_result(
-            "AES-128-CPU",
+            "AES-CPU",
             test_aes_cpu(load_json("tests/vectors/aes.json", py), py),
             tp,
             tf,
             af,
         )
     except e:
-        print("AES-128-CPU [error] " + String(e))
+        print("AES-CPU [error] " + String(e))
         af = True
     print()
 
     try:
         print("Testing AES-NI...")
         print_result(
-            "AES-128-NI",
+            "AES-NI",
             test_aes_ni(load_json("tests/vectors/aes.json", py), py),
             tp,
             tf,
             af,
         )
     except e:
-        print("AES-128-NI [error] " + String(e))
+        print("AES-NI [error] " + String(e))
+        af = True
+    print()
+
+    try:
+        print("Loading AES mode vectors...")
+        print_result(
+            "AES-CPU-Modes",
+            test_aes_cpu_modes(load_json("tests/vectors/aes_test_vectors.json", py), py),
+            tp,
+            tf,
+            af,
+        )
+    except e:
+        print("AES-CPU-Modes [error] " + String(e))
         af = True
     print()
 

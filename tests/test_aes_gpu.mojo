@@ -70,11 +70,14 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
     
     var count = Int(py=json_data.__len__())
     var num_test_vectors = min(count, 100)
-    
+    var stride = count // num_test_vectors
+    if stride < 1:
+        stride = 1
+
     with DeviceContext() as ctx:
-        
+
         for test_idx in range(num_test_vectors):
-            var v = json_data[test_idx]
+            var v = json_data[test_idx * stride]
             var name = String(v["name"])
             var key_hex = String(v["key"])
             var pt_hex = String(v["plaintext"])
@@ -83,8 +86,10 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
             var key_bytes = hex_to_bytes(key_hex)
             var pt_bytes_data = hex_to_bytes(pt_hex)
             
-            var key_ptr = alloc[UInt8](16)
-            for j in range(16):
+            var key_len = len(key_bytes)
+            var rounds = 10 if key_len == 16 else (12 if key_len == 24 else 14)
+            var key_ptr = alloc[UInt8](key_len)
+            for j in range(key_len):
                 key_ptr.store(j, key_bytes[j])
             
             var total_bytes = 64
@@ -98,9 +103,15 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
             var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
             var output_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
 
-            var round_keys = expand_key_128(key_ptr)
-            var skey_host = cpu_aes_ct_skey(round_keys, 10)
-            var skey_buffer = ctx.enqueue_create_buffer[DType.uint64](88)
+            var round_keys: UnsafePointer[UInt32, MutAnyOrigin]
+            if key_len == 16:
+                round_keys = expand_key_128(key_ptr)
+            elif key_len == 24:
+                round_keys = expand_key_192(key_ptr)
+            else:
+                round_keys = expand_key_256(key_ptr)
+            var skey_host = cpu_aes_ct_skey(round_keys, rounds)
+            var skey_buffer = ctx.enqueue_create_buffer[DType.uint64]((rounds + 1) * 8)
             ctx.enqueue_copy(skey_buffer, skey_host.unsafe_ptr())
             ctx.enqueue_copy(input_buffer, input_host)
             ctx.synchronize()
@@ -113,7 +124,7 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
                 output_buffer.unsafe_ptr(),
                 skey_buffer.unsafe_ptr(),
                 4,
-                10,
+                rounds,
                 grid_dim=grid_dim,
                 block_dim=block_dim,
             )
@@ -349,7 +360,7 @@ def main() raises:
         print("Loading AES single-block vectors...")
         var aes_data = load_json("tests/vectors/aes.json", py)
         var aes_gpu_result = test_aes_gpu_basic(aes_data, py)
-        print_result("AES-128-GPU", aes_gpu_result)
+        print_result("AES-GPU", aes_gpu_result)
         total_passed += aes_gpu_result.passed
         total_failed += aes_gpu_result.failed
         if aes_gpu_result.failed > 0:
