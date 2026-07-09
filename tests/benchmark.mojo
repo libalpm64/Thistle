@@ -205,7 +205,6 @@ def benchmark_camellia(data_size: Int, duration_secs: Float64) raises -> String:
     for i in range(nb * 16):
         blocks.store(i, UInt8(i % 256))
 
-    # Warmup
     for _ in range(100):
         camellia_encrypt_blocks(cipher, blocks, nb)
 
@@ -237,7 +236,6 @@ def benchmark_camellia_ctr(duration_secs: Float64) raises -> String:
     for i in range(16):
         nonce.store(i, UInt8(i * 3))
 
-    # Warmup
     camellia_ctr_kernel(buf, buf, cipher, size // 16, nonce)
 
     var count = 0
@@ -332,7 +330,6 @@ def benchmark_aes_cpu(duration_secs: Float64) raises -> String:
     for i in range(256):
         blocks.store(i, TEST_PT[i % 16])
 
-    # Warmup
     for _ in range(100):
         cpu_aes_ct_encrypt16(blocks, skey, ROUNDS_128)
 

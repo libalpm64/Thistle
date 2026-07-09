@@ -236,7 +236,6 @@ def test_camellia(data: PythonObject, py: PythonObject) raises -> TestResult:
                 "Camellia " + name + " dec: expected " + pt_hex + ", got " + got_pt
             )
 
-        # bulk kernel vs single blocks; 45 blocks hits the 32/8/tail paths
         var nb = 45
         var buf = List[UInt8](capacity=nb * 16)
         for bi in range(nb):
