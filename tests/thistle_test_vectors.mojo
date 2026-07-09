@@ -13,7 +13,16 @@ from thistle.sha2 import (
 from thistle.argon2 import Argon2id
 from thistle.blake2b import Blake2b
 from thistle.blake3 import blake3_parallel_hash
-from thistle.camellia import CamelliaCipher
+from thistle.camellia import (
+    CamelliaCipher,
+    camellia_encrypt_block,
+    camellia_decrypt_block,
+    camellia_encrypt_blocks,
+    camellia_decrypt_blocks,
+    camellia_cbc_encrypt_kernel,
+    camellia_cbc_decrypt_kernel,
+    camellia_ctr_kernel,
+)
 from thistle.chacha20 import ChaCha20
 from thistle.kcipher2 import KCipher2
 from thistle.pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
@@ -204,36 +213,134 @@ def test_camellia(data: PythonObject, py: PythonObject) raises -> TestResult:
         var pt_hex = String(v["plaintext"])
         var ct_hex = String(v["ciphertext"])
         var cipher = CamelliaCipher(Span[UInt8, ...](key))
-        var got_ct = bytes_to_hex(
-            cipher.encrypt(Span[UInt8, ...](hex_to_bytes(pt_hex)))
-        )
+
+        var pt_bytes = hex_to_bytes(pt_hex)
+        var ct_bytes = hex_to_bytes(ct_hex)
+        var pt_blk = pt_bytes.unsafe_ptr().load[width=16, alignment=1](0)
+        var ct_blk = ct_bytes.unsafe_ptr().load[width=16, alignment=1](0)
+
+        var got_ct = bytes_to_hex(camellia_encrypt_block(cipher, pt_blk))
         if got_ct == ct_hex:
             passed += 1
         else:
             failed += 1
             failures.append(
-                "Camellia "
-                + name
-                + " enc: expected "
-                + ct_hex
-                + ", got "
-                + got_ct
+                "Camellia " + name + " enc: expected " + ct_hex + ", got " + got_ct
             )
-        var got_pt = bytes_to_hex(
-            cipher.decrypt(Span[UInt8, ...](hex_to_bytes(ct_hex)))
-        )
+        var got_pt = bytes_to_hex(camellia_decrypt_block(cipher, ct_blk))
         if got_pt == pt_hex:
             passed += 1
         else:
             failed += 1
             failures.append(
-                "Camellia "
-                + name
-                + " dec: expected "
-                + pt_hex
-                + ", got "
-                + got_pt
+                "Camellia " + name + " dec: expected " + pt_hex + ", got " + got_pt
             )
+
+        var nb = 45
+        var buf = List[UInt8](capacity=nb * 16)
+        for bi in range(nb):
+            for j in range(16):
+                buf.append(pt_bytes[j] ^ UInt8((bi * 7 + j) % 256))
+        var batch_ok = True
+        var expected = List[UInt8](capacity=nb * 16)
+        for bi in range(nb):
+            var one = camellia_encrypt_block(
+                cipher, buf.unsafe_ptr().load[width=16, alignment=1](bi * 16)
+            )
+            for j in range(16):
+                expected.append(one[j])
+        var orig = buf.copy()
+        camellia_encrypt_blocks(cipher, buf.unsafe_ptr(), nb)
+        for i2 in range(nb * 16):
+            if buf[i2] != expected[i2]:
+                batch_ok = False
+        camellia_decrypt_blocks(cipher, buf.unsafe_ptr(), nb)
+        for i2 in range(nb * 16):
+            if buf[i2] != orig[i2]:
+                batch_ok = False
+        if batch_ok:
+            passed += 1
+        else:
+            failed += 1
+            failures.append("Camellia " + name + " bulk kernel mismatch")
+
+        # CTR vs single-block keystream reference, plus round-trip
+        var ctr_nb = 41
+        var nonce = List[UInt8](capacity=16)
+        for j in range(16):
+            nonce.append(pt_bytes[j] ^ 0xA5)
+        var msg = List[UInt8](capacity=ctr_nb * 16)
+        for i2 in range(ctr_nb * 16):
+            msg.append(UInt8((i2 * 13 + 1) % 256))
+        var ctr_out = List[UInt8](capacity=ctr_nb * 16)
+        for _ in range(ctr_nb * 16):
+            ctr_out.append(0)
+        camellia_ctr_kernel(
+            msg.unsafe_ptr(), ctr_out.unsafe_ptr(), cipher, ctr_nb, nonce.unsafe_ptr()
+        )
+        var ctr_ok = True
+        for bi in range(ctr_nb):
+            var ctr_blk = List[UInt8](capacity=16)
+            for j in range(16):
+                ctr_blk.append(nonce[j])
+            var carry = UInt64(bi)
+            for j in range(15, -1, -1):
+                if carry == 0:
+                    break
+                var total = UInt64(ctr_blk[j]) + (carry & 0xFF)
+                ctr_blk[j] = UInt8(total & 0xFF)
+                carry = (carry >> 8) + (total >> 8)
+            var ks_blk = camellia_encrypt_block(
+                cipher, ctr_blk.unsafe_ptr().load[width=16, alignment=1](0)
+            )
+            for j in range(16):
+                var idx = bi * 16 + j
+                if ctr_out[idx] != (msg[idx] ^ ks_blk[j]):
+                    ctr_ok = False
+        camellia_ctr_kernel(
+            ctr_out.unsafe_ptr(), ctr_out.unsafe_ptr(), cipher, ctr_nb, nonce.unsafe_ptr()
+        )
+        for i2 in range(ctr_nb * 16):
+            if ctr_out[i2] != msg[i2]:
+                ctr_ok = False
+        if ctr_ok:
+            passed += 1
+        else:
+            failed += 1
+            failures.append("Camellia " + name + " CTR mismatch")
+
+        # CBC chaining vs single-block reference, plus in-place round-trip
+        var cbc_nb = 40
+        var cbc_msg = List[UInt8](capacity=cbc_nb * 16)
+        for i2 in range(cbc_nb * 16):
+            cbc_msg.append(UInt8((i2 * 11 + 5) % 256))
+        var cbc_out = List[UInt8](capacity=cbc_nb * 16)
+        for _ in range(cbc_nb * 16):
+            cbc_out.append(0)
+        camellia_cbc_encrypt_kernel(
+            cbc_msg.unsafe_ptr(), cbc_out.unsafe_ptr(), cipher, cbc_nb, nonce.unsafe_ptr()
+        )
+        var cbc_ok = True
+        var prev = SIMD[DType.uint8, 16](0)
+        for j in range(16):
+            prev[j] = nonce[j]
+        for bi in range(cbc_nb):
+            var x = cbc_msg.unsafe_ptr().load[width=16, alignment=1](bi * 16) ^ prev
+            prev = camellia_encrypt_block(cipher, x)
+            for j in range(16):
+                if cbc_out[bi * 16 + j] != prev[j]:
+                    cbc_ok = False
+        camellia_cbc_decrypt_kernel(
+            cbc_out.unsafe_ptr(), cbc_out.unsafe_ptr(), cipher, cbc_nb, nonce.unsafe_ptr()
+        )
+        for i2 in range(cbc_nb * 16):
+            if cbc_out[i2] != cbc_msg[i2]:
+                cbc_ok = False
+        if cbc_ok:
+            passed += 1
+        else:
+            failed += 1
+            failures.append("Camellia " + name + " CBC mismatch")
     return TestResult(passed, failed, failures^)
 
 
