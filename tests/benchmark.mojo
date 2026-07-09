@@ -8,7 +8,7 @@ from std.sys import has_accelerator
 from thistle.argon2 import Argon2id
 from thistle.blake2b import Blake2b
 from thistle.blake3 import blake3_parallel_hash
-from thistle.camellia import CamelliaCipher
+from thistle.camellia import CamelliaCipher, camellia_encrypt_blocks, camellia_ctr_kernel
 from thistle.chacha20 import ChaCha20
 from thistle.kcipher2 import KCipher2
 from thistle.sha2 import sha256_hash, sha512_hash
@@ -199,24 +199,60 @@ def benchmark_camellia(data_size: Int, duration_secs: Float64) raises -> String:
     for i in range(16):
         key.append(UInt8(i))
     var cipher = CamelliaCipher(Span[UInt8, ...](key))
-    
-    var data = List[UInt8](capacity=16)
-    for i in range(16):
-        data.append(UInt8(i % 256))
-    var data_span = Span[UInt8, ...](data)
-    
-    var checksum: UInt64 = 0
+
+    var nb = 32
+    var blocks = alloc[UInt8](nb * 16)
+    for i in range(nb * 16):
+        blocks.store(i, UInt8(i % 256))
+
+    # Warmup
+    for _ in range(100):
+        camellia_encrypt_blocks(cipher, blocks, nb)
+
     var count = 0
     var start = perf_counter()
     while perf_counter() - start < duration_secs:
-        var result = cipher.encrypt(data_span)
-        checksum += UInt64(result[0])
+        camellia_encrypt_blocks(cipher, blocks, nb)
+        count += nb
+    var end = perf_counter()
+    var duration = end - start
+
+    blocks.free()
+
+    var mbps = Float64(count * 16) / (1024 * 1024) / duration
+    return "camellia | throughput: " + String(mbps)[byte=:6] + " mb/s, blocks: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+
+
+def benchmark_camellia_ctr(duration_secs: Float64) raises -> String:
+    var key = List[UInt8]()
+    for i in range(16):
+        key.append(UInt8(i))
+    var cipher = CamelliaCipher(Span[UInt8, ...](key))
+
+    var size = 64 * 1024
+    var buf = alloc[UInt8](size)
+    for i in range(size):
+        buf.store(i, UInt8(i % 256))
+    var nonce = alloc[UInt8](16)
+    for i in range(16):
+        nonce.store(i, UInt8(i * 3))
+
+    # Warmup
+    camellia_ctr_kernel(buf, buf, cipher, size // 16, nonce)
+
+    var count = 0
+    var start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        camellia_ctr_kernel(buf, buf, cipher, size // 16, nonce)
         count += 1
     var end = perf_counter()
     var duration = end - start
-    _ = checksum
-    var mbps = Float64(count * 16) / (1024 * 1024) / duration
-    return "camellia | throughput: " + String(mbps)[byte=:6] + " mb/s, blocks: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+
+    buf.free()
+    nonce.free()
+
+    var mbps = Float64(count * size) / (1024 * 1024) / duration
+    return "camellia-ctr | throughput: " + String(mbps)[byte=:6] + " mb/s, chunks: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
 def benchmark_chacha20(data_size: Int, duration_secs: Float64) raises -> String:
@@ -570,6 +606,7 @@ def main() raises:
     print(benchmark_blake2b(data, duration))
     print(benchmark_blake3(data, duration))
     print(benchmark_camellia(1024 * 1024, duration))
+    print(benchmark_camellia_ctr(duration))
     print(benchmark_chacha20(1024 * 1024, duration))
     print(benchmark_kcipher2(1024 * 1024, duration))
     print(benchmark_aes_cpu(duration))
