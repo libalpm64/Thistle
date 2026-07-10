@@ -96,10 +96,9 @@ def _tbl16(table: _U8x16, idx: _U8x16) -> _U8x16:
 
 @always_inline
 def _aes_sub16(t: _U8x16) -> _U8x16:
-    # AESE/AESENCLAST compute SubBytes(ShiftRows(x)). Lanes here are 16
-    # independent bytes (one per block), so ShiftRows would move data
-    # between blocks; pre-shuffling with InvShiftRows cancels it exactly
-    # and the net effect is per-lane SubBytes with no lane movement.
+    # AESE/AESENCLAST compute SubBytes(ShiftRows(x)).
+	# Lane 16 bytes per blocks.
+	# pre-shuffling with InvShiftRows cancels which is required for no lane movement
     var s = t.shuffle[0, 13, 10, 7, 4, 1, 14, 11, 8, 5, 2, 15, 12, 9, 6, 3]()
     comptime if has_arm_crypto():
         return _aese(s, _U8x16(0))

@@ -13,8 +13,18 @@ comptime SIMD16 = SIMD[DType.uint8, 16]
 comptime SIMD128 = SIMD[DType.uint64, 2]
 
 @always_inline
+def has_arm_crypto() -> Bool:
+    return CompilationTarget.has_neon() and not CompilationTarget.is_x86() and (
+        CompilationTarget._has_feature["crypto"]() or CompilationTarget._has_feature["aes"]()
+    )
+
+@always_inline
+def has_x86_aes_ni() -> Bool:
+    return CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]()
+
+@always_inline
 def _aese(lhs: SIMD16, rhs: SIMD16) -> SIMD16:
-    comptime if CompilationTarget._has_feature["crypto"]() or CompilationTarget._has_feature["aes"]():
+    comptime if has_arm_crypto():
         return llvm_intrinsic["llvm.aarch64.crypto.aese", SIMD16, has_side_effect=False](
             lhs, rhs
         )
@@ -23,7 +33,7 @@ def _aese(lhs: SIMD16, rhs: SIMD16) -> SIMD16:
 
 @always_inline
 def _aesmc(state: SIMD16) -> SIMD16:
-    comptime if CompilationTarget._has_feature["crypto"]() or CompilationTarget._has_feature["aes"]():
+    comptime if has_arm_crypto():
         return llvm_intrinsic["llvm.aarch64.crypto.aesmc", SIMD16, has_side_effect=False](
             state
         )
@@ -31,12 +41,8 @@ def _aesmc(state: SIMD16) -> SIMD16:
         return SIMD16(0)
 
 @always_inline
-def has_arm_crypto() -> Bool:
-    return CompilationTarget._has_feature["crypto"]() or CompilationTarget._has_feature["aes"]()
-
-@always_inline
 def _mm_aesenc_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
-    comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
+    comptime if has_x86_aes_ni():
         return llvm_intrinsic["llvm.x86.aesni.aesenc", SIMD128, has_side_effect=False](
             lhs, rhs
         )
@@ -45,7 +51,7 @@ def _mm_aesenc_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
 
 @always_inline
 def _mm_aesenclast_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
-    comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
+    comptime if has_x86_aes_ni():
         return llvm_intrinsic["llvm.x86.aesni.aesenclast", SIMD128, has_side_effect=False](
             lhs, rhs
         )
@@ -54,7 +60,7 @@ def _mm_aesenclast_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
 
 @always_inline
 def _mm_aeskeygenassist_si128(v: SIMD128, imm8: Int) -> SIMD128:
-    comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
+    comptime if has_x86_aes_ni():
         return llvm_intrinsic[
             "llvm.x86.aesni.aeskeygenassist",
             SIMD128,
@@ -62,10 +68,6 @@ def _mm_aeskeygenassist_si128(v: SIMD128, imm8: Int) -> SIMD128:
         ](v, imm8)
     else:
         return SIMD128(0)
-
-@always_inline
-def has_x86_aes_ni() -> Bool:
-    return CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]()
 
 
 @always_inline
