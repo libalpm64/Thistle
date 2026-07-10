@@ -9,7 +9,12 @@ nav_order: 8
 
 X25519 Ed25519 P-256 P-384 use mask-select ladders with branchless field arithmetic. ML-KEM uses branchless message encoding and constant-time implicit rejection. ML-DSA uses flag-accumulated rejection sampling.
 
-Not constant-time: software AES and Camellia. Both use table-based S-boxes that are cache observable. Use AES-NI or ChaCha20 for secret-key material on shared hardware.
+Camellia and KCipher-2 are constant-time on every path. With hardware AES
+(ARM crypto or AES-NI) their S-boxes run on AES round instructions with
+register-resident affine fixups; without it they fall back to bitsliced
+S-box circuits. No secret-indexed table lookups remain in either cipher.
+
+Not constant-time: software AES. Table-based S-boxes are cache observable. Use AES-NI or ChaCha20 for secret-key material on shared hardware.
 
 Source-level constant-time is not a compiler guarantee. Crypto entry
 points are `@no_inline` to keep codegen stable. For a formal claim inspect emitted assembly or run a dudect-style harness.

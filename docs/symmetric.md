@@ -51,7 +51,9 @@ cipher.wipe()
 ```
 
 - Note: constructor raises on any key length other than 16/24/32.
-- Note: S-box lookups are table-based. Not cache-timing constant-time.
+- Note: constant-time. S-boxes run on AES round instructions (16-way
+  byte-sliced, ~1.2 GB/s bulk on Apple M-series) when hardware AES is
+  present, bitsliced otherwise. No secret-indexed table lookups.
 
 ## AES
 
@@ -63,3 +65,8 @@ cipher.wipe()
 
 ISO/IEC 18033-4 stream cipher. Fixed-width SIMD key/IV constructor. No
 reason to use it unless a spec requires it.
+
+Constant-time: the T-table lookups (S-box and GF(2^32) multiply tables)
+are gone. sub_k2 is AES SubBytes + MixColumns, so it runs on AES round
+instructions (~1.8 GB/s keystream on Apple M-series) with a bitsliced
+fallback; the alpha multiplies are masked XORs of 8 basis constants.
