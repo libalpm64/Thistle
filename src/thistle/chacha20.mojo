@@ -1,6 +1,4 @@
-"""
-ChaCha20 stream cipher implementation per RFC 7539
-"""
+# ChaCha20 stream cipher per RFC 7539.
 
 from std.memory import bitcast
 from std.memory.unsafe_pointer import UnsafePointer
@@ -19,7 +17,7 @@ def simd_quarter_round(
     d: SIMD[DType.uint32, 4],
 ) -> Tuple[SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4]]:
     
-	var aa = a
+    var aa = a
     var bb = b
     var cc = c
     var dd = d
@@ -107,7 +105,6 @@ def simd_quarter_round_8x(
     c: SIMD[DType.uint32, 8],
     d: SIMD[DType.uint32, 8],
 ) -> Tuple[SIMD[DType.uint32, 8], SIMD[DType.uint32, 8], SIMD[DType.uint32, 8], SIMD[DType.uint32, 8]]:
-    """SIMD quarter round for 8-element vectors."""
     var aa = a
     var bb = b
     var cc = c
@@ -140,7 +137,7 @@ def simd_double_round_8x(
     row3: SIMD[DType.uint32, 8],
 ) -> Tuple[SIMD[DType.uint32, 8], SIMD[DType.uint32, 8], SIMD[DType.uint32, 8], SIMD[DType.uint32, 8]]:
 
-	var rr0 = row0
+    var rr0 = row0
     var rr1 = row1
     var rr2 = row2
     var rr3 = row3
@@ -222,7 +219,7 @@ def simd_quarter_round_16x(
     d: SIMD[DType.uint32, 16],
 ) -> Tuple[SIMD[DType.uint32, 16], SIMD[DType.uint32, 16], SIMD[DType.uint32, 16], SIMD[DType.uint32, 16]]:
 
-	var aa = a
+    var aa = a
     var bb = b
     var cc = c
     var dd = d
@@ -254,7 +251,7 @@ def simd_double_round_16x(
     row3: SIMD[DType.uint32, 16],
 ) -> Tuple[SIMD[DType.uint32, 16], SIMD[DType.uint32, 16], SIMD[DType.uint32, 16], SIMD[DType.uint32, 16]]:
 
-	var qr = simd_quarter_round_16x(row0, row1, row2, row3)
+    var qr = simd_quarter_round_16x(row0, row1, row2, row3)
     var rr0 = qr[0]
 
     var b = qr[1].shuffle[
@@ -377,7 +374,7 @@ def chacha20_block_core(
     nonce: SIMD[DType.uint32, 3],
 ) -> SIMD[DType.uint32, 16]:
 
-	var row0 = CHACHA_CONSTANTS
+    var row0 = CHACHA_CONSTANTS
     var row1 = SIMD[DType.uint32, 4](key[0], key[1], key[2], key[3])
     var row2 = SIMD[DType.uint32, 4](key[4], key[5], key[6], key[7])
     var row3 = SIMD[DType.uint32, 4](counter, nonce[0], nonce[1], nonce[2])
@@ -408,7 +405,7 @@ def chacha20_block(
     key: SIMD[DType.uint8, 32], counter: UInt32, nonce: SIMD[DType.uint8, 12]
 ) -> SIMD[DType.uint8, 64]:
 
-	var key_words = bitcast[DType.uint32, 8](key)
+    var key_words = bitcast[DType.uint32, 8](key)
     var nonce_words = bitcast[DType.uint32, 3](nonce)
     var state = chacha20_block_core(key_words, counter, nonce_words)
     return bitcast[DType.uint8, 64](state)
