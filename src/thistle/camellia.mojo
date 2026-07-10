@@ -91,14 +91,15 @@ def _f_planes[W: Int](
 
     comptime for k in range(8):
         var p = e[k]
-        var dw = p & _LANES_D
-        var uw = p >> 32
-        var dr = ((dw >> 8) | (dw << 24)) & _LANES_D
-        var da = dw ^ (((dw >> 16) | (dw << 16)) & _LANES_D)
-        var alld = da ^ (((da >> 8) | (da << 24)) & _LANES_D)
-        var ua = uw ^ (((uw >> 16) | (uw << 16)) & _LANES_D)
-        var uc = (ua ^ (((ua >> 8) | (ua << 24)) & _LANES_D)) ^ uw
-        right[k] ^= (alld ^ dr ^ uc) | ((dw ^ dr ^ uc) << 32)
+        var x32 = bitcast[DType.uint32, 2 * W](p)
+        var r16 = x32 ^ ((x32 << 16) | (x32 >> 16))
+        var s32 = r16 ^ ((r16 >> 8) | (r16 << 24))
+        var d8 = bitcast[DType.uint64, W]((x32 >> 8) | (x32 << 24))
+        var s = bitcast[DType.uint64, W](s32)
+        var u = (s ^ p) >> 32
+        var lo = (s ^ d8 ^ u) & _LANES_D
+        var hi = (lo ^ s ^ p) << 32
+        right[k] ^= lo | hi
 
 
 @always_inline
@@ -582,19 +583,20 @@ def camellia_cbc_decrypt_kernel(
     num_blocks: Int,
     iv_ptr: UnsafePointer[UInt8, MutAnyOrigin],
 ):
-    var ct = InlineArray[UInt8, 512](fill=0)
-    var pt = InlineArray[UInt8, 512](fill=0)
+    var ct = InlineArray[UInt8, 1024](fill=0)
+    var pt = InlineArray[UInt8, 1024](fill=0)
     var ctp = ct.unsafe_ptr()
     var ptp = pt.unsafe_ptr()
     var prev = iv_ptr.load[width=16, alignment=1](0)
     var i = 0
     while i < num_blocks:
         var n = num_blocks - i
-        if n > 32:
-            n = 32
-        for j in range(n * 16):
-            ctp[j] = input_ptr[i * 16 + j]
-            ptp[j] = ctp[j]
+        if n > 64:
+            n = 64
+        for b in range(n):
+            var v = input_ptr.load[width=16, alignment=1]((i + b) * 16)
+            ctp.store[alignment=1](b * 16, v)
+            ptp.store[alignment=1](b * 16, v)
         camellia_decrypt_blocks(cipher, ptp, n)
         for b in range(n):
             var out = ptp.load[width=16, alignment=1](b * 16) ^ prev
@@ -613,13 +615,30 @@ def camellia_ctr_kernel(
     var ks = InlineArray[UInt8, 512](fill=0)
     var kp = ks.unsafe_ptr()
     var i = 0
+    while i + 32 <= num_blocks:
+        for k in range(32):
+            _ctr_write_block(kp + k * 16, nonce_ptr, i + k)
+        _encrypt_batch[4](cipher, kp)
+        for b in range(32):
+            var off = (i + b) * 16
+            output_ptr.store[alignment=1](
+                off,
+                input_ptr.load[width=16, alignment=1](off)
+                ^ kp.load[width=16, alignment=1](b * 16),
+            )
+        i += 32
     while i < num_blocks:
         var n = num_blocks - i
-        if n > 32:
-            n = 32
-        for k in range(32):
+        if n > 8:
+            n = 8
+        for k in range(8):
             _ctr_write_block(kp + k * 16, nonce_ptr, i + (k if k < n else 0))
-        _encrypt_batch[4](cipher, kp)
-        for j in range(n * 16):
-            output_ptr.store(i * 16 + j, input_ptr.load(i * 16 + j) ^ kp.load(j))
+        _encrypt_batch[1](cipher, kp)
+        for b in range(n):
+            var off = (i + b) * 16
+            output_ptr.store[alignment=1](
+                off,
+                input_ptr.load[width=16, alignment=1](off)
+                ^ kp.load[width=16, alignment=1](b * 16),
+            )
         i += n
