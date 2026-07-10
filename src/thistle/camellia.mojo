@@ -5,8 +5,15 @@ Camellia block cipher implementation per RFC 3713
 from std.memory import bitcast, UnsafePointer
 from std.bit import byte_swap, rotate_bits_left
 from std.collections import InlineArray
+from std.sys import llvm_intrinsic
 from std.utils import StaticTuple
 from .aes import _ct_sbox, _ct_ortho, _ctr_write_block
+from .aes_ni import (
+    _aese,
+    _mm_aesenclast_si128,
+    has_arm_crypto,
+    has_x86_aes_ni,
+)
 
 
 comptime SIGMA1 = 0xA09E667F3BCC908B
@@ -25,6 +32,108 @@ comptime _CAM_P = StaticTuple[UInt8, 8](
 )
 comptime _CAM_IC: UInt8 = 0x01
 comptime _CAM_OC: UInt8 = 0x9A
+
+
+comptime _U8x16 = SIMD[DType.uint8, 16]
+
+# y = LO[x & 15] ^ HI[x >> 4], constant LO side only.
+# s2 = rotl1(s1), s3 = rotr1(s1) fold rotated POST copies;
+# s4 = s1(rotl1(x)) folds rotl1 into pre matrix.
+def _mk_tbl(
+    cols: StaticTuple[UInt8, 8],
+    add: UInt8,
+    hi: Bool,
+    in_rotl1: Bool,
+    out_rot: Int,
+) -> _U8x16:
+    var t = _U8x16(0)
+    for n in range(16):
+        var x = UInt8(n << 4) if hi else UInt8(n)
+        if in_rotl1:
+            x = (x << 1) | (x >> 7)
+        var y = UInt8(0) if hi else add
+        for j in range(8):
+            if ((x >> UInt8(j)) & 1) == 1:
+                y ^= cols[j]
+        if out_rot == 1:
+            y = (y << 1) | (y >> 7)
+        elif out_rot == -1:
+            y = (y >> 1) | (y << 7)
+        t[n] = y
+    return t
+
+
+comptime _PRE_LO = _mk_tbl(_CAM_Q, _CAM_IC, False, False, 0)
+comptime _PRE_HI = _mk_tbl(_CAM_Q, 0, True, False, 0)
+comptime _POST_LO = _mk_tbl(_CAM_P, _CAM_OC, False, False, 0)
+comptime _POST_HI = _mk_tbl(_CAM_P, 0, True, False, 0)
+comptime _POST2_LO = _mk_tbl(_CAM_P, _CAM_OC, False, False, 1)
+comptime _POST2_HI = _mk_tbl(_CAM_P, 0, True, False, 1)
+comptime _POST3_LO = _mk_tbl(_CAM_P, _CAM_OC, False, False, -1)
+comptime _POST3_HI = _mk_tbl(_CAM_P, 0, True, False, -1)
+comptime _PRE4_LO = _mk_tbl(_CAM_Q, _CAM_IC, False, True, 0)
+comptime _PRE4_HI = _mk_tbl(_CAM_Q, 0, True, True, 0)
+
+
+@always_inline
+def _has_hw_sbox() -> Bool:
+    return has_arm_crypto() or has_x86_aes_ni()
+
+
+@always_inline
+def _tbl16(table: _U8x16, idx: _U8x16) -> _U8x16:
+    comptime if has_arm_crypto():
+        return llvm_intrinsic[
+            "llvm.aarch64.neon.tbl1.v16i8", _U8x16, has_side_effect=False
+        ](table, idx)
+    elif has_x86_aes_ni():
+        return llvm_intrinsic[
+            "llvm.x86.ssse3.pshuf.b.128", _U8x16, has_side_effect=False
+        ](table, idx)
+    else:
+        return _U8x16(0)
+
+
+@always_inline
+def _aes_sub16(t: _U8x16) -> _U8x16:
+    # AESE/AESENCLAST compute SubBytes(ShiftRows(x)). Lanes here are 16
+    # independent bytes (one per block), so ShiftRows would move data
+    # between blocks; pre-shuffling with InvShiftRows cancels it exactly
+    # and the net effect is per-lane SubBytes with no lane movement.
+    var s = t.shuffle[0, 13, 10, 7, 4, 1, 14, 11, 8, 5, 2, 15, 12, 9, 6, 3]()
+    comptime if has_arm_crypto():
+        return _aese(s, _U8x16(0))
+    else:
+        return bitcast[DType.uint8, 16](
+            _mm_aesenclast_si128(
+                bitcast[DType.uint64, 2](s), SIMD[DType.uint64, 2](0)
+            )
+        )
+
+
+@always_inline
+def _sbox_bs_post[pos: Int](t0: _U8x16) -> _U8x16:
+    var t = _aes_sub16(t0)
+    comptime if pos == 1 or pos == 4:
+        return _tbl16(_POST2_LO, t & 0x0F) ^ _tbl16(_POST2_HI, t >> 4)
+    elif pos == 2 or pos == 5:
+        return _tbl16(_POST3_LO, t & 0x0F) ^ _tbl16(_POST3_HI, t >> 4)
+    else:
+        return _tbl16(_POST_LO, t & 0x0F) ^ _tbl16(_POST_HI, t >> 4)
+
+
+@always_inline
+def _sbox_bs[pos: Int](x: _U8x16) -> _U8x16:
+    # tbl/AES/tbl.
+    comptime if pos == 3 or pos == 6:
+        return _sbox_bs_post[pos](
+            _tbl16(_PRE4_LO, x & 0x0F) ^ _tbl16(_PRE4_HI, x >> 4)
+        )
+    else:
+        return _sbox_bs_post[pos](
+            _tbl16(_PRE_LO, x & 0x0F) ^ _tbl16(_PRE_HI, x >> 4)
+        )
+
 
 comptime _LANES_D: UInt64 = 0x00000000FFFFFFFF
 comptime _LANES_S2: UInt64 = (UInt64(0xFF) << 8) | (UInt64(0xFF) << 32)
@@ -120,7 +229,6 @@ def _fl_planes[inv: Bool, W: Int](
     comptime if not inv:
         comptime for k in range(8):
             x[k] ^= (x[k] | kep[base + k]) >> 32
-
 
 
 @always_inline
@@ -238,6 +346,8 @@ struct CamelliaCipher:
     var ke: InlineArray[UInt64, 6]
     var kp: InlineArray[UInt64, 192]
     var kep: InlineArray[UInt64, 48]
+    var khw: InlineArray[UInt64, 24]
+    var kwhw: InlineArray[UInt64, 4]
     var is_128: Bool
 
     def __init__(out self, key: Span[UInt8, ...]) raises:
@@ -246,6 +356,8 @@ struct CamelliaCipher:
         self.ke = InlineArray[UInt64, 6](fill=0)
         self.kp = InlineArray[UInt64, 192](fill=0)
         self.kep = InlineArray[UInt64, 48](fill=0)
+        self.khw = InlineArray[UInt64, 24](fill=0)
+        self.kwhw = InlineArray[UInt64, 4](fill=0)
         self.is_128 = len(key) == 16
 
         if self.is_128:
@@ -263,6 +375,10 @@ struct CamelliaCipher:
             var planes = _slice_subkey(self.ke[r])
             for kk in range(8):
                 self.kep[r * 8 + kk] = planes[kk]
+        for r in range(24):
+            self.khw[r] = byte_swap(self.k[r])
+        for r in range(4):
+            self.kwhw[r] = byte_swap(self.kw[r])
 
     def wipe(mut self):
         _wipe_u64(UnsafePointer(to=self.kw).bitcast[UInt64](), 4)
@@ -270,6 +386,8 @@ struct CamelliaCipher:
         _wipe_u64(self.ke.unsafe_ptr(), 6)
         _wipe_u64(self.kp.unsafe_ptr(), 192)
         _wipe_u64(self.kep.unsafe_ptr(), 48)
+        _wipe_u64(self.khw.unsafe_ptr(), 24)
+        _wipe_u64(self.kwhw.unsafe_ptr(), 4)
 
     def __del__(deinit self):
         _wipe_u64(UnsafePointer(to=self.kw).bitcast[UInt64](), 4)
@@ -277,6 +395,8 @@ struct CamelliaCipher:
         _wipe_u64(self.ke.unsafe_ptr(), 6)
         _wipe_u64(self.kp.unsafe_ptr(), 192)
         _wipe_u64(self.kep.unsafe_ptr(), 48)
+        _wipe_u64(self.khw.unsafe_ptr(), 24)
+        _wipe_u64(self.kwhw.unsafe_ptr(), 4)
 
     @always_inline
     def _bytes_to_u64_be(ref self, b: Span[UInt8, ...]) -> UInt64:
@@ -502,14 +622,193 @@ def _batch[encrypt: Bool, W: Int](
         _decrypt_batch[W](cipher, buf)
 
 
+# FL/FLINV BE words, bounce via scalar registers (1/6 rounds)
+# 16 blocks transposed j holds byte positon of j of all 16 blocks
+# The AES round instruction computes 16 blocks worth of one S-Box pos
+# S2/S3/S4 rotations go to per positon tables P functiions register XORS
+# ZIP network byte positon j row _BITREV4[j] block b in row _BITREV[B]
+comptime _BITREV4 = StaticTuple[Int, 16](
+    0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15
+)
+
+@always_inline
+def _transpose16(mut m: InlineArray[_U8x16, 16]):
+    # 16x16 byte matrix transpose setup 4 zip stages.
+    var t = InlineArray[_U8x16, 16](fill=_U8x16(0))
+    comptime for i in range(8):
+        var il = m[2 * i].interleave(m[2 * i + 1])
+        t[i] = il.slice[16]()
+        t[i + 8] = il.slice[16, offset=16]()
+    comptime for i in range(8):
+        var il = bitcast[DType.uint16, 8](t[2 * i]).interleave(
+            bitcast[DType.uint16, 8](t[2 * i + 1])
+        )
+        m[i] = bitcast[DType.uint8, 16](il.slice[8]())
+        m[i + 8] = bitcast[DType.uint8, 16](il.slice[8, offset=8]())
+    comptime for i in range(8):
+        var il = bitcast[DType.uint32, 4](m[2 * i]).interleave(
+            bitcast[DType.uint32, 4](m[2 * i + 1])
+        )
+        t[i] = bitcast[DType.uint8, 16](il.slice[4]())
+        t[i + 8] = bitcast[DType.uint8, 16](il.slice[4, offset=4]())
+    comptime for i in range(8):
+        var il = bitcast[DType.uint64, 2](t[2 * i]).interleave(
+            bitcast[DType.uint64, 2](t[2 * i + 1])
+        )
+        m[i] = bitcast[DType.uint8, 16](il.slice[2]())
+        m[i + 8] = bitcast[DType.uint8, 16](il.slice[2, offset=2]())
+
+
+@always_inline
+def _splat_byte(k: UInt64, j: Int) -> _U8x16:
+    return _U8x16(UInt8((k >> UInt64(8 * j)) & 0xFF))
+
+
+@always_inline
+def _f_bs(
+    l: InlineArray[_U8x16, 8],
+    mut r: InlineArray[_U8x16, 8],
+    k: UInt64,
+):
+    # Byte-sliced F on 16 blocks, k is the pre-byte-swapped subkey
+    # (byte j = t_{j+1}). P-function in CSE form:
+    # y_{4+i} = a_{i,i+1} ^ (s ^ x_{5+i}), y_i = x_i ^ a_{i+2,i+3} ^ ...
+    var y = InlineArray[_U8x16, 8](fill=_U8x16(0))
+    comptime for j in range(8):
+        y[j] = _sbox_bs[j](l[j] ^ _splat_byte(k, j))
+
+    var a12 = y[0] ^ y[1]
+    var a23 = y[1] ^ y[2]
+    var a34 = y[2] ^ y[3]
+    var a41 = y[3] ^ y[0]
+    var s = (y[4] ^ y[5]) ^ (y[6] ^ y[7])
+    var s5 = s ^ y[4]
+    var s6 = s ^ y[5]
+    var s7 = s ^ y[6]
+    var s8 = s ^ y[7]
+    r[0] ^= y[0] ^ a34 ^ s5
+    r[1] ^= y[1] ^ a41 ^ s6
+    r[2] ^= y[2] ^ a12 ^ s7
+    r[3] ^= y[3] ^ a23 ^ s8
+    r[4] ^= a12 ^ s5
+    r[5] ^= a23 ^ s6
+    r[6] ^= a34 ^ s7
+    r[7] ^= a41 ^ s8
+
+
+@always_inline
+def _fl_rot_bs(mut h: InlineArray[_U8x16, 8], ke: UInt64):
+    # FL step x2 ^= rotl1(x1 & k1). Layout: h[0..3] = x1 bytes MSB first,
+    # h[4..7] = x2; ke is big-endian, k1 = ke bytes 7..4, k2 = 3..0.
+    # rotl1 32-bit word t0t1t2t3 splits pb register
+    # out_i = (t_i << 1) | (t_{i+1 mod 4} >> 7), t3 wraps t0.
+    var t0 = h[0] & _splat_byte(ke, 7)
+    var t1 = h[1] & _splat_byte(ke, 6)
+    var t2 = h[2] & _splat_byte(ke, 5)
+    var t3 = h[3] & _splat_byte(ke, 4)
+    h[4] ^= (t0 << 1) | (t1 >> 7)
+    h[5] ^= (t1 << 1) | (t2 >> 7)
+    h[6] ^= (t2 << 1) | (t3 >> 7)
+    h[7] ^= (t3 << 1) | (t0 >> 7)
+
+
+@always_inline
+def _fl_bs[inv: Bool](mut h: InlineArray[_U8x16, 8], ke: UInt64):
+    # x2 ^= rotl1(x1 & k1), x1 ^= (x2 | k2)
+    comptime if inv:
+        comptime for j in range(4):
+            h[j] ^= h[4 + j] | _splat_byte(ke, 3 - j)
+        _fl_rot_bs(h, ke)
+    else:
+        _fl_rot_bs(h, ke)
+        comptime for j in range(4):
+            h[j] ^= h[4 + j] | _splat_byte(ke, 3 - j)
+
+
+@always_inline
+def _six_rounds_bs[forward: Bool](
+    mut a: InlineArray[_U8x16, 8],
+    mut b: InlineArray[_U8x16, 8],
+    cipher: CamelliaCipher,
+    kbase: Int,
+):
+    comptime for r in range(6):
+        comptime off = r if forward else 5 - r
+        comptime if (r % 2 == 0) == forward:
+            _f_bs(a, b, cipher.khw[kbase + off])
+        else:
+            _f_bs(b, a, cipher.khw[kbase + off])
+
+
+@always_inline
+def _batch16_hw[encrypt: Bool](
+    cipher: CamelliaCipher, buf: UnsafePointer[UInt8, MutAnyOrigin]
+):
+    var m = InlineArray[_U8x16, 16](fill=_U8x16(0))
+    comptime for i in range(16):
+        m[i] = buf.load[width=16, alignment=1](i * 16)
+    _transpose16(m)
+
+    var a = InlineArray[_U8x16, 8](fill=_U8x16(0))
+    var b = InlineArray[_U8x16, 8](fill=_U8x16(0))
+
+    comptime if encrypt:
+        comptime for j in range(8):
+            a[j] = m[_BITREV4[j]] ^ _splat_byte(cipher.kwhw[0], j)
+            b[j] = m[_BITREV4[j + 8]] ^ _splat_byte(cipher.kwhw[1], j)
+        _six_rounds_bs[True](a, b, cipher, 0)
+        _fl_bs[False](a, cipher.ke[0])
+        _fl_bs[True](b, cipher.ke[1])
+        _six_rounds_bs[True](a, b, cipher, 6)
+        _fl_bs[False](a, cipher.ke[2])
+        _fl_bs[True](b, cipher.ke[3])
+        _six_rounds_bs[True](a, b, cipher, 12)
+        if not cipher.is_128:
+            _fl_bs[False](a, cipher.ke[4])
+            _fl_bs[True](b, cipher.ke[5])
+            _six_rounds_bs[True](a, b, cipher, 18)
+        comptime for j in range(8):
+            m[j] = b[j] ^ _splat_byte(cipher.kwhw[2], j)
+            m[j + 8] = a[j] ^ _splat_byte(cipher.kwhw[3], j)
+    else:
+        comptime for j in range(8):
+            b[j] = m[_BITREV4[j]] ^ _splat_byte(cipher.kwhw[2], j)
+            a[j] = m[_BITREV4[j + 8]] ^ _splat_byte(cipher.kwhw[3], j)
+        if not cipher.is_128:
+            _six_rounds_bs[False](a, b, cipher, 18)
+            _fl_bs[True](a, cipher.ke[4])
+            _fl_bs[False](b, cipher.ke[5])
+        _six_rounds_bs[False](a, b, cipher, 12)
+        _fl_bs[True](a, cipher.ke[2])
+        _fl_bs[False](b, cipher.ke[3])
+        _six_rounds_bs[False](a, b, cipher, 6)
+        _fl_bs[True](a, cipher.ke[0])
+        _fl_bs[False](b, cipher.ke[1])
+        _six_rounds_bs[False](a, b, cipher, 0)
+        comptime for j in range(8):
+            m[j] = a[j] ^ _splat_byte(cipher.kwhw[0], j)
+            m[j + 8] = b[j] ^ _splat_byte(cipher.kwhw[1], j)
+
+    _transpose16(m)
+    comptime for blk in range(16):
+        buf.store[alignment=1](blk * 16, m[_BITREV4[blk]])
+
+
 def _camellia_block[encrypt: Bool](
     cipher: CamelliaCipher, block: SIMD[DType.uint8, 16]
 ) -> SIMD[DType.uint8, 16]:
-    var buf = InlineArray[UInt8, 128](fill=0)
-    var bp = buf.unsafe_ptr()
-    bp.store[alignment=1](0, block)
-    _batch[encrypt, 1](cipher, bp)
-    return bp.load[width=16, alignment=1](0)
+    comptime if _has_hw_sbox():
+        var scratch = InlineArray[UInt8, 256](fill=0)
+        var sp = scratch.unsafe_ptr()
+        sp.store[alignment=1](0, block)
+        _batch16_hw[encrypt](cipher, sp)
+        return sp.load[width=16, alignment=1](0)
+    else:
+        var buf = InlineArray[UInt8, 128](fill=0)
+        var bp = buf.unsafe_ptr()
+        bp.store[alignment=1](0, block)
+        _batch[encrypt, 1](cipher, bp)
+        return bp.load[width=16, alignment=1](0)
 
 
 def _camellia_blocks[encrypt: Bool](
@@ -517,21 +816,35 @@ def _camellia_blocks[encrypt: Bool](
     data: UnsafePointer[UInt8, MutAnyOrigin],
     num_blocks: Int,
 ):
-    var i = 0
-    while i + 32 <= num_blocks:
-        _batch[encrypt, 4](cipher, data + i * 16)
-        i += 32
-    while i + 8 <= num_blocks:
-        _batch[encrypt, 1](cipher, data + i * 16)
-        i += 8
-    if i < num_blocks:
-        var scratch = InlineArray[UInt8, 128](fill=0)
-        var sp = scratch.unsafe_ptr()
-        for j in range((num_blocks - i) * 16):
-            sp[j] = data[i * 16 + j]
-        _batch[encrypt, 1](cipher, sp)
-        for j in range((num_blocks - i) * 16):
-            data[i * 16 + j] = sp[j]
+    comptime if _has_hw_sbox():
+        var i = 0
+        while i + 16 <= num_blocks:
+            _batch16_hw[encrypt](cipher, data + i * 16)
+            i += 16
+        if i < num_blocks:
+            var scratch = InlineArray[UInt8, 256](fill=0)
+            var sp = scratch.unsafe_ptr()
+            for j in range((num_blocks - i) * 16):
+                sp[j] = data[i * 16 + j]
+            _batch16_hw[encrypt](cipher, sp)
+            for j in range((num_blocks - i) * 16):
+                data[i * 16 + j] = sp[j]
+    else:
+        var i = 0
+        while i + 32 <= num_blocks:
+            _batch[encrypt, 4](cipher, data + i * 16)
+            i += 32
+        while i + 8 <= num_blocks:
+            _batch[encrypt, 1](cipher, data + i * 16)
+            i += 8
+        if i < num_blocks:
+            var scratch = InlineArray[UInt8, 128](fill=0)
+            var sp = scratch.unsafe_ptr()
+            for j in range((num_blocks - i) * 16):
+                sp[j] = data[i * 16 + j]
+            _batch[encrypt, 1](cipher, sp)
+            for j in range((num_blocks - i) * 16):
+                data[i * 16 + j] = sp[j]
 
 
 def camellia_encrypt_block(
@@ -615,30 +928,61 @@ def camellia_ctr_kernel(
     var ks = InlineArray[UInt8, 512](fill=0)
     var kp = ks.unsafe_ptr()
     var i = 0
-    while i + 32 <= num_blocks:
-        for k in range(32):
-            _ctr_write_block(kp + k * 16, nonce_ptr, i + k)
-        _encrypt_batch[4](cipher, kp)
-        for b in range(32):
-            var off = (i + b) * 16
-            output_ptr.store[alignment=1](
-                off,
-                input_ptr.load[width=16, alignment=1](off)
-                ^ kp.load[width=16, alignment=1](b * 16),
-            )
-        i += 32
-    while i < num_blocks:
-        var n = num_blocks - i
-        if n > 8:
-            n = 8
-        for k in range(8):
-            _ctr_write_block(kp + k * 16, nonce_ptr, i + (k if k < n else 0))
-        _encrypt_batch[1](cipher, kp)
-        for b in range(n):
-            var off = (i + b) * 16
-            output_ptr.store[alignment=1](
-                off,
-                input_ptr.load[width=16, alignment=1](off)
-                ^ kp.load[width=16, alignment=1](b * 16),
-            )
-        i += n
+    comptime if _has_hw_sbox():
+        while i + 16 <= num_blocks:
+            for k in range(16):
+                _ctr_write_block(kp + k * 16, nonce_ptr, i + k)
+            _batch16_hw[True](cipher, kp)
+            for b in range(16):
+                var off = (i + b) * 16
+                output_ptr.store[alignment=1](
+                    off,
+                    input_ptr.load[width=16, alignment=1](off)
+                    ^ kp.load[width=16, alignment=1](b * 16),
+                )
+            i += 16
+        while i < num_blocks:
+            var n = num_blocks - i
+            for k in range(16):
+                _ctr_write_block(
+                    kp + k * 16, nonce_ptr, i + (k if k < n else 0)
+                )
+            _batch16_hw[True](cipher, kp)
+            for b in range(n):
+                var off = (i + b) * 16
+                output_ptr.store[alignment=1](
+                    off,
+                    input_ptr.load[width=16, alignment=1](off)
+                    ^ kp.load[width=16, alignment=1](b * 16),
+                )
+            i += n
+    else:
+        while i + 32 <= num_blocks:
+            for k in range(32):
+                _ctr_write_block(kp + k * 16, nonce_ptr, i + k)
+            _encrypt_batch[4](cipher, kp)
+            for b in range(32):
+                var off = (i + b) * 16
+                output_ptr.store[alignment=1](
+                    off,
+                    input_ptr.load[width=16, alignment=1](off)
+                    ^ kp.load[width=16, alignment=1](b * 16),
+                )
+            i += 32
+        while i < num_blocks:
+            var n = num_blocks - i
+            if n > 8:
+                n = 8
+            for k in range(8):
+                _ctr_write_block(
+                    kp + k * 16, nonce_ptr, i + (k if k < n else 0)
+                )
+            _encrypt_batch[1](cipher, kp)
+            for b in range(n):
+                var off = (i + b) * 16
+                output_ptr.store[alignment=1](
+                    off,
+                    input_ptr.load[width=16, alignment=1](off)
+                    ^ kp.load[width=16, alignment=1](b * 16),
+                )
+            i += n
