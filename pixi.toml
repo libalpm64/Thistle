@@ -7,6 +7,7 @@ version = "1.0.2"
 
 [tasks]
 test = "mojo run -I src/ tests/thistle_test_vectors.mojo"
+dudect = "mojo run -I src/ tests/dudect.mojo"
 test-ml-kem = "mojo run -I src/ tests/test_ml_kem.mojo"
 test-ml-dsa = "mojo run -I src/ tests/test_ml_dsa.mojo"
 bench = "mojo run -I src/ tests/benchmark.mojo"
