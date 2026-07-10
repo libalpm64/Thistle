@@ -14,7 +14,9 @@ Camellia and KCipher-2 are constant-time on every path. With hardware AES
 register-resident affine fixups; without it they fall back to bitsliced
 S-box circuits. No secret-indexed table lookups remain in either cipher.
 
-Not constant-time: software AES. Table-based S-boxes are cache observable. Use AES-NI or ChaCha20 for secret-key material on shared hardware.
+Software AES is bitsliced and constant-time too, including key expansion;
+there are no S-box tables in `thistle.aes`. AES-NI / ARM crypto are used
+when present and are faster.
 
 Source-level constant-time is not a compiler guarantee. Crypto entry
 points are `@no_inline` to keep codegen stable. For a formal claim inspect emitted assembly or run a dudect-style harness.

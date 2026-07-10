@@ -57,7 +57,7 @@ cipher.wipe()
 
 ## AES
 
-`thistle.aes` is software. Table-based and not cache-timing safe.
+`thistle.aes` is software, bitsliced and constant-time.
 `thistle.aes_ni` is hardware for x86 and ARM. Check `has_aes_ni()` first.
 `thistle.aes_gpu` has `aes_gpu_kernel_ecb/ctr/gcm` for bulk data.
 
