@@ -331,56 +331,85 @@ struct SHA256Context(Movable):
         self.buffer_len = 0
 
 @always_inline
+def sha256_transform_blocks(
+    mut state: SIMD[DType.uint32, 8],
+    data: UnsafePointer[UInt8, ImmutAnyOrigin],
+    nblocks: Int,
+):
+    var a0 = state[0]
+    var b0 = state[1]
+    var c0 = state[2]
+    var d0 = state[3]
+    var e0 = state[4]
+    var f0 = state[5]
+    var g0 = state[6]
+    var h0 = state[7]
+
+    for blk in range(nblocks):
+        var block = data + blk * 64
+        var w = InlineArray[UInt32, 16](uninitialized=True)
+
+        var a = a0
+        var b = b0
+        var c = c0
+        var d = d0
+        var e = e0
+        var f = f0
+        var g = g0
+        var h = h0
+
+        comptime for i in range(16):
+            var word = load_32be(block, i * 4)
+            w[i] = word
+
+            var t1 = h + sigma1_32(e) + ch32(e, f, g) + SHA256_K[i] + word
+            var t2 = sigma0_32(a) + maj32(a, b, c)
+            h = g
+            g = f
+            f = e
+            e = d + t1
+            d = c
+            c = b
+            b = a
+            a = t1 + t2
+
+        comptime for i in range(16, 64):
+            var idx = i & 0xF
+            var s0 = small_sigma0_32(w[(i - 15) & 0xF])
+            var s1 = small_sigma1_32(w[(i - 2) & 0xF])
+            var word = s1 + w[(i - 7) & 0xF] + s0 + w[(i - 16) & 0xF]
+            w[idx] = word
+
+            var t1 = h + sigma1_32(e) + ch32(e, f, g) + SHA256_K[i] + word
+            var t2 = sigma0_32(a) + maj32(a, b, c)
+            h = g
+            g = f
+            f = e
+            e = d + t1
+            d = c
+            c = b
+            b = a
+            a = t1 + t2
+
+        a0 += a
+        b0 += b
+        c0 += c
+        d0 += d
+        e0 += e
+        f0 += f
+        g0 += g
+        h0 += h
+
+    state = SIMD[DType.uint32, 8](a0, b0, c0, d0, e0, f0, g0, h0)
+
+
+@always_inline
 def sha256_transform(
     state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]
 ) -> SIMD[DType.uint32, 8]:
-    var w = InlineArray[UInt32, 16](uninitialized=True)
-
-    var a = state[0]
-    var b = state[1]
-    var c = state[2]
-    var d = state[3]
-    var e = state[4]
-    var f = state[5]
-    var g = state[6]
-    var h = state[7]
-
-    # First 16 rounds (load words and process)
-    comptime for i in range(16):
-        var word = load_32be(block.unsafe_ptr(), i * 4)
-        w[i] = word
-
-        var t1 = h + sigma1_32(e) + ch32(e, f, g) + SHA256_K[i] + word
-        var t2 = sigma0_32(a) + maj32(a, b, c)
-        h = g
-        g = f
-        f = e
-        e = d + t1
-        d = c
-        c = b
-        b = a
-        a = t1 + t2
-
-    # Last 48 rounds with message schedule expansion
-    comptime for i in range(16, 64):
-        var idx = i & 0xF
-        var s0 = small_sigma0_32(w[(i - 15) & 0xF])
-        var s1 = small_sigma1_32(w[(i - 2) & 0xF])
-        var word = s1 + w[(i - 7) & 0xF] + s0 + w[(i - 16) & 0xF]
-        w[idx] = word
-
-        var t1 = h + sigma1_32(e) + ch32(e, f, g) + SHA256_K[i] + word
-        var t2 = sigma0_32(a) + maj32(a, b, c)
-        h = g
-        g = f
-        f = e
-        e = d + t1
-        d = c
-        c = b
-        b = a
-        a = t1 + t2
-
-    return state + SIMD[DType.uint32, 8](a, b, c, d, e, f, g, h)
+    var s = state
+    sha256_transform_blocks(s, block.unsafe_ptr(), 1)
+    return s
 
 
 def sha256_update(mut ctx: SHA256Context, data: Span[UInt8, ...]):
@@ -411,10 +440,11 @@ def sha256_update(mut ctx: SHA256Context, data: Span[UInt8, ...]):
             ctx.buffer_len += total_len
             return
 
-    while i + 64 <= total_len:
-        ctx.state = sha256_transform(ctx.state, data[i : i + 64])
-        ctx.count += 512
-        i += 64
+    var nblocks = (total_len - i) // 64
+    if nblocks > 0:
+        sha256_transform_blocks(ctx.state, data.unsafe_ptr() + i, nblocks)
+        ctx.count += UInt64(nblocks) * 512
+        i += nblocks * 64
 
     if i < total_len:
         var remaining = total_len - i
@@ -526,55 +556,83 @@ struct SHA512Context(Movable):
 
 
 @always_inline
+def sha512_transform_blocks(
+    mut state: SIMD[DType.uint64, 8],
+    data: UnsafePointer[UInt8, ImmutAnyOrigin],
+    nblocks: Int,
+):
+    var a0 = state[0]
+    var b0 = state[1]
+    var c0 = state[2]
+    var d0 = state[3]
+    var e0 = state[4]
+    var f0 = state[5]
+    var g0 = state[6]
+    var h0 = state[7]
+
+    for blk in range(nblocks):
+        var block = data + blk * 128
+        var w = InlineArray[UInt64, 16](uninitialized=True)
+
+        var a = a0
+        var b = b0
+        var c = c0
+        var d = d0
+        var e = e0
+        var f = f0
+        var g = g0
+        var h = h0
+
+        comptime for i in range(16):
+            var word = load_64be(block, i * 8)
+            w[i] = word
+
+            var t1 = h + sigma1_64(e) + ch64(e, f, g) + SHA512_K[i] + word
+            var t2 = sigma0_64(a) + maj64(a, b, c)
+            h = g
+            g = f
+            f = e
+            e = d + t1
+            d = c
+            c = b
+            b = a
+            a = t1 + t2
+
+        comptime for i in range(16, 80):
+            var s0 = small_sigma0_64(w[(i - 15) & 0xF])
+            var word = s1 + w[(i - 7) & 0xF] + s0 + w[(i - 16) & 0xF]
+            w[i & 0xF] = word
+
+            var t1 = h + sigma1_64(e) + ch64(e, f, g) + SHA512_K[i] + word
+            var t2 = sigma0_64(a) + maj64(a, b, c)
+            h = g
+            g = f
+            f = e
+            e = d + t1
+            d = c
+            c = b
+            b = a
+            a = t1 + t2
+
+        a0 += a
+        b0 += b
+        c0 += c
+        d0 += d
+        e0 += e
+        f0 += f
+        g0 += g
+        h0 += h
+
+    state = SIMD[DType.uint64, 8](a0, b0, c0, d0, e0, f0, g0, h0)
+
+
+@always_inline
 def sha512_transform(
     state: SIMD[DType.uint64, 8], block: Span[UInt8, ...]
 ) -> SIMD[DType.uint64, 8]:
-    var w = InlineArray[UInt64, 16](uninitialized=True)
-
-    var a = state[0]
-    var b = state[1]
-    var c = state[2]
-    var d = state[3]
-    var e = state[4]
-    var f = state[5]
-    var g = state[6]
-    var h = state[7]
-
-    # First 16 rounds
-    comptime for i in range(16):
-        var word = load_64be(block.unsafe_ptr(), i * 8)
-        w[i] = word
-
-        var t1 = h + sigma1_64(e) + ch64(e, f, g) + SHA512_K[i] + word
-        var t2 = sigma0_64(a) + maj64(a, b, c)
-        h = g
-        g = f
-        f = e
-        e = d + t1
-        d = c
-        c = b
-        b = a
-        a = t1 + t2
-
-    # Remaining 64 rounds
-    comptime for i in range(16, 80):
-        var s0 = small_sigma0_64(w[(i - 15) & 0xF])
-        var s1 = small_sigma1_64(w[(i - 2) & 0xF])
-        var word = s1 + w[(i - 7) & 0xF] + s0 + w[(i - 16) & 0xF]
-        w[i & 0xF] = word
-
-        var t1 = h + sigma1_64(e) + ch64(e, f, g) + SHA512_K[i] + word
-        var t2 = sigma0_64(a) + maj64(a, b, c)
-        h = g
-        g = f
-        f = e
-        e = d + t1
-        d = c
-        c = b
-        b = a
-        a = t1 + t2
-
-    return state + SIMD[DType.uint64, 8](a, b, c, d, e, f, g, h)
+    var s = state
+    sha512_transform_blocks(s, block.unsafe_ptr(), 1)
+    return s
 
 
 @always_inline
@@ -611,15 +669,16 @@ def sha512_update(mut ctx: SHA512Context, data: Span[UInt8, ...]):
             ctx.buffer_len += total_len
             return
 
-    while i + 128 <= total_len:
-        ctx.state = sha512_transform(ctx.state, data[i : i + 128])
+    var nblocks = (total_len - i) // 128
+    if nblocks > 0:
+        sha512_transform_blocks(ctx.state, data.unsafe_ptr() + i, nblocks)
 
         var old_low = ctx.count_low
-        ctx.count_low += 1024
+        ctx.count_low += UInt64(nblocks) * 1024
         if ctx.count_low < old_low:
             ctx.count_high += 1
 
-        i += 128
+        i += nblocks * 128
 
     if i < total_len:
         var remaining = total_len - i
