@@ -600,6 +600,7 @@ def sha512_transform_blocks(
 
         comptime for i in range(16, 80):
             var s0 = small_sigma0_64(w[(i - 15) & 0xF])
+            var s1 = small_sigma1_64(w[(i - 2) & 0xF])
             var word = s1 + w[(i - 7) & 0xF] + s0 + w[(i - 16) & 0xF]
             w[i & 0xF] = word
 
