@@ -9,6 +9,7 @@ from .utils import StackBuffer
 from std.bit import rotate_bits_left
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
+from std.sys import llvm_intrinsic, CompilationTarget
 
 comptime KECCAK_RC = SIMD[DType.uint64, 24](
     0x0000000000000001, 0x0000000000008082,
@@ -36,7 +37,163 @@ def rotl64[n: Int](x: UInt64) -> UInt64:
     return rotate_bits_left[n](x)
 
 
+comptime _U64x2 = SIMD[DType.uint64, 2]
+
+comptime _has_sha3_ext = (
+    CompilationTarget.has_neon()
+    and not CompilationTarget.is_x86()
+    and CompilationTarget._has_feature["sha3"]()
+)
+
+
+@always_inline
+def _eor3(a: _U64x2, b: _U64x2, c: _U64x2) -> _U64x2:
+    return llvm_intrinsic["llvm.aarch64.crypto.eor3u", _U64x2, has_side_effect=False](a, b, c)
+
+
+@always_inline
+def _rax1(a: _U64x2, b: _U64x2) -> _U64x2:
+    return llvm_intrinsic["llvm.aarch64.crypto.rax1", _U64x2, has_side_effect=False](a, b)
+
+
+@always_inline
+def _xar[r: Int](a: _U64x2, b: _U64x2) -> _U64x2:
+    return llvm_intrinsic["llvm.aarch64.crypto.xar", _U64x2, has_side_effect=False](a, b, Int64(64 - r))
+
+
+@always_inline
+def _bcax(a: _U64x2, b: _U64x2, c: _U64x2) -> _U64x2:
+    return llvm_intrinsic["llvm.aarch64.crypto.bcaxu", _U64x2, has_side_effect=False](a, b, c)
+
+
+def _keccak_f1600_hw(state: UnsafePointer[UInt64, MutAnyOrigin]):
+    var a0 = _U64x2(state[0], 0)
+    var a1 = _U64x2(state[1], 0)
+    var a2 = _U64x2(state[2], 0)
+    var a3 = _U64x2(state[3], 0)
+    var a4 = _U64x2(state[4], 0)
+    var a5 = _U64x2(state[5], 0)
+    var a6 = _U64x2(state[6], 0)
+    var a7 = _U64x2(state[7], 0)
+    var a8 = _U64x2(state[8], 0)
+    var a9 = _U64x2(state[9], 0)
+    var a10 = _U64x2(state[10], 0)
+    var a11 = _U64x2(state[11], 0)
+    var a12 = _U64x2(state[12], 0)
+    var a13 = _U64x2(state[13], 0)
+    var a14 = _U64x2(state[14], 0)
+    var a15 = _U64x2(state[15], 0)
+    var a16 = _U64x2(state[16], 0)
+    var a17 = _U64x2(state[17], 0)
+    var a18 = _U64x2(state[18], 0)
+    var a19 = _U64x2(state[19], 0)
+    var a20 = _U64x2(state[20], 0)
+    var a21 = _U64x2(state[21], 0)
+    var a22 = _U64x2(state[22], 0)
+    var a23 = _U64x2(state[23], 0)
+    var a24 = _U64x2(state[24], 0)
+
+    comptime for round in range(24):
+        var c0 = _eor3(a0, a5, _eor3(a10, a15, a20))
+        var c1 = _eor3(a1, a6, _eor3(a11, a16, a21))
+        var c2 = _eor3(a2, a7, _eor3(a12, a17, a22))
+        var c3 = _eor3(a3, a8, _eor3(a13, a18, a23))
+        var c4 = _eor3(a4, a9, _eor3(a14, a19, a24))
+
+        var d0 = _rax1(c4, c1)
+        var d1 = _rax1(c0, c2)
+        var d2 = _rax1(c1, c3)
+        var d3 = _rax1(c2, c4)
+        var d4 = _rax1(c3, c0)
+
+        # theta xor, rho rotate, and pi permute fused into one XAR per lane
+        var b0 = a0 ^ d0
+        var b1 = _xar[44](a6, d1)
+        var b2 = _xar[43](a12, d2)
+        var b3 = _xar[21](a18, d3)
+        var b4 = _xar[14](a24, d4)
+        var b5 = _xar[28](a3, d3)
+        var b6 = _xar[20](a9, d4)
+        var b7 = _xar[3](a10, d0)
+        var b8 = _xar[45](a16, d1)
+        var b9 = _xar[61](a22, d2)
+        var b10 = _xar[1](a1, d1)
+        var b11 = _xar[6](a7, d2)
+        var b12 = _xar[25](a13, d3)
+        var b13 = _xar[8](a19, d4)
+        var b14 = _xar[18](a20, d0)
+        var b15 = _xar[27](a4, d4)
+        var b16 = _xar[36](a5, d0)
+        var b17 = _xar[10](a11, d1)
+        var b18 = _xar[15](a17, d2)
+        var b19 = _xar[56](a23, d3)
+        var b20 = _xar[62](a2, d2)
+        var b21 = _xar[55](a8, d3)
+        var b22 = _xar[39](a14, d4)
+        var b23 = _xar[41](a15, d0)
+        var b24 = _xar[2](a21, d1)
+
+        a0 = _bcax(b0, b2, b1) ^ _U64x2(KECCAK_RC[round], 0)
+        a1 = _bcax(b1, b3, b2)
+        a2 = _bcax(b2, b4, b3)
+        a3 = _bcax(b3, b0, b4)
+        a4 = _bcax(b4, b1, b0)
+        a5 = _bcax(b5, b7, b6)
+        a6 = _bcax(b6, b8, b7)
+        a7 = _bcax(b7, b9, b8)
+        a8 = _bcax(b8, b5, b9)
+        a9 = _bcax(b9, b6, b5)
+        a10 = _bcax(b10, b12, b11)
+        a11 = _bcax(b11, b13, b12)
+        a12 = _bcax(b12, b14, b13)
+        a13 = _bcax(b13, b10, b14)
+        a14 = _bcax(b14, b11, b10)
+        a15 = _bcax(b15, b17, b16)
+        a16 = _bcax(b16, b18, b17)
+        a17 = _bcax(b17, b19, b18)
+        a18 = _bcax(b18, b15, b19)
+        a19 = _bcax(b19, b16, b15)
+        a20 = _bcax(b20, b22, b21)
+        a21 = _bcax(b21, b23, b22)
+        a22 = _bcax(b22, b24, b23)
+        a23 = _bcax(b23, b20, b24)
+        a24 = _bcax(b24, b21, b20)
+
+    state[0] = a0[0]
+    state[1] = a1[0]
+    state[2] = a2[0]
+    state[3] = a3[0]
+    state[4] = a4[0]
+    state[5] = a5[0]
+    state[6] = a6[0]
+    state[7] = a7[0]
+    state[8] = a8[0]
+    state[9] = a9[0]
+    state[10] = a10[0]
+    state[11] = a11[0]
+    state[12] = a12[0]
+    state[13] = a13[0]
+    state[14] = a14[0]
+    state[15] = a15[0]
+    state[16] = a16[0]
+    state[17] = a17[0]
+    state[18] = a18[0]
+    state[19] = a19[0]
+    state[20] = a20[0]
+    state[21] = a21[0]
+    state[22] = a22[0]
+    state[23] = a23[0]
+    state[24] = a24[0]
+
+
 def keccak_f1600(state: UnsafePointer[UInt64, MutAnyOrigin]):
+    comptime if _has_sha3_ext:
+        _keccak_f1600_hw(state)
+        return
+    _keccak_f1600_scalar(state)
+
+
+def _keccak_f1600_scalar(state: UnsafePointer[UInt64, MutAnyOrigin]):
     var a0 = state[0]
     var a1 = state[1]
     var a2 = state[2]
