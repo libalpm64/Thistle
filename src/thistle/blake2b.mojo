@@ -52,25 +52,30 @@ def g(a: UInt64, b: UInt64, c: UInt64, d: UInt64, x: UInt64, y: UInt64) -> Tuple
 
 
 @always_inline
+def _mload(m: UnsafePointer[UInt8, ImmutAnyOrigin], i: Int) -> UInt64:
+    return (m + i * 8).bitcast[UInt64]().load[width=1, alignment=1]()
+
+
+@always_inline
 def round_fn[r: Int](
     mut v0: UInt64, mut v1: UInt64, mut v2: UInt64, mut v3: UInt64,
     mut v4: UInt64, mut v5: UInt64, mut v6: UInt64, mut v7: UInt64,
     mut v8: UInt64, mut v9: UInt64, mut v10: UInt64, mut v11: UInt64,
     mut v12: UInt64, mut v13: UInt64, mut v14: UInt64, mut v15: UInt64,
-    m: UnsafePointer[UInt64, ImmutAnyOrigin],
+    m: UnsafePointer[UInt8, ImmutAnyOrigin],
 ) -> Tuple[UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64]:
     comptime s = SIGMA[r]
-    
-    v0, v4, v8, v12 = g(v0, v4, v8, v12, m[Int(s[0])], m[Int(s[1])])
-    v1, v5, v9, v13 = g(v1, v5, v9, v13, m[Int(s[2])], m[Int(s[3])])
-    v2, v6, v10, v14 = g(v2, v6, v10, v14, m[Int(s[4])], m[Int(s[5])])
-    v3, v7, v11, v15 = g(v3, v7, v11, v15, m[Int(s[6])], m[Int(s[7])])
-    
-    v0, v5, v10, v15 = g(v0, v5, v10, v15, m[Int(s[8])], m[Int(s[9])])
-    v1, v6, v11, v12 = g(v1, v6, v11, v12, m[Int(s[10])], m[Int(s[11])])
-    v2, v7, v8, v13 = g(v2, v7, v8, v13, m[Int(s[12])], m[Int(s[13])])
-    v3, v4, v9, v14 = g(v3, v4, v9, v14, m[Int(s[14])], m[Int(s[15])])
-    
+
+    v0, v4, v8, v12 = g(v0, v4, v8, v12, _mload(m, Int(s[0])), _mload(m, Int(s[1])))
+    v1, v5, v9, v13 = g(v1, v5, v9, v13, _mload(m, Int(s[2])), _mload(m, Int(s[3])))
+    v2, v6, v10, v14 = g(v2, v6, v10, v14, _mload(m, Int(s[4])), _mload(m, Int(s[5])))
+    v3, v7, v11, v15 = g(v3, v7, v11, v15, _mload(m, Int(s[6])), _mload(m, Int(s[7])))
+
+    v0, v5, v10, v15 = g(v0, v5, v10, v15, _mload(m, Int(s[8])), _mload(m, Int(s[9])))
+    v1, v6, v11, v12 = g(v1, v6, v11, v12, _mload(m, Int(s[10])), _mload(m, Int(s[11])))
+    v2, v7, v8, v13 = g(v2, v7, v8, v13, _mload(m, Int(s[12])), _mload(m, Int(s[13])))
+    v3, v4, v9, v14 = g(v3, v4, v9, v14, _mload(m, Int(s[14])), _mload(m, Int(s[15])))
+
     return (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15)
 
 
@@ -149,7 +154,13 @@ struct Blake2b(Movable):
     def __del__(deinit self):
         memset_zero(self.buffer.unsafe_ptr(), 16)
 
-    def compress(mut self, is_last: Bool):
+    @always_inline
+    def _inc_counter(mut self):
+        self.t_low += 128
+        if self.t_low < 128:
+            self.t_high += 1
+
+    def compress(mut self, m: UnsafePointer[UInt8, ImmutAnyOrigin], is_last: Bool):
         var v0 = self.h[0]
         var v1 = self.h[1]
         var v2 = self.h[2]
@@ -173,8 +184,6 @@ struct Blake2b(Movable):
         if is_last:
             v14 ^= 0xFFFFFFFFFFFFFFFF
 
-        var m = self.buffer.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
-        
         (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[0](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
         (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[1](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
         (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[2](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
@@ -198,29 +207,40 @@ struct Blake2b(Movable):
         self.h[7] ^= v7 ^ v15
 
     def update(mut self, data: Span[UInt8, ...]):
+        var total = len(data)
+        if total == 0:
+            return
         var i = 0
-        while i < len(data):
-            if self.buffer_len == 128:
-                self.t_low += 128
-                if self.t_low < 128:
-                    self.t_high += 1
-                self.compress(False)
-                self.buffer_len = 0
 
-            var available = 128 - self.buffer_len
-            var remaining_data = len(data) - i
-            var to_copy = available
-            if remaining_data < available:
-                to_copy = remaining_data
+        if self.buffer_len > 0:
+            if self.buffer_len < 128:
+                var to_copy = 128 - self.buffer_len
+                if total < to_copy:
+                    to_copy = total
+                memcpy(
+                    dest=self._buf_ptr() + self.buffer_len,
+                    src=data.unsafe_ptr(),
+                    count=to_copy,
+                )
+                self.buffer_len += to_copy
+                i += to_copy
+            if i == total:
+                return
+            self._inc_counter()
+            self.compress(self._buf_ptr(), False)
+            self.buffer_len = 0
 
-            memcpy(
-                dest=self._buf_ptr() + self.buffer_len,
-                src=data.unsafe_ptr() + i,
-                count=to_copy,
-            )
+        while total - i > 128:
+            self._inc_counter()
+            self.compress(data.unsafe_ptr() + i, False)
+            i += 128
 
-            self.buffer_len += to_copy
-            i += to_copy
+        memcpy(
+            dest=self._buf_ptr(),
+            src=data.unsafe_ptr() + i,
+            count=total - i,
+        )
+        self.buffer_len = total - i
 
     def finalize_into(mut self, output: UnsafePointer[UInt8, MutAnyOrigin]):
         var old_low = self.t_low
@@ -228,18 +248,18 @@ struct Blake2b(Movable):
         if self.t_low < old_low:
             self.t_high += 1
 
-        var buf = self._buf_ptr()
-        while self.buffer_len < 128:
-            buf[self.buffer_len] = 0
-            self.buffer_len += 1
+        if self.buffer_len < 128:
+            memset_zero(self._buf_ptr() + self.buffer_len, 128 - self.buffer_len)
+            self.buffer_len = 128
 
-        self.compress(True)
+        self.compress(self._buf_ptr(), True)
 
-        for i in range(self.out_len):
-            var word_idx = i // 8
-            var byte_idx = i % 8
-            var word = self.h[word_idx]
-            output[i] = UInt8((word >> UInt64(byte_idx * 8)) & 0xFF)
+        var h_copy = self.h
+        memcpy(
+            dest=output,
+            src=UnsafePointer(to=h_copy).bitcast[UInt8](),
+            count=self.out_len,
+        )
 
     def finalize(mut self) -> List[UInt8]:
         var output = List[UInt8](capacity=self.out_len)
