@@ -283,34 +283,14 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         c4 += _u128_shr[51](c3)
         var l3 = (c3.cast[DType.uint64]()) & MASK
         
-        # C4 becomes UInt128, we need do carry propagation from it
-        var q4 = _u128_shr[51](c4)
+        var carry = (_u128_shr[51](c4)).cast[DType.uint64]()
         var l4 = (c4.cast[DType.uint64]()) & MASK
-        
-        # q4*19 back to l0
-        var l0_2 = UInt128(l0) + q4 * 19
-        
-        # Guard Check make sure everything is 51 bits otherwise Mojo will collapse if its a shuffle over 64 bits and return 0.
-        var l1_2 = UInt128(l1) + _u128_shr[51](l0_2)
-        var l0_final = (l0_2.cast[DType.uint64]()) & MASK
-        
-        var l2_2 = UInt128(l2) + _u128_shr[51](l1_2)
-        var l1_final = (l1_2.cast[DType.uint64]()) & MASK
-        
-        var l3_2 = UInt128(l3) + _u128_shr[51](l2_2)
-        var l2_final = (l2_2.cast[DType.uint64]()) & MASK
-        
-        var l4_2 = UInt128(l4) + _u128_shr[51](l3_2)
-        var l3_final = (l3_2.cast[DType.uint64]()) & MASK
-        
-        var l0_final_2 = UInt128(l0_final) + _u128_shr[51](l4_2) * 19
-        var l4_final = (l4_2.cast[DType.uint64]()) & MASK
-        
-        var carry = _u128_shr[51](l0_final_2)
-        var l0_out = (l0_final_2.cast[DType.uint64]()) & MASK
-        var l1_out = UInt64(l1_final) + carry.cast[DType.uint64]()
-        
-        return FieldElement51(l0_out, l1_out, l2_final, l3_final, l4_final)
+
+        var l0_2 = l0 + carry * 19
+        var l1_2 = l1 + (l0_2 >> 51)
+        l0_2 &= MASK
+
+        return FieldElement51(l0_2, l1_2, l2, l3, l4)
 
     @always_inline
     def _reduce(self, limbs: InlineArray[UInt64, 5]) -> FieldElement51:

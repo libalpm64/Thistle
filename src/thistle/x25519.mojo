@@ -68,7 +68,7 @@ def x25519(scalar_in: Span[UInt8, ...], point: Span[UInt8, ...], output: UnsafeP
         x_3 = (DA + CB).square()
         z_3 = x_1 * (DA - CB).square()
         x_2 = AA * BB
-        z_2 = E * (AA + APLUS2_OVER_FOUR * E)
+        z_2 = E * (AA + E.mul_u32(121665))
         
     _cswap_pair(swap, x_2, x_3, z_2, z_3)
         

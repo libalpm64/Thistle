@@ -6,7 +6,7 @@ from std.collections import List, InlineArray
 from std.sys import llvm_intrinsic, CompilationTarget
 from std.memory import alloc, bitcast, memset_zero, memcpy, UnsafePointer, Span
 from std.utils import StaticTuple
-from .aes import cpu_aes_encrypt, cpu_aes_ct_encrypt, cpu_aes_ct_encrypt16, cpu_aes_ct_skey, expand_key_128, expand_key_192, expand_key_256
+from .aes import cpu_aes_encrypt, cpu_aes_ct_encrypt, cpu_aes_ct_encrypt16, cpu_aes_ct_skey, expand_key_128, expand_key_192, expand_key_256, expand_key_128_into, expand_key_192_into, expand_key_256_into
 from .utils import StackBuffer
 
 comptime SIMD16 = SIMD[DType.uint8, 16]
@@ -586,6 +586,108 @@ def _arm_gcm_ctr_loop[NR: Int](
 
 
 @always_inline
+def _arm_gcm_fused_loop[NR: Int](
+    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    num_blocks: Int,
+    j0_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    mut gh: _GHash,
+    ghash_ciphertext: Bool,
+) -> None:
+    var keys = _arm_load_keys[NR + 1](round_keys)
+    var y = SIMD128(_bitrev64(gh.y_hi), _bitrev64(gh.y_lo))
+
+    var j0u32 = bitcast[DType.uint32, 4](j0_ptr.load[width=16, alignment=1](0))
+    var ctr_base = llvm_intrinsic["llvm.bswap.i32", UInt32, has_side_effect=False](j0u32[3]) + 1
+
+    var i = 0
+    while i + 8 <= num_blocks:
+        var b = InlineArray[SIMD16, 8](uninitialized=True)
+        comptime for k in range(8):
+            var cv = j0u32
+            cv[3] = llvm_intrinsic["llvm.bswap.i32", UInt32, has_side_effect=False](
+                ctr_base + UInt32(i + k)
+            )
+            b[k] = bitcast[DType.uint8, 16](cv)
+        comptime for r in range(NR - 1):
+            comptime for k in range(8):
+                b[k] = _aesmc(_aese(b[k], keys[r]))
+        comptime for k in range(8):
+            b[k] = _aese(b[k], keys[NR - 1]) ^ keys[NR]
+
+        var p = input_ptr + i * 16
+        var q = output_ptr + i * 16
+        var g = InlineArray[SIMD16, 8](uninitialized=True)
+        comptime for k in range(8):
+            var pt = p.load[width=16, alignment=1](k * 16)
+            var ct = pt ^ b[k]
+            q.store[alignment=1](k * 16, ct)
+            g[k] = ct if ghash_ciphertext else pt
+
+        var lo = SIMD128(0)
+        var hi = SIMD128(0)
+        _clmul_acc(_rev128(g[0]) ^ y, gh.hn8, lo, hi)
+        _clmul_acc(_rev128(g[1]), gh.hn7, lo, hi)
+        _clmul_acc(_rev128(g[2]), gh.hn6, lo, hi)
+        _clmul_acc(_rev128(g[3]), gh.hn5, lo, hi)
+        _clmul_acc(_rev128(g[4]), gh.hn4, lo, hi)
+        _clmul_acc(_rev128(g[5]), gh.hn3, lo, hi)
+        _clmul_acc(_rev128(g[6]), gh.hn2, lo, hi)
+        _clmul_acc(_rev128(g[7]), gh.hn, lo, hi)
+        y = _reduce_vec(lo, hi)
+        i += 8
+
+    if i + 4 <= num_blocks:
+        var b = InlineArray[SIMD16, 4](uninitialized=True)
+        comptime for k in range(4):
+            var cv = j0u32
+            cv[3] = llvm_intrinsic["llvm.bswap.i32", UInt32, has_side_effect=False](
+                ctr_base + UInt32(i + k)
+            )
+            b[k] = bitcast[DType.uint8, 16](cv)
+        comptime for r in range(NR - 1):
+            comptime for k in range(4):
+                b[k] = _aesmc(_aese(b[k], keys[r]))
+        comptime for k in range(4):
+            b[k] = _aese(b[k], keys[NR - 1]) ^ keys[NR]
+
+        var p = input_ptr + i * 16
+        var q = output_ptr + i * 16
+        var g = InlineArray[SIMD16, 4](uninitialized=True)
+        comptime for k in range(4):
+            var pt = p.load[width=16, alignment=1](k * 16)
+            var ct = pt ^ b[k]
+            q.store[alignment=1](k * 16, ct)
+            g[k] = ct if ghash_ciphertext else pt
+
+        var lo = SIMD128(0)
+        var hi = SIMD128(0)
+        _clmul_acc(_rev128(g[0]) ^ y, gh.hn4, lo, hi)
+        _clmul_acc(_rev128(g[1]), gh.hn3, lo, hi)
+        _clmul_acc(_rev128(g[2]), gh.hn2, lo, hi)
+        _clmul_acc(_rev128(g[3]), gh.hn, lo, hi)
+        y = _reduce_vec(lo, hi)
+        i += 4
+
+    while i < num_blocks:
+        var cv = j0u32
+        cv[3] = llvm_intrinsic["llvm.bswap.i32", UInt32, has_side_effect=False](
+            ctr_base + UInt32(i)
+        )
+        var ks = _arm_enc_block[NR](bitcast[DType.uint8, 16](cv), keys)
+        var p0 = (input_ptr + i * 16).load[width=16, alignment=1](0)
+        var c0 = p0 ^ ks
+        (output_ptr + i * 16).store[alignment=1](0, c0)
+        var g0 = c0 if ghash_ciphertext else p0
+        y = _gf_mul_nat(_rev128(g0) ^ y, gh.hn)
+        i += 1
+
+    gh.y_hi = _bitrev64(y[0])
+    gh.y_lo = _bitrev64(y[1])
+
+
+@always_inline
 def _soft_gcm_ctr_kernel(
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
@@ -633,20 +735,113 @@ def _be_store64(p: UnsafePointer[UInt8, MutAnyOrigin], off: Int, v: UInt64):
         p[off + i] = UInt8((v >> UInt64(56 - 8 * i)) & 0xFF)
 
 
-struct _GHash:
+@always_inline("nodebug")
+def _bitrev64(v: UInt64) -> UInt64:
+    return llvm_intrinsic["llvm.bitreverse.i64", UInt64, has_side_effect=False](v)
+
+
+@always_inline("nodebug")
+def _clmul64(a: UInt64, b: UInt64) -> SIMD128:
+    comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["aes"]() and not CompilationTarget.is_x86():
+        return bitcast[DType.uint64, 2](
+            llvm_intrinsic["llvm.aarch64.neon.pmull64", SIMD16, has_side_effect=False](a, b)
+        )
+    else:
+        return SIMD128(0)
+
+
+@always_inline("nodebug")
+def _rev128(v: SIMD16) -> SIMD128:
+    return bitcast[DType.uint64, 2](
+        llvm_intrinsic["llvm.bitreverse.v16i8", SIMD16, has_side_effect=False](v)
+    )
+
+
+@always_inline("nodebug")
+def _load_nat128(p: UnsafePointer[UInt8, MutAnyOrigin]) -> SIMD128:
+    return _rev128(p.load[width=16, alignment=1](0))
+
+
+comptime _ZERO128 = SIMD128(0)
+
+
+@always_inline("nodebug")
+def _shl64(v: SIMD128) -> SIMD128:
+    return _ZERO128.shuffle[1, 2](v)
+
+
+@always_inline("nodebug")
+def _shr64(v: SIMD128) -> SIMD128:
+    return v.shuffle[1, 2](_ZERO128)
+
+
+@always_inline("nodebug")
+def _clmul_acc(a: SIMD128, b: SIMD128, mut lo: SIMD128, mut hi: SIMD128):
+    var p00 = _clmul64(a[0], b[0])
+    var p11 = _clmul64(a[1], b[1])
+    var axs = a ^ a.shuffle[1, 0]()
+    var bxs = b ^ b.shuffle[1, 0]()
+    var pm = _clmul64(axs[0], bxs[0]) ^ p00 ^ p11
+    lo ^= p00 ^ _shl64(pm)
+    hi ^= p11 ^ _shr64(pm)
+
+
+@always_inline("nodebug")
+def _reduce_vec(lo: SIMD128, hi: SIMD128) -> SIMD128:
+    var f = _clmul64(hi[1], 0x87)
+    var hi2 = hi ^ _shr64(f)
+    var lo2 = lo ^ _shl64(f)
+    return lo2 ^ _clmul64(hi2[0], 0x87)
+
+
+@always_inline("nodebug")
+def _gf_mul_nat(a: SIMD128, b: SIMD128) -> SIMD128:
+    var lo = SIMD128(0)
+    var hi = SIMD128(0)
+    _clmul_acc(a, b, lo, hi)
+    return _reduce_vec(lo, hi)
+
+
+struct _GHash(Copyable, Movable):
     var h_hi: UInt64
     var h_lo: UInt64
     var y_hi: UInt64
     var y_lo: UInt64
+    var hn: SIMD128
+    var hn2: SIMD128
+    var hn3: SIMD128
+    var hn4: SIMD128
+    var hn5: SIMD128
+    var hn6: SIMD128
+    var hn7: SIMD128
+    var hn8: SIMD128
 
     def __init__(out self, h_hi: UInt64, h_lo: UInt64):
         self.h_hi = h_hi
         self.h_lo = h_lo
         self.y_hi = 0
         self.y_lo = 0
+        self.hn = SIMD128(_bitrev64(h_hi), _bitrev64(h_lo))
+        self.hn2 = _gf_mul_nat(self.hn, self.hn)
+        self.hn3 = _gf_mul_nat(self.hn2, self.hn)
+        self.hn4 = _gf_mul_nat(self.hn2, self.hn2)
+        self.hn5 = _gf_mul_nat(self.hn4, self.hn)
+        self.hn6 = _gf_mul_nat(self.hn4, self.hn2)
+        self.hn7 = _gf_mul_nat(self.hn4, self.hn3)
+        self.hn8 = _gf_mul_nat(self.hn4, self.hn4)
 
     @always_inline
     def _mul_y_by_h(mut self):
+        comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["aes"]() and not CompilationTarget.is_x86():
+            var y = _gf_mul_nat(SIMD128(_bitrev64(self.y_hi), _bitrev64(self.y_lo)), self.hn)
+            self.y_hi = _bitrev64(y[0])
+            self.y_lo = _bitrev64(y[1])
+            return
+
+        self._mul_y_by_h_soft()
+
+    @always_inline
+    def _mul_y_by_h_soft(mut self):
         var z_hi: UInt64 = 0
         var z_lo: UInt64 = 0
         var v_hi = self.y_hi
@@ -673,6 +868,41 @@ struct _GHash:
 
     @always_inline
     def update(mut self, data: UnsafePointer[UInt8, MutAnyOrigin], length: Int):
+        comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["aes"]() and not CompilationTarget.is_x86():
+            self._update_pmull(data, length)
+            return
+
+        self._update_soft(data, length)
+
+    @always_inline
+    def _update_pmull(mut self, data: UnsafePointer[UInt8, MutAnyOrigin], length: Int):
+        var y = SIMD128(_bitrev64(self.y_hi), _bitrev64(self.y_lo))
+        var off = 0
+
+        while off + 64 <= length:
+            var lo = SIMD128(0)
+            var hi = SIMD128(0)
+            _clmul_acc(_load_nat128(data + off) ^ y, self.hn4, lo, hi)
+            _clmul_acc(_load_nat128(data + off + 16), self.hn3, lo, hi)
+            _clmul_acc(_load_nat128(data + off + 32), self.hn2, lo, hi)
+            _clmul_acc(_load_nat128(data + off + 48), self.hn, lo, hi)
+            y = _reduce_vec(lo, hi)
+            off += 64
+
+        while off + 16 <= length:
+            y = _gf_mul_nat(_load_nat128(data + off) ^ y, self.hn)
+            off += 16
+
+        if off < length:
+            var block = InlineArray[UInt8, 16](fill=0)
+            memcpy(dest=block.unsafe_ptr(), src=data + off, count=length - off)
+            y = _gf_mul_nat(_load_nat128(block.unsafe_ptr()) ^ y, self.hn)
+
+        self.y_hi = _bitrev64(y[0])
+        self.y_lo = _bitrev64(y[1])
+
+    @always_inline
+    def _update_soft(mut self, data: UnsafePointer[UInt8, MutAnyOrigin], length: Int):
         var off = 0
         while off < length:
             var block = InlineArray[UInt8, 16](fill=0)
@@ -682,7 +912,7 @@ struct _GHash:
             memcpy(dest=block.unsafe_ptr(), src=data + off, count=n)
             self.y_hi ^= _be_load64(block.unsafe_ptr(), 0)
             self.y_lo ^= _be_load64(block.unsafe_ptr(), 8)
-            self._mul_y_by_h()
+            self._mul_y_by_h_soft()
             off += 16
 
     @always_inline
@@ -753,9 +983,27 @@ def _gctr_and_ghash(
     for i in range(16):
         j0_buf[i] = j0[i]
     var full_blocks = length // 16
-    aes_gcm_ctr_kernel(
-        input_ptr, output_ptr, rk, full_blocks, j0_buf.unsafe_ptr(), rounds
-    )
+
+    var fused = False
+    comptime if has_arm_crypto():
+        if rounds == 10:
+            _arm_gcm_fused_loop[10](
+                input_ptr, output_ptr, rk, full_blocks, j0_buf.unsafe_ptr(), gh, ghash_ciphertext
+            )
+        elif rounds == 12:
+            _arm_gcm_fused_loop[12](
+                input_ptr, output_ptr, rk, full_blocks, j0_buf.unsafe_ptr(), gh, ghash_ciphertext
+            )
+        else:
+            _arm_gcm_fused_loop[14](
+                input_ptr, output_ptr, rk, full_blocks, j0_buf.unsafe_ptr(), gh, ghash_ciphertext
+            )
+        fused = True
+
+    if not fused:
+        aes_gcm_ctr_kernel(
+            input_ptr, output_ptr, rk, full_blocks, j0_buf.unsafe_ptr(), rounds
+        )
 
     var rem = length - full_blocks * 16
     if rem > 0:
@@ -767,38 +1015,35 @@ def _gctr_and_ghash(
         for i in range(rem):
             output_ptr[off + i] = input_ptr[off + i] ^ ks[i]
 
-    if ghash_ciphertext:
+    if fused:
+        if rem > 0:
+            var off = full_blocks * 16
+            if ghash_ciphertext:
+                gh.update(output_ptr + off, rem)
+            else:
+                gh.update(input_ptr + off, rem)
+    elif ghash_ciphertext:
         gh.update(output_ptr, length)
     else:
         gh.update(input_ptr, length)
 
 
-def _gcm_core(
-    key: Span[UInt8, ...], iv: Span[UInt8, ...], aad: Span[UInt8, ...],
+def _gcm_core_keyed(
+    rk: UnsafePointer[UInt32, MutAnyOrigin], rounds: Int,
+    mut gh: _GHash,
+    iv: Span[UInt8, ...], aad: Span[UInt8, ...],
     input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     length: Int,
     mut tag: InlineArray[UInt8, 16],
     ghash_ciphertext: Bool,
 ) raises:
-    var rounds = 10 if len(key) == 16 else (12 if len(key) == 24 else 14)
-    var key_buf = InlineArray[UInt8, 32](fill=0)
-    var rk = _gcm_expand(key, key_buf)
-
-    var zero_block = InlineArray[UInt8, 16](fill=0)
-    var h_block = InlineArray[UInt8, 16](fill=0)
-    _encrypt_block(rk, rounds, zero_block.unsafe_ptr(), h_block.unsafe_ptr())
-    var h_hi = _be_load64(h_block.unsafe_ptr(), 0)
-    var h_lo = _be_load64(h_block.unsafe_ptr(), 8)
-
     var j0 = InlineArray[UInt8, 16](fill=0)
-    _derive_j0(h_hi, h_lo, iv, j0)
+    _derive_j0(gh.h_hi, gh.h_lo, iv, j0)
 
-    var gh = _GHash(h_hi, h_lo)
     if len(aad) > 0:
-        var aad_buf = List[UInt8](capacity=len(aad))
-        aad_buf.extend(aad)
-        gh.update(aad_buf.unsafe_ptr(), len(aad))
+        var aad_ptr = aad.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
+        gh.update(aad_ptr, len(aad))
 
     _gctr_and_ghash(rk, rounds, j0, input_ptr, output_ptr, length, gh, ghash_ciphertext)
     gh.update_lengths(UInt64(len(aad)) * 8, UInt64(length) * 8)
@@ -810,9 +1055,95 @@ def _gcm_core(
     _be_store64(tag.unsafe_ptr(), 0, t_hi)
     _be_store64(tag.unsafe_ptr(), 8, t_lo)
 
-    memset_zero(key_buf.unsafe_ptr(), 32)
-    memset_zero(rk, 4 * (rounds + 1))
-    rk.free()
+
+struct AESGCMContext(Copyable, Movable):
+    var _rk: InlineArray[UInt32, 60]
+    var _rounds: Int
+    var _gh0: _GHash
+
+    def __init__(out self, key: Span[UInt8, ...]) raises:
+        if not _valid_gcm_key(key):
+            raise Error("invalid key size")
+        self._rounds = 10 if len(key) == 16 else (12 if len(key) == 24 else 14)
+        self._rk = InlineArray[UInt32, 60](fill=0)
+
+        var key_buf = InlineArray[UInt8, 32](fill=0)
+        for i in range(len(key)):
+            key_buf[i] = key[i]
+        if len(key) == 16:
+            expand_key_128_into(key_buf.unsafe_ptr(), self._rk.unsafe_ptr())
+        elif len(key) == 24:
+            expand_key_192_into(key_buf.unsafe_ptr(), self._rk.unsafe_ptr())
+        else:
+            expand_key_256_into(key_buf.unsafe_ptr(), self._rk.unsafe_ptr())
+        memset_zero(key_buf.unsafe_ptr(), 32)
+
+        var zero_block = InlineArray[UInt8, 16](fill=0)
+        var h_block = InlineArray[UInt8, 16](fill=0)
+        _encrypt_block(self._rk.unsafe_ptr(), self._rounds, zero_block.unsafe_ptr(), h_block.unsafe_ptr())
+        self._gh0 = _GHash(
+            _be_load64(h_block.unsafe_ptr(), 0), _be_load64(h_block.unsafe_ptr(), 8)
+        )
+        memset_zero(h_block.unsafe_ptr(), 16)
+
+    def __del__(deinit self):
+        memset_zero(self._rk.unsafe_ptr(), 60 * 4)
+
+    def encrypt(
+        self, iv: Span[UInt8, ...], plaintext: Span[UInt8, ...], aad: Span[UInt8, ...]
+    ) raises -> Tuple[List[UInt8], List[UInt8]]:
+        if len(iv) == 0:
+            raise Error("invalid iv size")
+        var n = len(plaintext)
+        var ciphertext = List[UInt8](unsafe_uninit_length=n)
+        var pt_ptr = plaintext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
+        var tag = InlineArray[UInt8, 16](fill=0)
+        var rk = self._rk.copy()
+        var gh = self._gh0.copy()
+
+        _gcm_core_keyed(
+            rk.unsafe_ptr(), self._rounds, gh, iv, aad,
+            pt_ptr, ciphertext.unsafe_ptr(), n, tag,
+            ghash_ciphertext=True,
+        )
+
+        var tag_out = List[UInt8](capacity=16)
+        for i in range(16):
+            tag_out.append(tag[i])
+        return (ciphertext^, tag_out^)
+
+    def decrypt(
+        self, iv: Span[UInt8, ...], ciphertext: Span[UInt8, ...],
+        aad: Span[UInt8, ...], tag: Span[UInt8, ...],
+    ) raises -> Tuple[List[UInt8], Bool]:
+        if len(iv) == 0:
+            raise Error("invalid iv size")
+        if len(tag) != 16:
+            raise Error("invalid tag size")
+        var n = len(ciphertext)
+        var plaintext = List[UInt8](unsafe_uninit_length=n)
+        var ct_ptr = ciphertext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
+        var computed_tag = InlineArray[UInt8, 16](fill=0)
+        var rk = self._rk.copy()
+        var gh = self._gh0.copy()
+
+        _gcm_core_keyed(
+            rk.unsafe_ptr(), self._rounds, gh, iv, aad,
+            ct_ptr, plaintext.unsafe_ptr(), n, computed_tag,
+            ghash_ciphertext=False,
+        )
+
+        var diff = UInt8(0)
+        for i in range(16):
+            diff |= computed_tag[i] ^ tag[i]
+
+        if diff != 0:
+            var pt_ptr = plaintext.unsafe_ptr()
+            for i in range(n):
+                pt_ptr.store[volatile=True](i, UInt8(0))
+            return (List[UInt8](), False)
+
+        return (plaintext^, True)
 
 
 def _valid_gcm_key(key: Span[UInt8, ...]) -> Bool:
@@ -823,58 +1154,13 @@ def aes_gcm_encrypt(
     key: Span[UInt8, ...], iv: Span[UInt8, ...],
     plaintext: Span[UInt8, ...], aad: Span[UInt8, ...],
 ) raises -> Tuple[List[UInt8], List[UInt8]]:
-    if not _valid_gcm_key(key):
-        raise Error("invalid key size")
-    if len(iv) == 0:
-        raise Error("invalid iv size")
-
-    var n = len(plaintext)
-    var ciphertext = List[UInt8](unsafe_uninit_length=n)
-    var pt_buf = List[UInt8](capacity=n)
-    pt_buf.extend(plaintext)
-    var tag = InlineArray[UInt8, 16](fill=0)
-
-    _gcm_core(
-        key, iv, aad, pt_buf.unsafe_ptr(), ciphertext.unsafe_ptr(), n, tag,
-        ghash_ciphertext=True,
-    )
-
-    var tag_out = List[UInt8](capacity=16)
-    for i in range(16):
-        tag_out.append(tag[i])
-    return (ciphertext^, tag_out^)
+    var ctx = AESGCMContext(key)
+    return ctx.encrypt(iv, plaintext, aad)
 
 
 def aes_gcm_decrypt(
     key: Span[UInt8, ...], iv: Span[UInt8, ...],
     ciphertext: Span[UInt8, ...], aad: Span[UInt8, ...], tag: Span[UInt8, ...],
 ) raises -> Tuple[List[UInt8], Bool]:
-    if not _valid_gcm_key(key):
-        raise Error("invalid key size")
-    if len(iv) == 0:
-        raise Error("invalid iv size")
-    if len(tag) != 16:
-        raise Error("invalid tag size")
-
-    var n = len(ciphertext)
-    var plaintext = List[UInt8](unsafe_uninit_length=n)
-    var ct_buf = List[UInt8](capacity=n)
-    ct_buf.extend(ciphertext)
-    var computed_tag = InlineArray[UInt8, 16](fill=0)
-
-    _gcm_core(
-        key, iv, aad, ct_buf.unsafe_ptr(), plaintext.unsafe_ptr(), n, computed_tag,
-        ghash_ciphertext=False,
-    )
-
-    var diff = UInt8(0)
-    for i in range(16):
-        diff |= computed_tag[i] ^ tag[i]
-
-    if diff != 0:
-        var pt_ptr = plaintext.unsafe_ptr()
-        for i in range(n):
-            pt_ptr.store[volatile=True](i, UInt8(0))
-        return (List[UInt8](), False)
-
-    return (plaintext^, True)
+    var ctx = AESGCMContext(key)
+    return ctx.decrypt(iv, ciphertext, aad, tag)

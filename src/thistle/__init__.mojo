@@ -14,7 +14,7 @@ from .pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
 from .argon2 import Argon2id, argon2id_hash_string
 
 from .aes import AESKey, expand_key_128, expand_key_192, expand_key_256
-from .aes_ni import has_aes_ni, aes_gcm_ctr_kernel, aes_gcm_encrypt, aes_gcm_decrypt
+from .aes_ni import has_aes_ni, aes_gcm_ctr_kernel, aes_gcm_encrypt, aes_gcm_decrypt, AESGCMContext
 from .aes_gpu import aes_gpu_kernel_ecb, aes_gpu_kernel_ctr, aes_gpu_kernel_gcm
 from .camellia import CamelliaCipher
 from .chacha20 import ChaCha20, chacha20_block
@@ -27,7 +27,7 @@ from .chacha20poly1305 import (
 from .kcipher2 import KCipher2
 
 from .x25519 import x25519
-from .ed25519 import ed25519_generate_public_key, ed25519_sign, ed25519_verify
+from .ed25519 import ed25519_generate_public_key, ed25519_sign, ed25519_verify, Ed25519SigningKey
 from .p256 import p256_public_key, p256_ecdh, P256_SIZE, P256_POINT_SIZE
 from .p384 import p384_public_key, p384_ecdh, P384_SIZE, P384_POINT_SIZE
 from .rsa import (

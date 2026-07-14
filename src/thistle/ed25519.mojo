@@ -813,6 +813,95 @@ def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...], outpu
         r_bytes_ptr.store[volatile=True](i, UInt8(0))
         S_ptr.store[volatile=True](i, UInt8(0))
 
+struct Ed25519SigningKey(Copyable, Movable):
+    var _s: Scalar
+    var _prefix: InlineArray[UInt8, 32]
+    var _a_enc: InlineArray[UInt8, 32]
+
+    def __init__(out self, private_key: Span[UInt8, ...]) raises:
+        if len(private_key) != 32:
+            raise Error("Ed25519 private key must be 32 bytes")
+        var hash = InlineArray[UInt8, 64](uninitialized=True)
+        var ctx = SHA512Context()
+        sha512_update(ctx, private_key)
+        sha512_final_to_buffer(ctx, hash.unsafe_ptr())
+        self._s = Scalar.from_bytes_clamped(Span[UInt8, ...](ptr=hash.unsafe_ptr(), length=32))
+
+        self._prefix = InlineArray[UInt8, 32](uninitialized=True)
+        for i in range(32):
+            self._prefix[i] = hash[32 + i]
+
+        var s_bytes = InlineArray[UInt8, 32](uninitialized=True)
+        self._s.to_bytes_into(s_bytes.unsafe_ptr())
+        var A_point = _mul_base_ct(Span[UInt8, ...](ptr=s_bytes.unsafe_ptr(), length=32))
+        self._a_enc = InlineArray[UInt8, 32](uninitialized=True)
+        edwards_encode_into(A_point, self._a_enc.unsafe_ptr())
+
+        ctx.wipe()
+        var hash_ptr = hash.unsafe_ptr()
+        var s_ptr = s_bytes.unsafe_ptr()
+        for i in range(64):
+            hash_ptr.store[volatile=True](i, UInt8(0))
+        for i in range(32):
+            s_ptr.store[volatile=True](i, UInt8(0))
+
+    def __del__(deinit self):
+        self._s.wipe()
+        var p = self._prefix.unsafe_ptr()
+        for i in range(32):
+            p.store[volatile=True](i, UInt8(0))
+
+    def public_key_into(self, output: UnsafePointer[UInt8, MutAnyOrigin]):
+        for i in range(32):
+            output[i] = self._a_enc[i]
+
+    @no_inline
+    def sign(self, message: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]) raises:
+        var r_hash = InlineArray[UInt8, 64](uninitialized=True)
+        var r_ctx = SHA512Context()
+        sha512_update(r_ctx, Span[UInt8, ...](ptr=self._prefix.unsafe_ptr(), length=32))
+        sha512_update(r_ctx, message)
+        sha512_final_to_buffer(r_ctx, r_hash.unsafe_ptr())
+
+        var r_scalar = Scalar.from_bytes_wide(Span[UInt8, ...](ptr=r_hash.unsafe_ptr(), length=64))
+        var r_bytes = InlineArray[UInt8, 32](uninitialized=True)
+        r_scalar.to_bytes_into(r_bytes.unsafe_ptr())
+        var R_point = _mul_base_ct(Span[UInt8, ...](ptr=r_bytes.unsafe_ptr(), length=32))
+
+        var R_enc = InlineArray[UInt8, 32](uninitialized=True)
+        edwards_encode_into(R_point, R_enc.unsafe_ptr())
+
+        var k_hash = InlineArray[UInt8, 64](uninitialized=True)
+        var k_ctx = SHA512Context()
+        sha512_update(k_ctx, Span[UInt8, ...](ptr=R_enc.unsafe_ptr(), length=32))
+        sha512_update(k_ctx, Span[UInt8, ...](ptr=self._a_enc.unsafe_ptr(), length=32))
+        sha512_update(k_ctx, message)
+        sha512_final_to_buffer(k_ctx, k_hash.unsafe_ptr())
+
+        var k_scalar = Scalar.from_bytes_wide(Span[UInt8, ...](ptr=k_hash.unsafe_ptr(), length=64))
+        var S_scalar = r_scalar + k_scalar * self._s
+        var S_bytes = InlineArray[UInt8, 32](uninitialized=True)
+        S_scalar.to_bytes_into(S_bytes.unsafe_ptr())
+
+        for i in range(32):
+            output[i] = R_enc[i]
+        for i in range(32):
+            output[32 + i] = S_bytes[i]
+
+        r_ctx.wipe()
+        r_scalar.wipe()
+        var r_ptr = r_hash.unsafe_ptr()
+        var k_ptr = k_hash.unsafe_ptr()
+        var r_bytes_ptr = r_bytes.unsafe_ptr()
+        var S_ptr = S_bytes.unsafe_ptr()
+        for i in range(64):
+            r_ptr.store[volatile=True](i, UInt8(0))
+            k_ptr.store[volatile=True](i, UInt8(0))
+        for i in range(32):
+            r_bytes_ptr.store[volatile=True](i, UInt8(0))
+            S_ptr.store[volatile=True](i, UInt8(0))
+
+
 @no_inline
 def ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], signature: Span[UInt8, ...]) -> Bool:
     # RFC 8032 5.1.7 strict Ed25519 verification.
