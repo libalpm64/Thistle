@@ -83,6 +83,7 @@ struct Poly1305:
     var r2: _RPower
     var r3: _RPower
     var r4: _RPower
+    var r5: _RPower
     var r6: _RPower
     var r7: _RPower
     var r8: _RPower
