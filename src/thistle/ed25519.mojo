@@ -5,6 +5,7 @@ from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
 from std.memory import bitcast
 from .curve25519 import FieldElement51
+from .ed25519_table import ed25519_base_table, ed25519_b_odd_table
 from .sha2 import SHA512Context, sha512_update, sha512_final_to_buffer
 
 
@@ -321,22 +322,14 @@ def _ct_select_fe(a: FieldElement51, b: FieldElement51, choice: UInt8) -> FieldE
         limbs[i] = a.limbs[i] ^ (mask & (a.limbs[i] ^ b.limbs[i]))
     return FieldElement51(limbs)
 
-@always_inline
-def _ct_select_point(a: EdwardsPoint, b: EdwardsPoint, choice: UInt8) -> EdwardsPoint:
-    return EdwardsPoint(
-        _ct_select_fe(a.X, b.X, choice),
-        _ct_select_fe(a.Y, b.Y, choice),
-        _ct_select_fe(a.Z, b.Z, choice),
-        _ct_select_fe(a.T, b.T, choice),
-    )
-
 @no_inline
 def _edwards_add_d2(p: EdwardsPoint, q: EdwardsPoint, d2: FieldElement51) -> EdwardsPoint:
     # RFC 8032 5.1.4: complete extended Edwards addition, a = -1.
     var A = (p.Y - p.X) * (q.Y - q.X)
     var B = (p.Y + p.X) * (q.Y + q.X)
     var C = p.T * q.T * d2
-    var D = p.Z * q.Z * FieldElement51(2, 0, 0, 0, 0)
+    var ZZ = p.Z * q.Z
+    var D = ZZ + ZZ
     var E = B - A
     var F = D - C
     var G = D + C
@@ -348,7 +341,8 @@ def _edwards_double_standalone(p: EdwardsPoint) -> EdwardsPoint:
     # RFC 8032 5.1.4: extended Edwards doubling.
     var A = p.X.square()
     var B = p.Y.square()
-    var C = p.Z.square() * FieldElement51(2, 0, 0, 0, 0)
+    var ZZ = p.Z.square()
+    var C = ZZ + ZZ
     var D = FieldElement51.ZERO() - A
     var E = (p.X + p.Y).square() - A - B
     var G = D + B
@@ -377,7 +371,10 @@ def fe_from_bytes(bytes: Span[UInt8, ...]) -> FieldElement51:
 @no_inline
 def edwards_encode_into(p: EdwardsPoint, output: UnsafePointer[UInt8, MutAnyOrigin]):
     # RFC 8032 5.1.2: encode y and store x parity in bit 255.
-    var z_inv = p.Z.invert()
+    _edwards_encode_with_zinv(p, p.Z.invert(), output)
+
+@no_inline
+def _edwards_encode_with_zinv(p: EdwardsPoint, z_inv: FieldElement51, output: UnsafePointer[UInt8, MutAnyOrigin]):
     var x = p.X * z_inv
     var y = p.Y * z_inv
     y.to_bytes_into(output)
@@ -458,23 +455,11 @@ def sqrt_ratio_checked(u: FieldElement51, v: FieldElement51) -> Optional[FieldEl
     # RFC 8032 5.1.3: compute sqrt(u/v) using
     # x = u*v^3*(u*v^7)^((p-5)/8). Public decoding only.
     # Branches on validity; do not use for secret-dependent values.
-    @always_inline
-    def _pow_p58(a: FieldElement51) -> FieldElement51:
-        var acc = FieldElement51.ONE()
-        for i in range(251, -1, -1):
-            acc = acc.square()
-            var bit = True
-            if i == 1:
-                bit = False
-            if bit:
-                acc = acc * a
-        return acc
-
     var v2 = v.square()
     var v3 = v2 * v
     var v7 = v3 * v2.square()
     var r = u * v7
-    var z = _pow_p58(r)
+    var z = r.pow_p58()
 
     var x = u * v3 * z
     var vx2 = x.square() * v
@@ -507,30 +492,236 @@ def sqrt_ratio(u: FieldElement51, v: FieldElement51) -> FieldElement51:
         return x.unsafe_value()
     return FieldElement51.ZERO()
 
-@no_inline
-def _scalar_mult(k: Span[UInt8, ...], p: EdwardsPoint) -> EdwardsPoint:
-    # Secret-scalar loop: always double/add/select; no scalar-bit branch.
-    var d2 = ed25519_d2()
-    var base = EdwardsPoint(
-        FieldElement51(p.X.limbs),
-        FieldElement51(p.Y.limbs),
-        FieldElement51(p.Z.limbs),
-        FieldElement51(p.T.limbs),
-    )
-    var r = EdwardsPoint()
+struct AffineNielsPoint(Movable, Copyable, ImplicitlyCopyable):
+    var y_plus_x: FieldElement51
+    var y_minus_x: FieldElement51
+    var xy2d: FieldElement51
+
     @always_inline
-    def _bit_at(bytes: Span[UInt8, ...], bit_index: Int) -> UInt8:
-        return (bytes[bit_index >> 3] >> UInt8(bit_index & 7)) & UInt8(1)
+    def __init__(out self, y_plus_x: FieldElement51, y_minus_x: FieldElement51, xy2d: FieldElement51):
+        self.y_plus_x = y_plus_x
+        self.y_minus_x = y_minus_x
+        self.xy2d = xy2d
 
-    for i in range(255, -1, -1):
-        r = _edwards_double_standalone(r)
-        var added = _edwards_add_d2(r, base, d2)
-        r = _ct_select_point(r, added, _bit_at(k, i))
-    return r
+    @always_inline
+    def __copyinit__(out self, copy: Self):
+        self.y_plus_x = copy.y_plus_x
+        self.y_minus_x = copy.y_minus_x
+        self.xy2d = copy.xy2d
 
-def _scalar_mult_base(k: Span[UInt8, ...]) -> EdwardsPoint:
-    var bp = ed25519_base_point()
-    return _scalar_mult(k, bp)
+    @always_inline
+    def __moveinit__(out self, deinit take: Self):
+        self.y_plus_x = take.y_plus_x^
+        self.y_minus_x = take.y_minus_x^
+        self.xy2d = take.xy2d^
+
+
+struct ProjectiveNielsPoint(Movable, Copyable, ImplicitlyCopyable):
+    var Y_plus_X: FieldElement51
+    var Y_minus_X: FieldElement51
+    var Z: FieldElement51
+    var T2d: FieldElement51
+
+    @always_inline
+    def __init__(out self, Y_plus_X: FieldElement51, Y_minus_X: FieldElement51, Z: FieldElement51, T2d: FieldElement51):
+        self.Y_plus_X = Y_plus_X
+        self.Y_minus_X = Y_minus_X
+        self.Z = Z
+        self.T2d = T2d
+
+    @always_inline
+    def __copyinit__(out self, copy: Self):
+        self.Y_plus_X = copy.Y_plus_X
+        self.Y_minus_X = copy.Y_minus_X
+        self.Z = copy.Z
+        self.T2d = copy.T2d
+
+    @always_inline
+    def __moveinit__(out self, deinit take: Self):
+        self.Y_plus_X = take.Y_plus_X^
+        self.Y_minus_X = take.Y_minus_X^
+        self.Z = take.Z^
+        self.T2d = take.T2d^
+
+
+@always_inline
+def _to_projective_niels(p: EdwardsPoint, d2: FieldElement51) -> ProjectiveNielsPoint:
+    return ProjectiveNielsPoint(p.Y + p.X, p.Y - p.X, p.Z, p.T * d2)
+
+@always_inline
+def _add_affine_niels(p: EdwardsPoint, q: AffineNielsPoint) -> EdwardsPoint:
+    var PP = (p.Y + p.X) * q.y_plus_x
+    var MM = (p.Y - p.X) * q.y_minus_x
+    var Txy = p.T * q.xy2d
+    var Z2 = p.Z + p.Z
+    var X3 = PP - MM
+    var Y3 = PP + MM
+    var Z3 = Z2 + Txy
+    var T3 = Z2 - Txy
+    return EdwardsPoint(X3 * T3, Y3 * Z3, Z3 * T3, X3 * Y3)
+
+@always_inline
+def _sub_affine_niels(p: EdwardsPoint, q: AffineNielsPoint) -> EdwardsPoint:
+    var PM = (p.Y + p.X) * q.y_minus_x
+    var MP = (p.Y - p.X) * q.y_plus_x
+    var Txy = p.T * q.xy2d
+    var Z2 = p.Z + p.Z
+    var X3 = PM - MP
+    var Y3 = PM + MP
+    var Z3 = Z2 - Txy
+    var T3 = Z2 + Txy
+    return EdwardsPoint(X3 * T3, Y3 * Z3, Z3 * T3, X3 * Y3)
+
+@always_inline
+def _add_projective_niels(p: EdwardsPoint, n: ProjectiveNielsPoint) -> EdwardsPoint:
+    var PP = (p.Y + p.X) * n.Y_plus_X
+    var MM = (p.Y - p.X) * n.Y_minus_X
+    var TT2d = p.T * n.T2d
+    var ZZ = p.Z * n.Z
+    var ZZ2 = ZZ + ZZ
+    var X3 = PP - MM
+    var Y3 = PP + MM
+    var Z3 = ZZ2 + TT2d
+    var T3 = ZZ2 - TT2d
+    return EdwardsPoint(X3 * T3, Y3 * Z3, Z3 * T3, X3 * Y3)
+
+@always_inline
+def _sub_projective_niels(p: EdwardsPoint, n: ProjectiveNielsPoint) -> EdwardsPoint:
+    var PM = (p.Y + p.X) * n.Y_minus_X
+    var MP = (p.Y - p.X) * n.Y_plus_X
+    var TT2d = p.T * n.T2d
+    var ZZ = p.Z * n.Z
+    var ZZ2 = ZZ + ZZ
+    var X3 = PM - MP
+    var Y3 = PM + MP
+    var Z3 = ZZ2 - TT2d
+    var T3 = ZZ2 + TT2d
+    return EdwardsPoint(X3 * T3, Y3 * Z3, Z3 * T3, X3 * Y3)
+
+@always_inline
+def _radix16_digits(scalar: Span[UInt8, ...]) -> InlineArray[Int, 64]:
+    var digits = InlineArray[Int, 64](uninitialized=True)
+    for i in range(32):
+        digits[2 * i] = Int(scalar[i] & 15)
+        digits[2 * i + 1] = Int((scalar[i] >> 4) & 15)
+    for i in range(63):
+        var carry = (digits[i] + 8) >> 4
+        digits[i] -= carry << 4
+        digits[i + 1] += carry
+    return digits
+
+@always_inline
+def _base_table_lookup(ptr: UnsafePointer[UInt64, _], j: Int, digit: Int) -> AffineNielsPoint:
+    var d = Int64(digit)
+    var sign = d >> 63
+    var absv = ((d ^ sign) - sign).cast[DType.uint64]()
+    var acc = SIMD[DType.uint64, 16](0)
+    acc[0] = 1
+    acc[5] = 1
+    var base = ptr + j * 128
+    for k in range(1, 9):
+        var cand = (base + (k - 1) * 16).load[width=16, alignment=8]()
+        var diff = absv ^ UInt64(k)
+        var m = UInt64(0) - ((diff - 1) >> 63)
+        acc = acc ^ ((acc ^ cand) & SIMD[DType.uint64, 16](m))
+    var sm = sign.cast[DType.uint64]()
+    var yp = SIMD[DType.uint64, 5](acc[0], acc[1], acc[2], acc[3], acc[4])
+    var ym = SIMD[DType.uint64, 5](acc[5], acc[6], acc[7], acc[8], acc[9])
+    var swap = (yp ^ ym) & SIMD[DType.uint64, 5](sm)
+    yp ^= swap
+    ym ^= swap
+    var xy = FieldElement51(SIMD[DType.uint64, 5](acc[10], acc[11], acc[12], acc[13], acc[14]))
+    var xy_neg = FieldElement51.ZERO() - xy
+    var xy_sel = _ct_select_fe(xy, xy_neg, UInt8(sm & 1))
+    return AffineNielsPoint(FieldElement51(yp), FieldElement51(ym), xy_sel)
+
+@no_inline
+def _mul_base_ct(scalar: Span[UInt8, ...]) -> EdwardsPoint:
+    var table = ed25519_base_table()
+    var tptr = table.unsafe_ptr()
+    var digits = _radix16_digits(scalar)
+    var P = EdwardsPoint()
+    for i in range(1, 64, 2):
+        P = _add_affine_niels(P, _base_table_lookup(tptr, i >> 1, digits[i]))
+    P = _edwards_double_standalone(P)
+    P = _edwards_double_standalone(P)
+    P = _edwards_double_standalone(P)
+    P = _edwards_double_standalone(P)
+    for i in range(0, 64, 2):
+        P = _add_affine_niels(P, _base_table_lookup(tptr, i >> 1, digits[i]))
+    var dptr = digits.unsafe_ptr().bitcast[UInt64]()
+    for i in range(64):
+        dptr.store[volatile=True](i, UInt64(0))
+    return P
+
+def _naf5(scalar: Span[UInt8, ...]) -> InlineArray[Int, 256]:
+    var naf = InlineArray[Int, 256](fill=0)
+    var words = InlineArray[UInt64, 5](uninitialized=True)
+    words[4] = 0
+    var ptr = scalar.unsafe_ptr()
+    for w in range(4):
+        words[w] = (ptr + 8 * w).bitcast[UInt64]().load[width=1, alignment=1]()
+    var pos = 0
+    var carry: UInt64 = 0
+    while pos < 256:
+        var idx = pos >> 6
+        var bit = UInt64(pos & 63)
+        var bit_buf: UInt64 = words[idx] >> bit
+        if bit > 59:
+            bit_buf |= words[idx + 1] << (UInt64(64) - bit)
+        var window = carry + (bit_buf & 31)
+        if (window & 1) == 0:
+            pos += 1
+            continue
+        if window < 16:
+            carry = 0
+            naf[pos] = Int(window)
+        else:
+            carry = 1
+            naf[pos] = Int(window) - 32
+        pos += 5
+    return naf
+
+@always_inline
+def _b_odd_entry(ptr: UnsafePointer[UInt64, _], k: Int) -> AffineNielsPoint:
+    var base = ptr + k * 16
+    return AffineNielsPoint(
+        FieldElement51(base[0], base[1], base[2], base[3], base[4]),
+        FieldElement51(base[5], base[6], base[7], base[8], base[9]),
+        FieldElement51(base[10], base[11], base[12], base[13], base[14]),
+    )
+
+@no_inline
+def _double_scalar_mult_vartime(a: Span[UInt8, ...], A: EdwardsPoint, b: Span[UInt8, ...]) -> EdwardsPoint:
+    var naf_a = _naf5(a)
+    var naf_b = _naf5(b)
+    var d2 = ed25519_d2()
+    var A2n = _to_projective_niels(_edwards_double_standalone(A), d2)
+    var Ai = InlineArray[ProjectiveNielsPoint, 8](uninitialized=True)
+    var cur = A
+    Ai[0] = _to_projective_niels(A, d2)
+    for k in range(1, 8):
+        cur = _add_projective_niels(cur, A2n)
+        Ai[k] = _to_projective_niels(cur, d2)
+    var btable = ed25519_b_odd_table()
+    var bptr = btable.unsafe_ptr()
+    var start = 255
+    while start > 0 and naf_a[start] == 0 and naf_b[start] == 0:
+        start -= 1
+    var Q = EdwardsPoint()
+    for i in range(start, -1, -1):
+        Q = _edwards_double_standalone(Q)
+        var da = naf_a[i]
+        if da > 0:
+            Q = _add_projective_niels(Q, Ai[(da - 1) >> 1])
+        elif da < 0:
+            Q = _sub_projective_niels(Q, Ai[(-da - 1) >> 1])
+        var db = naf_b[i]
+        if db > 0:
+            Q = _add_affine_niels(Q, _b_odd_entry(bptr, (db - 1) >> 1))
+        elif db < 0:
+            Q = _sub_affine_niels(Q, _b_odd_entry(bptr, (-db - 1) >> 1))
+    return Q
 
 @no_inline
 def ed25519_generate_public_key(private_key: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]) raises:
@@ -544,7 +735,7 @@ def ed25519_generate_public_key(private_key: Span[UInt8, ...], output: UnsafePoi
     var s = Scalar.from_bytes_clamped(Span[UInt8, ...](ptr=hash.unsafe_ptr(), length=32))
     var s_bytes = InlineArray[UInt8, 32](uninitialized=True)
     s.to_bytes_into(s_bytes.unsafe_ptr())
-    var pub_point = _scalar_mult_base(Span[UInt8, ...](ptr=s_bytes.unsafe_ptr(), length=32))
+    var pub_point = _mul_base_ct(Span[UInt8, ...](ptr=s_bytes.unsafe_ptr(), length=32))
     edwards_encode_into(pub_point, output)
     ctx.wipe()
     s.wipe()
@@ -570,9 +761,7 @@ def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...], outpu
 
     var s_bytes = InlineArray[UInt8, 32](uninitialized=True)
     s_scalar.to_bytes_into(s_bytes.unsafe_ptr())
-    var A_point = _scalar_mult_base(Span[UInt8, ...](ptr=s_bytes.unsafe_ptr(), length=32))
-    var A_enc = InlineArray[UInt8, 32](uninitialized=True)
-    edwards_encode_into(A_point, A_enc.unsafe_ptr())
+    var A_point = _mul_base_ct(Span[UInt8, ...](ptr=s_bytes.unsafe_ptr(), length=32))
 
     var r_hash = InlineArray[UInt8, 64](uninitialized=True)
     var r_ctx = SHA512Context()
@@ -583,9 +772,13 @@ def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...], outpu
     var r_scalar = Scalar.from_bytes_wide(Span[UInt8, ...](ptr=r_hash.unsafe_ptr(), length=64))
     var r_bytes = InlineArray[UInt8, 32](uninitialized=True)
     r_scalar.to_bytes_into(r_bytes.unsafe_ptr())
-    var R_point = _scalar_mult_base(Span[UInt8, ...](ptr=r_bytes.unsafe_ptr(), length=32))
+    var R_point = _mul_base_ct(Span[UInt8, ...](ptr=r_bytes.unsafe_ptr(), length=32))
+
+    var zz_inv = (A_point.Z * R_point.Z).invert()
+    var A_enc = InlineArray[UInt8, 32](uninitialized=True)
     var R_enc = InlineArray[UInt8, 32](uninitialized=True)
-    edwards_encode_into(R_point, R_enc.unsafe_ptr())
+    _edwards_encode_with_zinv(A_point, zz_inv * R_point.Z, A_enc.unsafe_ptr())
+    _edwards_encode_with_zinv(R_point, zz_inv * A_point.Z, R_enc.unsafe_ptr())
 
     var k_hash = InlineArray[UInt8, 64](uninitialized=True)
     var k_ctx = SHA512Context()
@@ -651,22 +844,14 @@ def ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], sign
     var k_hash_span = Span[UInt8, ...](ptr=k_hash.unsafe_ptr(), length=64)
     var k_scalar = Scalar.from_bytes_wide(k_hash_span)
 
-    var SB = _scalar_mult(S_bytes_span, ed25519_base_point())
-
     var k_bytes = InlineArray[UInt8, 32](uninitialized=True)
     k_scalar.to_bytes_into(k_bytes.unsafe_ptr())
     var k_bytes_span = Span[UInt8, ...](ptr=k_bytes.unsafe_ptr(), length=32)
-    var kA = _scalar_mult(k_bytes_span, A)
 
-    var R_res = edwards_decode_verify_compatible(Span[UInt8, ...](ptr=R_enc.unsafe_ptr(), length=32))
-    if not R_res.ok:
-        return False
-    var P = edwards_add(R_res.p, kA)
-    var P_enc = InlineArray[UInt8, 32](uninitialized=True)
-    var SB_enc = InlineArray[UInt8, 32](uninitialized=True)
-    edwards_encode_into(P, P_enc.unsafe_ptr())
-    edwards_encode_into(SB, SB_enc.unsafe_ptr())
+    var Q = _double_scalar_mult_vartime(k_bytes_span, edwards_negate(A), S_bytes_span)
+    var Q_enc = InlineArray[UInt8, 32](uninitialized=True)
+    edwards_encode_into(Q, Q_enc.unsafe_ptr())
     for i in range(32):
-        if P_enc[i] != SB_enc[i]:
+        if Q_enc[i] != R_enc[i]:
             return False
     return True

@@ -277,6 +277,45 @@ def _transpose8x8(x0: UInt64) -> UInt64:
 
 
 @always_inline
+def _p_tail(sout0: UInt64) -> UInt64:
+    var sout = sout0
+    var ol = ((sout << 1) & ~_BIT0_OF_EACH_BYTE) | ((sout >> 7) & _BIT0_OF_EACH_BYTE)
+    var orr = ((sout >> 1) & ~(_BIT0_OF_EACH_BYTE << 7)) | (
+        (sout << 7) & (_BIT0_OF_EACH_BYTE << 7)
+    )
+    sout = (
+        (sout & ~(_LANES_S2 | _LANES_S3))
+        | (ol & _LANES_S2)
+        | (orr & _LANES_S3)
+    )
+
+    var dw = UInt32(sout & 0xFFFFFFFF)
+    var uw = UInt32(sout >> 32)
+    var dr = rotate_bits_left[24](dw)
+    var da = dw ^ rotate_bits_left[16](dw)
+    var all_d = da ^ rotate_bits_left[24](da)
+    var ua = uw ^ rotate_bits_left[16](uw)
+    var uc = (ua ^ rotate_bits_left[24](ua)) ^ uw
+    var y14 = all_d ^ dr ^ uc
+    var y58 = dw ^ dr ^ uc
+
+    return byte_swap(UInt64(y14) | (UInt64(y58) << 32))
+
+
+@always_inline
+def _f_hw(f_in: UInt64, ke: UInt64) -> UInt64:
+    var pin = byte_swap(f_in ^ ke)
+    var rol1 = ((pin << 1) & ~_BIT0_OF_EACH_BYTE) | ((pin >> 7) & _BIT0_OF_EACH_BYTE)
+    pin = (pin & ~_LANES_S4) | (rol1 & _LANES_S4)
+
+    var x = bitcast[DType.uint8, 16](SIMD[DType.uint64, 2](pin, 0))
+    var t = _tbl16(_PRE_LO, x & 0x0F) ^ _tbl16(_PRE_HI, x >> 4)
+    t = _aes_sub16(t)
+    var y = _tbl16(_POST_LO, t & 0x0F) ^ _tbl16(_POST_HI, t >> 4)
+    return _p_tail(bitcast[DType.uint64, 2](y)[0])
+
+
+@always_inline
 def _f_scalar(f_in: UInt64, ke: UInt64) -> UInt64:
     var x = f_in ^ ke
 
@@ -314,29 +353,196 @@ def _f_scalar(f_in: UInt64, ke: UInt64) -> UInt64:
     var packed: UInt64 = 0
     comptime for k in range(8):
         packed |= (UInt64(b[k]) & 0xFF) << UInt64(8 * k)
-    var sout = _transpose8x8(packed)
+    return _p_tail(_transpose8x8(packed))
 
-    var ol = ((sout << 1) & ~_BIT0_OF_EACH_BYTE) | ((sout >> 7) & _BIT0_OF_EACH_BYTE)
-    var orr = ((sout >> 1) & ~(_BIT0_OF_EACH_BYTE << 7)) | (
-        (sout << 7) & (_BIT0_OF_EACH_BYTE << 7)
+
+@always_inline
+def _f_one(x: UInt64, k: UInt64) -> UInt64:
+    comptime if _has_hw_sbox():
+        return _f_hw(x, k)
+    else:
+        return _f_scalar(x, k)
+
+
+
+comptime _M_S4V = _U8x16(
+    0, 0, 0, 0xFF, 0, 0, 0xFF, 0, 0, 0, 0, 0xFF, 0, 0, 0xFF, 0
+)
+
+comptime _AES_SR_INV = StaticTuple[UInt8, 16](
+    0, 13, 10, 7, 4, 1, 14, 11, 8, 5, 2, 15, 12, 9, 6, 3
+)
+
+comptime _P_SRC = StaticTuple[StaticTuple[UInt8, 6], 8](
+    StaticTuple[UInt8, 6](0, 2, 3, 5, 6, 7),
+    StaticTuple[UInt8, 6](0, 1, 3, 4, 6, 7),
+    StaticTuple[UInt8, 6](0, 1, 2, 4, 5, 7),
+    StaticTuple[UInt8, 6](1, 2, 3, 4, 5, 6),
+    StaticTuple[UInt8, 6](0, 1, 5, 6, 7, 255),
+    StaticTuple[UInt8, 6](1, 2, 4, 6, 7, 255),
+    StaticTuple[UInt8, 6](2, 3, 4, 5, 7, 255),
+    StaticTuple[UInt8, 6](0, 3, 4, 5, 6, 255),
+)
+
+
+def _mk_p_cls_idx(vec: Int, slot: Int, a_to_b: Bool) -> _U8x16:
+    var t = _U8x16(255)
+    for i in range(8):
+        var count = 0
+        for m in range(6):
+            var src = _P_SRC[i][m]
+            if src == 255:
+                continue
+            var cls = 0
+            if src == 1 or src == 4:
+                cls = 1
+            elif src == 2 or src == 5:
+                cls = 2
+            if cls != vec:
+                continue
+            if count == slot:
+                var srcl = Int(src) if a_to_b else Int(src) + 8
+                t[(8 + i) if a_to_b else i] = _AES_SR_INV[srcl]
+            count += 1
+    return t
+
+
+def _mk_fl_idx(base: Int, rot: Bool, down: Bool) -> _U8x16:
+    var t = _U8x16(255)
+    for i in range(4):
+        if down:
+            t[base + i] = UInt8(base + 4 + i)
+        elif rot:
+            t[base + 4 + i] = UInt8(base + ((i + 1) % 4))
+        else:
+            t[base + 4 + i] = UInt8(base + i)
+    return t
+
+
+comptime _FL_SH_A = _mk_fl_idx(0, False, False)
+comptime _FL_SH2_A = _mk_fl_idx(0, True, False)
+comptime _FL_DOWN_A = _mk_fl_idx(0, False, True)
+comptime _FL_SH_B = _mk_fl_idx(8, False, False)
+comptime _FL_SH2_B = _mk_fl_idx(8, True, False)
+comptime _FL_DOWN_B = _mk_fl_idx(8, False, True)
+
+comptime _SWAP_HALVES = StaticTuple[Int, 16](
+    8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7
+)
+
+
+@always_inline
+def _kv_a(k: UInt64) -> _U8x16:
+    return bitcast[DType.uint8, 16](SIMD[DType.uint64, 2](k, 0))
+
+
+@always_inline
+def _kv_b(k: UInt64) -> _U8x16:
+    return bitcast[DType.uint8, 16](SIMD[DType.uint64, 2](0, k))
+
+
+@always_inline
+def _aes_sub16_raw(t: _U8x16) -> _U8x16:
+    comptime if has_arm_crypto():
+        return _aese(t, _U8x16(0))
+    else:
+        return bitcast[DType.uint8, 16](
+            _mm_aesenclast_si128(
+                bitcast[DType.uint64, 2](t), SIMD[DType.uint64, 2](0)
+            )
+        )
+
+
+@always_inline
+def _round_simd[a_to_b: Bool](mut v: _U8x16, kvec: _U8x16):
+    var x = v ^ kvec
+    var lo = x & 0x0F
+    var hi = x >> 4
+    var t = _tbl16(_PRE_LO, lo) ^ _tbl16(_PRE_HI, hi)
+    var t4 = _tbl16(_PRE4_LO, lo) ^ _tbl16(_PRE4_HI, hi)
+    t = (t & ~_M_S4V) | (t4 & _M_S4V)
+    var s = _aes_sub16_raw(t)
+    var slo = s & 0x0F
+    var shi = s >> 4
+    var yb = _tbl16(_POST_LO, slo) ^ _tbl16(_POST_HI, shi)
+    var y2 = _tbl16(_POST2_LO, slo) ^ _tbl16(_POST2_HI, shi)
+    var y3 = _tbl16(_POST3_LO, slo) ^ _tbl16(_POST3_HI, shi)
+    var acc = _U8x16(0)
+    comptime for m in range(4):
+        comptime IDXB = _mk_p_cls_idx(0, m, a_to_b)
+        acc = acc ^ _tbl16(yb, IDXB)
+    comptime for m in range(2):
+        comptime IDX2 = _mk_p_cls_idx(1, m, a_to_b)
+        comptime IDX3 = _mk_p_cls_idx(2, m, a_to_b)
+        acc = acc ^ (_tbl16(y2, IDX2) ^ _tbl16(y3, IDX3))
+    v = v ^ acc
+
+
+@always_inline
+def _fl_simd[inv: Bool, half_b: Bool](mut v: _U8x16, ke: UInt64):
+    var keb = byte_swap(ke)
+    var k1v = _kv_b(keb) if half_b else _kv_a(keb)
+    comptime if inv:
+        comptime if half_b:
+            v = v ^ _tbl16(v | k1v, _FL_DOWN_B)
+        else:
+            v = v ^ _tbl16(v | k1v, _FL_DOWN_A)
+    var t = v & k1v
+    comptime if half_b:
+        t = t & ~_mask_x2_b()
+        v = v ^ (_tbl16(t << 1, _FL_SH_B) | _tbl16(t >> 7, _FL_SH2_B))
+    else:
+        t = t & ~_mask_x2_a()
+        v = v ^ (_tbl16(t << 1, _FL_SH_A) | _tbl16(t >> 7, _FL_SH2_A))
+    comptime if not inv:
+        comptime if half_b:
+            v = v ^ _tbl16(v | k1v, _FL_DOWN_B)
+        else:
+            v = v ^ _tbl16(v | k1v, _FL_DOWN_A)
+
+
+@always_inline
+def _mask_x2_a() -> _U8x16:
+    return _U8x16(
+        0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0
     )
-    sout = (
-        (sout & ~(_LANES_S2 | _LANES_S3))
-        | (ol & _LANES_S2)
-        | (orr & _LANES_S3)
+
+
+@always_inline
+def _mask_x2_b() -> _U8x16:
+    return _U8x16(
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF
     )
 
-    var dw = UInt32(sout & 0xFFFFFFFF)
-    var uw = UInt32(sout >> 32)
-    var dr = rotate_bits_left[24](dw)
-    var da = dw ^ rotate_bits_left[16](dw)
-    var all_d = da ^ rotate_bits_left[24](da)
-    var ua = uw ^ rotate_bits_left[16](uw)
-    var uc = (ua ^ rotate_bits_left[24](ua)) ^ uw
-    var y14 = all_d ^ dr ^ uc
-    var y58 = dw ^ dr ^ uc
 
-    return byte_swap(UInt64(y14) | (UInt64(y58) << 32))
+@always_inline
+def _six_rounds_simd[forward: Bool](
+    mut v: _U8x16, cipher: CamelliaCipher, base: Int
+):
+    comptime for r in range(6):
+        var k = cipher.khw[base + (r if forward else 5 - r)]
+        comptime if r % 2 == 0:
+            _round_simd[True](v, _kv_a(k))
+        else:
+            _round_simd[False](v, _kv_b(k))
+
+
+@always_inline
+def _fl_scalar(x: UInt64, ke: UInt64) -> UInt64:
+    var x1 = UInt32(x >> 32)
+    var x2 = UInt32(x & 0xFFFFFFFF)
+    x2 ^= rotate_bits_left[1](x1 & UInt32(ke >> 32))
+    x1 ^= x2 | UInt32(ke & 0xFFFFFFFF)
+    return (UInt64(x1) << 32) | UInt64(x2)
+
+
+@always_inline
+def _flinv_scalar(y: UInt64, ke: UInt64) -> UInt64:
+    var y1 = UInt32(y >> 32)
+    var y2 = UInt32(y & 0xFFFFFFFF)
+    y1 ^= y2 | UInt32(ke & 0xFFFFFFFF)
+    y2 ^= rotate_bits_left[1](y1 & UInt32(ke >> 32))
+    return (UInt64(y1) << 32) | UInt64(y2)
 
 
 struct CamelliaCipher:
@@ -793,21 +999,113 @@ def _batch16_hw[encrypt: Bool](
         buf.store[alignment=1](blk * 16, m[_BITREV4[blk]])
 
 
+@always_inline
+def _six_rounds_one[forward: Bool](
+    mut d1: UInt64, mut d2: UInt64, cipher: CamelliaCipher, base: Int
+):
+    comptime for r in range(6):
+        var k = cipher.k[base + (r if forward else 5 - r)]
+        comptime if r % 2 == 0:
+            d2 ^= _f_one(d1, k)
+        else:
+            d1 ^= _f_one(d2, k)
+
+
+def _camellia_block_hw[encrypt: Bool](
+    cipher: CamelliaCipher, block: SIMD[DType.uint8, 16]
+) -> SIMD[DType.uint8, 16]:
+    var v = block
+
+    comptime if encrypt:
+        v = v ^ bitcast[DType.uint8, 16](
+            SIMD[DType.uint64, 2](cipher.kwhw[0], cipher.kwhw[1])
+        )
+        _six_rounds_simd[True](v, cipher, 0)
+        _fl_simd[False, False](v, cipher.ke[0])
+        _fl_simd[True, True](v, cipher.ke[1])
+        _six_rounds_simd[True](v, cipher, 6)
+        _fl_simd[False, False](v, cipher.ke[2])
+        _fl_simd[True, True](v, cipher.ke[3])
+        _six_rounds_simd[True](v, cipher, 12)
+        if not cipher.is_128:
+            _fl_simd[False, False](v, cipher.ke[4])
+            _fl_simd[True, True](v, cipher.ke[5])
+            _six_rounds_simd[True](v, cipher, 18)
+        return v.shuffle[
+            8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7
+        ]() ^ bitcast[DType.uint8, 16](
+            SIMD[DType.uint64, 2](cipher.kwhw[2], cipher.kwhw[3])
+        )
+    else:
+        v = v ^ bitcast[DType.uint8, 16](
+            SIMD[DType.uint64, 2](cipher.kwhw[2], cipher.kwhw[3])
+        )
+        if not cipher.is_128:
+            _six_rounds_simd[False](v, cipher, 18)
+            _fl_simd[False, False](v, cipher.ke[5])
+            _fl_simd[True, True](v, cipher.ke[4])
+        _six_rounds_simd[False](v, cipher, 12)
+        _fl_simd[False, False](v, cipher.ke[3])
+        _fl_simd[True, True](v, cipher.ke[2])
+        _six_rounds_simd[False](v, cipher, 6)
+        _fl_simd[False, False](v, cipher.ke[1])
+        _fl_simd[True, True](v, cipher.ke[0])
+        _six_rounds_simd[False](v, cipher, 0)
+        return v.shuffle[
+            8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7
+        ]() ^ bitcast[DType.uint8, 16](
+            SIMD[DType.uint64, 2](cipher.kwhw[0], cipher.kwhw[1])
+        )
+
+
 def _camellia_block[encrypt: Bool](
     cipher: CamelliaCipher, block: SIMD[DType.uint8, 16]
 ) -> SIMD[DType.uint8, 16]:
     comptime if _has_hw_sbox():
-        var scratch = InlineArray[UInt8, 256](fill=0)
-        var sp = scratch.unsafe_ptr()
-        sp.store[alignment=1](0, block)
-        _batch16_hw[encrypt](cipher, sp)
-        return sp.load[width=16, alignment=1](0)
+        return _camellia_block_hw[encrypt](cipher, block)
+
+    var w = bitcast[DType.uint64, 2](block)
+    var d1 = byte_swap(w[0])
+    var d2 = byte_swap(w[1])
+
+    comptime if encrypt:
+        d1 ^= cipher.kw[0]
+        d2 ^= cipher.kw[1]
+        _six_rounds_one[True](d1, d2, cipher, 0)
+        d1 = _fl_scalar(d1, cipher.ke[0])
+        d2 = _flinv_scalar(d2, cipher.ke[1])
+        _six_rounds_one[True](d1, d2, cipher, 6)
+        d1 = _fl_scalar(d1, cipher.ke[2])
+        d2 = _flinv_scalar(d2, cipher.ke[3])
+        _six_rounds_one[True](d1, d2, cipher, 12)
+        if not cipher.is_128:
+            d1 = _fl_scalar(d1, cipher.ke[4])
+            d2 = _flinv_scalar(d2, cipher.ke[5])
+            _six_rounds_one[True](d1, d2, cipher, 18)
+        return bitcast[DType.uint8, 16](
+            SIMD[DType.uint64, 2](
+                byte_swap(d2 ^ cipher.kw[2]), byte_swap(d1 ^ cipher.kw[3])
+            )
+        )
     else:
-        var buf = InlineArray[UInt8, 128](fill=0)
-        var bp = buf.unsafe_ptr()
-        bp.store[alignment=1](0, block)
-        _batch[encrypt, 1](cipher, bp)
-        return bp.load[width=16, alignment=1](0)
+        d1 ^= cipher.kw[2]
+        d2 ^= cipher.kw[3]
+        if not cipher.is_128:
+            _six_rounds_one[False](d1, d2, cipher, 18)
+            d1 = _fl_scalar(d1, cipher.ke[5])
+            d2 = _flinv_scalar(d2, cipher.ke[4])
+        _six_rounds_one[False](d1, d2, cipher, 12)
+        d1 = _fl_scalar(d1, cipher.ke[3])
+        d2 = _flinv_scalar(d2, cipher.ke[2])
+        _six_rounds_one[False](d1, d2, cipher, 6)
+        d1 = _fl_scalar(d1, cipher.ke[1])
+        d2 = _flinv_scalar(d2, cipher.ke[0])
+        _six_rounds_one[False](d1, d2, cipher, 0)
+        return bitcast[DType.uint8, 16](
+            SIMD[DType.uint64, 2](
+                byte_swap(d2 ^ cipher.kw[0]), byte_swap(d1 ^ cipher.kw[1])
+            )
+        )
 
 
 def _camellia_blocks[encrypt: Bool](

@@ -500,7 +500,7 @@ def main() raises:
 
     var any_leak = False
 
-	print("symmetric:")
+    print("symmetric:")
     if run_camellia_block(rng):
         any_leak = True
     if run_aes_sw(rng):
@@ -510,7 +510,7 @@ def main() raises:
     if run_kcipher2(rng):
         any_leak = True
 
-	print("hashes/mac: ")
+    print("hashes/mac: ")
     if _run_hash(0, "sha-256 (fixed/random msg)", rng):
         any_leak = True
     if _run_hash(1, "sha-512 (fixed/random msg)", rng):
@@ -524,7 +524,7 @@ def main() raises:
     if run_hmac(rng):
         any_leak = True
 
-	print("asymmetric:")
+    print("asymmetric:")
     if run_x25519(rng):
         any_leak = True
     if run_ed25519(rng):

@@ -2,7 +2,7 @@
 AES-NI implementation
 """
 
-from std.collections import List
+from std.collections import List, InlineArray
 from std.sys import llvm_intrinsic, CompilationTarget
 from std.memory import alloc, bitcast, memset_zero, memcpy, UnsafePointer, Span
 from std.utils import StaticTuple
@@ -182,273 +182,93 @@ def x86_aes_encrypt_256_direct(
     state = _mm_aesenclast_si128(state, keys[14])
 
 
+@always_inline
+def _arm_load_keys[N: Int](
+    round_keys: UnsafePointer[UInt32, MutAnyOrigin]
+) -> InlineArray[SIMD16, N]:
+    var keys = InlineArray[SIMD16, N](uninitialized=True)
+    comptime for i in range(N):
+        var raw = (round_keys + i * 4).bitcast[UInt8]().load[
+            width=16, alignment=1
+        ]()
+        keys[i] = raw.shuffle[
+            3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12
+        ]()
+    return keys
+
+
+@always_inline
+def _arm_enc_block[NR: Int](
+    x0: SIMD16, keys: InlineArray[SIMD16, NR + 1]
+) -> SIMD16:
+    var x = x0
+    comptime for r in range(NR - 1):
+        x = _aesmc(_aese(x, keys[r]))
+    x = _aese(x, keys[NR - 1])
+    return x ^ keys[NR]
+
+
 def arm_aes_encrypt_128(
     pt: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
 ) -> None:
-    var state = SIMD16(
-        pt.load(0), pt.load(1), pt.load(2), pt.load(3),
-        pt.load(4), pt.load(5), pt.load(6), pt.load(7),
-        pt.load(8), pt.load(9), pt.load(10), pt.load(11),
-        pt.load(12), pt.load(13), pt.load(14), pt.load(15)
-    )
-    
-    var keys = StaticTuple[SIMD16, 11](
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-    )
-    
-    comptime for i in range(11):
-        var w0 = round_keys.load(i * 4)
-        var w1 = round_keys.load(i * 4 + 1)
-        var w2 = round_keys.load(i * 4 + 2)
-        var w3 = round_keys.load(i * 4 + 3)
-        
-        var key = SIMD16(
-            UInt8((w0 >> 24) & 0xff), UInt8((w0 >> 16) & 0xff),
-            UInt8((w0 >> 8) & 0xff), UInt8(w0 & 0xff),
-            UInt8((w1 >> 24) & 0xff), UInt8((w1 >> 16) & 0xff),
-            UInt8((w1 >> 8) & 0xff), UInt8(w1 & 0xff),
-            UInt8((w2 >> 24) & 0xff), UInt8((w2 >> 16) & 0xff),
-            UInt8((w2 >> 8) & 0xff), UInt8(w2 & 0xff),
-            UInt8((w3 >> 24) & 0xff), UInt8((w3 >> 16) & 0xff),
-            UInt8((w3 >> 8) & 0xff), UInt8(w3 & 0xff)
-        )
-        keys[i] = key
-    
-    var result = state
-    result = _aese(result, keys[0])
-    result = _aesmc(result)
-    
-    result = _aese(result, keys[1])
-    result = _aesmc(result)
-    result = _aese(result, keys[2])
-    result = _aesmc(result)
-    result = _aese(result, keys[3])
-    result = _aesmc(result)
-    result = _aese(result, keys[4])
-    result = _aesmc(result)
-    result = _aese(result, keys[5])
-    result = _aesmc(result)
-    result = _aese(result, keys[6])
-    result = _aesmc(result)
-    result = _aese(result, keys[7])
-    result = _aesmc(result)
-    result = _aese(result, keys[8])
-    result = _aesmc(result)
-    result = _aese(result, keys[9])
-    result = result ^ keys[10]
-    
-    pt.store(0, result[0])
-    pt.store(1, result[1])
-    pt.store(2, result[2])
-    pt.store(3, result[3])
-    pt.store(4, result[4])
-    pt.store(5, result[5])
-    pt.store(6, result[6])
-    pt.store(7, result[7])
-    pt.store(8, result[8])
-    pt.store(9, result[9])
-    pt.store(10, result[10])
-    pt.store(11, result[11])
-    pt.store(12, result[12])
-    pt.store(13, result[13])
-    pt.store(14, result[14])
-    pt.store(15, result[15])
+    var keys = _arm_load_keys[11](round_keys)
+    var x = pt.load[width=16, alignment=1](0)
+    pt.store[alignment=1](0, _arm_enc_block[10](x, keys))
 
 
 def arm_aes_encrypt_192(
     pt: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
 ) -> None:
-    var state = SIMD16(
-        pt.load(0), pt.load(1), pt.load(2), pt.load(3),
-        pt.load(4), pt.load(5), pt.load(6), pt.load(7),
-        pt.load(8), pt.load(9), pt.load(10), pt.load(11),
-        pt.load(12), pt.load(13), pt.load(14), pt.load(15)
-    )
-    
-    var keys = StaticTuple[SIMD16, 13](
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-    )
-    
-    comptime for i in range(13):
-        var w0 = round_keys.load(i * 4)
-        var w1 = round_keys.load(i * 4 + 1)
-        var w2 = round_keys.load(i * 4 + 2)
-        var w3 = round_keys.load(i * 4 + 3)
-        
-        var key = SIMD16(
-            UInt8((w0 >> 24) & 0xff), UInt8((w0 >> 16) & 0xff),
-            UInt8((w0 >> 8) & 0xff), UInt8(w0 & 0xff),
-            UInt8((w1 >> 24) & 0xff), UInt8((w1 >> 16) & 0xff),
-            UInt8((w1 >> 8) & 0xff), UInt8(w1 & 0xff),
-            UInt8((w2 >> 24) & 0xff), UInt8((w2 >> 16) & 0xff),
-            UInt8((w2 >> 8) & 0xff), UInt8(w2 & 0xff),
-            UInt8((w3 >> 24) & 0xff), UInt8((w3 >> 16) & 0xff),
-            UInt8((w3 >> 8) & 0xff), UInt8(w3 & 0xff)
-        )
-        keys[i] = key
-    
-    var result = state
-    result = _aese(result, keys[0])
-    result = _aesmc(result)
-    
-    result = _aese(result, keys[1])
-    result = _aesmc(result)
-    result = _aese(result, keys[2])
-    result = _aesmc(result)
-    result = _aese(result, keys[3])
-    result = _aesmc(result)
-    result = _aese(result, keys[4])
-    result = _aesmc(result)
-    result = _aese(result, keys[5])
-    result = _aesmc(result)
-    result = _aese(result, keys[6])
-    result = _aesmc(result)
-    result = _aese(result, keys[7])
-    result = _aesmc(result)
-    result = _aese(result, keys[8])
-    result = _aesmc(result)
-    result = _aese(result, keys[9])
-    result = _aesmc(result)
-    result = _aese(result, keys[10])
-    result = _aesmc(result)
-    result = _aese(result, keys[11])
-    result = result ^ keys[12]
-    
-    pt.store(0, result[0])
-    pt.store(1, result[1])
-    pt.store(2, result[2])
-    pt.store(3, result[3])
-    pt.store(4, result[4])
-    pt.store(5, result[5])
-    pt.store(6, result[6])
-    pt.store(7, result[7])
-    pt.store(8, result[8])
-    pt.store(9, result[9])
-    pt.store(10, result[10])
-    pt.store(11, result[11])
-    pt.store(12, result[12])
-    pt.store(13, result[13])
-    pt.store(14, result[14])
-    pt.store(15, result[15])
+    var keys = _arm_load_keys[13](round_keys)
+    var x = pt.load[width=16, alignment=1](0)
+    pt.store[alignment=1](0, _arm_enc_block[12](x, keys))
+
 
 def arm_aes_encrypt_256(
     pt: UnsafePointer[UInt8, MutAnyOrigin],
     round_keys: UnsafePointer[UInt32, MutAnyOrigin]
 ) -> None:
-    var state = SIMD16(
-        pt.load(0), pt.load(1), pt.load(2), pt.load(3),
-        pt.load(4), pt.load(5), pt.load(6), pt.load(7),
-        pt.load(8), pt.load(9), pt.load(10), pt.load(11),
-        pt.load(12), pt.load(13), pt.load(14), pt.load(15)
-    )
-    
-    var keys = StaticTuple[SIMD16, 15](
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        SIMD16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-    )
-    
-    comptime for i in range(15):
-        var w0 = round_keys.load(i * 4)
-        var w1 = round_keys.load(i * 4 + 1)
-        var w2 = round_keys.load(i * 4 + 2)
-        var w3 = round_keys.load(i * 4 + 3)
-        
-        var key = SIMD16(
-            UInt8((w0 >> 24) & 0xff), UInt8((w0 >> 16) & 0xff),
-            UInt8((w0 >> 8) & 0xff), UInt8(w0 & 0xff),
-            UInt8((w1 >> 24) & 0xff), UInt8((w1 >> 16) & 0xff),
-            UInt8((w1 >> 8) & 0xff), UInt8(w1 & 0xff),
-            UInt8((w2 >> 24) & 0xff), UInt8((w2 >> 16) & 0xff),
-            UInt8((w2 >> 8) & 0xff), UInt8(w2 & 0xff),
-            UInt8((w3 >> 24) & 0xff), UInt8((w3 >> 16) & 0xff),
-            UInt8((w3 >> 8) & 0xff), UInt8(w3 & 0xff)
-        )
-        keys[i] = key
-    
-    var result = state
-    result = _aese(result, keys[0])
-    result = _aesmc(result)
-    
-    result = _aese(result, keys[1])
-    result = _aesmc(result)
-    result = _aese(result, keys[2])
-    result = _aesmc(result)
-    result = _aese(result, keys[3])
-    result = _aesmc(result)
-    result = _aese(result, keys[4])
-    result = _aesmc(result)
-    result = _aese(result, keys[5])
-    result = _aesmc(result)
-    result = _aese(result, keys[6])
-    result = _aesmc(result)
-    result = _aese(result, keys[7])
-    result = _aesmc(result)
-    result = _aese(result, keys[8])
-    result = _aesmc(result)
-    result = _aese(result, keys[9])
-    result = _aesmc(result)
-    result = _aese(result, keys[10])
-    result = _aesmc(result)
-    result = _aese(result, keys[11])
-    result = _aesmc(result)
-    result = _aese(result, keys[12])
-    result = _aesmc(result)
-    result = _aese(result, keys[13])
-    result = result ^ keys[14]
-    
-    pt.store(0, result[0])
-    pt.store(1, result[1])
-    pt.store(2, result[2])
-    pt.store(3, result[3])
-    pt.store(4, result[4])
-    pt.store(5, result[5])
-    pt.store(6, result[6])
-    pt.store(7, result[7])
-    pt.store(8, result[8])
-    pt.store(9, result[9])
-    pt.store(10, result[10])
-    pt.store(11, result[11])
-    pt.store(12, result[12])
-    pt.store(13, result[13])
-    pt.store(14, result[14])
-    pt.store(15, result[15])
+    var keys = _arm_load_keys[15](round_keys)
+    var x = pt.load[width=16, alignment=1](0)
+    pt.store[alignment=1](0, _arm_enc_block[14](x, keys))
+
+@always_inline
+def _arm_ecb_loop[NR: Int](
+    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    num_blocks: Int,
+) -> None:
+    var keys = _arm_load_keys[NR + 1](round_keys)
+    var i = 0
+    while i + 4 <= num_blocks:
+        var p = input_ptr + i * 16
+        var b0 = p.load[width=16, alignment=1](0)
+        var b1 = p.load[width=16, alignment=1](16)
+        var b2 = p.load[width=16, alignment=1](32)
+        var b3 = p.load[width=16, alignment=1](48)
+        comptime for r in range(NR - 1):
+            b0 = _aesmc(_aese(b0, keys[r]))
+            b1 = _aesmc(_aese(b1, keys[r]))
+            b2 = _aesmc(_aese(b2, keys[r]))
+            b3 = _aesmc(_aese(b3, keys[r]))
+        b0 = _aese(b0, keys[NR - 1]) ^ keys[NR]
+        b1 = _aese(b1, keys[NR - 1]) ^ keys[NR]
+        b2 = _aese(b2, keys[NR - 1]) ^ keys[NR]
+        b3 = _aese(b3, keys[NR - 1]) ^ keys[NR]
+        var q = output_ptr + i * 16
+        q.store[alignment=1](0, b0)
+        q.store[alignment=1](16, b1)
+        q.store[alignment=1](32, b2)
+        q.store[alignment=1](48, b3)
+        i += 4
+    while i < num_blocks:
+        var x = (input_ptr + i * 16).load[width=16, alignment=1](0)
+        (output_ptr + i * 16).store[alignment=1](0, _arm_enc_block[NR](x, keys))
+        i += 1
+
 
 @always_inline
 def arm_aes_ecb_kernel(
@@ -458,28 +278,35 @@ def arm_aes_ecb_kernel(
     num_blocks: Int,
     rounds: Int
 ) -> None:
-    var temp_block = StackBuffer[UInt8, 16]()
-    var tp = temp_block.ptr()
+    if rounds == 10:
+        _arm_ecb_loop[10](input_ptr, output_ptr, round_keys, num_blocks)
+    elif rounds == 12:
+        _arm_ecb_loop[12](input_ptr, output_ptr, round_keys, num_blocks)
+    else:
+        _arm_ecb_loop[14](input_ptr, output_ptr, round_keys, num_blocks)
 
+
+@always_inline
+def _arm_cbc_loop[NR: Int](
+    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    num_blocks: Int,
+    iv_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+) -> None:
+    var keys = _arm_load_keys[NR + 1](round_keys)
+    var prev = iv_ptr.load[width=16, alignment=1](0)
+    var src = input_ptr
+    var dst = output_ptr
     var i = 0
     while i < num_blocks:
-        var block_ptr = input_ptr + i * 16
-        var out_ptr = output_ptr + i * 16
-
-        for j in range(16):
-            tp.store(j, block_ptr.load(j))
-
-        if rounds == 10:
-            arm_aes_encrypt_128(tp, round_keys)
-        elif rounds == 12:
-            arm_aes_encrypt_192(tp, round_keys)
-        else:
-            arm_aes_encrypt_256(tp, round_keys)
-
-        for j in range(16):
-            out_ptr.store(j, tp.load(j))
-
+        var x = src.load[width=16, alignment=1](0) ^ prev
+        prev = _arm_enc_block[NR](x, keys)
+        dst.store[alignment=1](0, prev)
+        src += 16
+        dst += 16
         i += 1
+
 
 @always_inline
 def arm_aes_cbc_kernel(
@@ -490,72 +317,12 @@ def arm_aes_cbc_kernel(
     iv_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int
 ) -> None:
-    var prev_block = StaticTuple[UInt8, 16](
-        iv_ptr[0], iv_ptr[1], iv_ptr[2], iv_ptr[3],
-        iv_ptr[4], iv_ptr[5], iv_ptr[6], iv_ptr[7],
-        iv_ptr[8], iv_ptr[9], iv_ptr[10], iv_ptr[11],
-        iv_ptr[12], iv_ptr[13], iv_ptr[14], iv_ptr[15]
-    )
-    var temp_block = StackBuffer[UInt8, 16]()
-    var tp = temp_block.ptr()
-
-    var i = 0
-    while i < num_blocks:
-        var block_ptr = input_ptr + i * 16
-        var out_ptr = output_ptr + i * 16
-
-        for j in range(16):
-            tp.store(j, block_ptr.load(j) ^ prev_block[j])
-
-        if rounds == 10:
-            arm_aes_encrypt_128(tp, round_keys)
-        elif rounds == 12:
-            arm_aes_encrypt_192(tp, round_keys)
-        else:
-            arm_aes_encrypt_256(tp, round_keys)
-
-        for j in range(16):
-            var c = tp.load(j)
-            out_ptr.store(j, c)
-            prev_block[j] = c
-
-        i += 1
-
-def gf_mul2_xts(val: UInt8) -> UInt8:
-    var result = val << 1
-    if (val & 0x80) != 0:
-        result = result ^ 0x87
-    return result
-
-def compute_xts_tweak(tweak_bytes: List[UInt8]) -> List[UInt8]:
-    var result = List[UInt8](capacity=16)
-    for i in range(16):
-        result.append(tweak_bytes[i])
-    
-    var carry = False
-    for i in range(16):
-        var new_carry = (result[i] & 0x80) != 0
-        result[i] = gf_mul2_xts(result[i])
-        if carry:
-            result[i] = result[i] ^ 1
-        carry = new_carry
-    
-    return result^
-
-def compute_xts_tweak_list(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> StackBuffer[UInt8, 16]:
-    var result = StackBuffer[UInt8, 16]()
-    var carry = UInt8(0)
-
-    for i in range(16):
-        var b = tweak_ptr.load(i)
-        var next_carry = b >> 7
-        result[i] = (b << 1) | carry
-        carry = next_carry
-
-    if carry != 0:
-        result[0] = result[0] ^ 0x87
-
-    return result
+    if rounds == 10:
+        _arm_cbc_loop[10](input_ptr, output_ptr, round_keys, num_blocks, iv_ptr)
+    elif rounds == 12:
+        _arm_cbc_loop[12](input_ptr, output_ptr, round_keys, num_blocks, iv_ptr)
+    else:
+        _arm_cbc_loop[14](input_ptr, output_ptr, round_keys, num_blocks, iv_ptr)
 
 @always_inline
 def arm_aes_xts_kernel(
@@ -567,39 +334,33 @@ def arm_aes_xts_kernel(
     tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int
 ) -> None:
-    var tweak = StackBuffer[UInt8, 16]()
-    var tp = tweak.ptr()
-    for j in range(16):
-        tp.store(j, tweak_ptr[j])
-    
+    var tweak = tweak_ptr.load[width=16, alignment=1](0)
     if rounds == 10:
-        arm_aes_encrypt_128(tp, round_keys2)
+        tweak = _arm_enc_block[10](tweak, _arm_load_keys[11](round_keys2))
     else:
-        arm_aes_encrypt_256(tp, round_keys2)
-    
-    var i = 0
-    while i < num_blocks:
-        var in_block = input_ptr + i * 16
-        var out_block = output_ptr + i * 16
-        
-        var xored = StackBuffer[UInt8, 16]()
-        var xp = xored.ptr()
-        for j in range(16):
-            xp.store(j, in_block.load(j) ^ tp.load(j))
-        
-        if rounds == 10:
-            arm_aes_encrypt_128(xp, round_keys1)
-        else:
-            arm_aes_encrypt_256(xp, round_keys1)
-        
-        for j in range(16):
-            out_block.store(j, xp.load(j) ^ tp.load(j))
-        
-        var next_tweak = compute_xts_tweak_list(tp)
-        for j in range(16):
-            tp.store(j, next_tweak[j])
-        
-        i += 1
+        tweak = _arm_enc_block[14](tweak, _arm_load_keys[15](round_keys2))
+    if rounds == 10:
+        var keys = _arm_load_keys[11](round_keys1)
+        var i = 0
+        while i < num_blocks:
+            var x = (input_ptr + i * 16).load[width=16, alignment=1](0) ^ tweak
+            x = _arm_enc_block[10](x, keys) ^ tweak
+            (output_ptr + i * 16).store[alignment=1](0, x)
+            tweak = bitcast[DType.uint8, 16](
+                _gf_mul2_xts_simd(bitcast[DType.uint64, 2](tweak))
+            )
+            i += 1
+    else:
+        var keys = _arm_load_keys[15](round_keys1)
+        var i = 0
+        while i < num_blocks:
+            var x = (input_ptr + i * 16).load[width=16, alignment=1](0) ^ tweak
+            x = _arm_enc_block[14](x, keys) ^ tweak
+            (output_ptr + i * 16).store[alignment=1](0, x)
+            tweak = bitcast[DType.uint8, 16](
+                _gf_mul2_xts_simd(bitcast[DType.uint64, 2](tweak))
+            )
+            i += 1
 
 @always_inline
 def x86_aes_ecb_kernel(
@@ -747,6 +508,21 @@ def _hw_gcm_ctr_kernel(
     j0_ptr: UnsafePointer[UInt8, MutAnyOrigin],
     rounds: Int
 ) -> None:
+    comptime if has_arm_crypto():
+        if rounds == 10:
+            _arm_gcm_ctr_loop[10](
+                input_ptr, output_ptr, round_keys, num_blocks, j0_ptr
+            )
+        elif rounds == 12:
+            _arm_gcm_ctr_loop[12](
+                input_ptr, output_ptr, round_keys, num_blocks, j0_ptr
+            )
+        else:
+            _arm_gcm_ctr_loop[14](
+                input_ptr, output_ptr, round_keys, num_blocks, j0_ptr
+            )
+        return
+
     var counter_block = StackBuffer[UInt8, 16]()
     var cp = counter_block.ptr()
 
@@ -760,6 +536,52 @@ def _hw_gcm_ctr_kernel(
         for j in range(16):
             out_block.store(j, in_block.load(j) ^ cp.load(j))
 
+        i += 1
+
+
+@always_inline
+def _arm_gcm_ctr_loop[NR: Int](
+    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    num_blocks: Int,
+    j0_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+) -> None:
+    var keys = _arm_load_keys[NR + 1](round_keys)
+    var ctr = StackBuffer[UInt8, 64]()
+    var cp = ctr.ptr()
+    var i = 0
+    while i + 4 <= num_blocks:
+        _write_gcm_counter(cp, j0_ptr, i)
+        _write_gcm_counter(cp + 16, j0_ptr, i + 1)
+        _write_gcm_counter(cp + 32, j0_ptr, i + 2)
+        _write_gcm_counter(cp + 48, j0_ptr, i + 3)
+        var b0 = cp.load[width=16, alignment=1](0)
+        var b1 = cp.load[width=16, alignment=1](16)
+        var b2 = cp.load[width=16, alignment=1](32)
+        var b3 = cp.load[width=16, alignment=1](48)
+        comptime for r in range(NR - 1):
+            b0 = _aesmc(_aese(b0, keys[r]))
+            b1 = _aesmc(_aese(b1, keys[r]))
+            b2 = _aesmc(_aese(b2, keys[r]))
+            b3 = _aesmc(_aese(b3, keys[r]))
+        b0 = _aese(b0, keys[NR - 1]) ^ keys[NR]
+        b1 = _aese(b1, keys[NR - 1]) ^ keys[NR]
+        b2 = _aese(b2, keys[NR - 1]) ^ keys[NR]
+        b3 = _aese(b3, keys[NR - 1]) ^ keys[NR]
+        var p = input_ptr + i * 16
+        var q = output_ptr + i * 16
+        q.store[alignment=1](0, p.load[width=16, alignment=1](0) ^ b0)
+        q.store[alignment=1](16, p.load[width=16, alignment=1](16) ^ b1)
+        q.store[alignment=1](32, p.load[width=16, alignment=1](32) ^ b2)
+        q.store[alignment=1](48, p.load[width=16, alignment=1](48) ^ b3)
+        i += 4
+    while i < num_blocks:
+        _write_gcm_counter(cp, j0_ptr, i)
+        var ks = _arm_enc_block[NR](cp.load[width=16, alignment=1](0), keys)
+        (output_ptr + i * 16).store[alignment=1](
+            0, (input_ptr + i * 16).load[width=16, alignment=1](0) ^ ks
+        )
         i += 1
 
 

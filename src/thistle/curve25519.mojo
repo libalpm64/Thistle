@@ -136,85 +136,28 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
 
     @always_inline
     def __add__(self, other: FieldElement51) -> FieldElement51:
-        var a0 = self.limbs[0] + other.limbs[0]
-        var a1 = self.limbs[1] + other.limbs[1]
-        var a2 = self.limbs[2] + other.limbs[2]
-        var a3 = self.limbs[3] + other.limbs[3]
-        var a4 = self.limbs[4] + other.limbs[4]
-        
-        var carry0 = a0 >> 51
-        a0 = a0 & 0x7FFFFFFFFFFFF
-        a1 = a1 + carry0
-        
-        var carry1 = a1 >> 51
-        a1 = a1 & 0x7FFFFFFFFFFFF
-        a2 = a2 + carry1
-        
-        var carry2 = a2 >> 51
-        a2 = a2 & 0x7FFFFFFFFFFFF
-        a3 = a3 + carry2
-        
-        var carry3 = a3 >> 51
-        a3 = a3 & 0x7FFFFFFFFFFFF
-        a4 = a4 + carry3
-        
-        var carry4 = a4 >> 51
-        a4 = a4 & 0x7FFFFFFFFFFFF
-        
-        a0 = a0 + carry4 * 19
-        var carry5 = a0 >> 51
-        a0 = a0 & 0x7FFFFFFFFFFFF
-        a1 = a1 + carry5
-        
-        # Final carry propagation
-        var carry6 = a1 >> 51
-        a1 = a1 & 0x7FFFFFFFFFFFF
-        a2 = a2 + carry6
-        
-        var carry7 = a2 >> 51
-        a2 = a2 & 0x7FFFFFFFFFFFF
-        a3 = a3 + carry7
-        
-        var carry8 = a3 >> 51
-        a3 = a3 & 0x7FFFFFFFFFFFF
-        a4 = a4 + carry8
-        
-        var carry9 = a4 >> 51
-        a4 = a4 & 0x7FFFFFFFFFFFF
-        a0 = a0 + carry9 * 19
-        
-        return FieldElement51(a0, a1, a2, a3, a4)
+        return FieldElement51(
+            self.limbs[0] + other.limbs[0],
+            self.limbs[1] + other.limbs[1],
+            self.limbs[2] + other.limbs[2],
+            self.limbs[3] + other.limbs[3],
+            self.limbs[4] + other.limbs[4],
+        )
 
     @always_inline
     def __sub__(self, other: FieldElement51) -> FieldElement51:
         var l = InlineArray[UInt64, 5](uninitialized=True)
-        # Add 2*p to ensure results are positive
-        # p_limbs = [2^51-19, 2^51-1, 2^51-1, 2^51-1, 2^51-1]
-        # 2*p_limbs = [2^52-38, 2^52-2, 2^52-2, 2^52-2, 2^52-2]
-        l[0] = (self.limbs[0] + 0xFFFFFFFFFFFDA) - other.limbs[0]
-        l[1] = (self.limbs[1] + 0xFFFFFFFFFFFFE) - other.limbs[1]
-        l[2] = (self.limbs[2] + 0xFFFFFFFFFFFFE) - other.limbs[2]
-        l[3] = (self.limbs[3] + 0xFFFFFFFFFFFFE) - other.limbs[3]
-        l[4] = (self.limbs[4] + 0xFFFFFFFFFFFFE) - other.limbs[4]
-        return self._carry_reduce_from_limbs(l)
-
-    @always_inline
-    def _carry_reduce_from_limbs(self, limbs: InlineArray[UInt64, 5]) -> FieldElement51:
-        var l = limbs
+        l[0] = (self.limbs[0] + 0x7FFFFFFFFFFED0) - other.limbs[0]
+        l[1] = (self.limbs[1] + 0x7FFFFFFFFFFFF0) - other.limbs[1]
+        l[2] = (self.limbs[2] + 0x7FFFFFFFFFFFF0) - other.limbs[2]
+        l[3] = (self.limbs[3] + 0x7FFFFFFFFFFFF0) - other.limbs[3]
+        l[4] = (self.limbs[4] + 0x7FFFFFFFFFFFF0) - other.limbs[4]
         var MASK = UInt64(0x7FFFFFFFFFFFF)
-        
-        for _ in range(2):
-            l[1] += l[0] >> 51
-            l[0] = l[0] & MASK
-            l[2] += l[1] >> 51
-            l[1] = l[1] & MASK
-            l[3] += l[2] >> 51
-            l[2] = l[2] & MASK
-            l[4] += l[3] >> 51
-            l[3] = l[3] & MASK
-            l[0] += (l[4] >> 51) * 19
-            l[4] = l[4] & MASK
-        
+        l[1] += l[0] >> 51; l[0] &= MASK
+        l[2] += l[1] >> 51; l[1] &= MASK
+        l[3] += l[2] >> 51; l[2] &= MASK
+        l[4] += l[3] >> 51; l[3] &= MASK
+        l[0] += (l[4] >> 51) * 19; l[4] &= MASK
         return FieldElement51(l)
 
     @always_inline
@@ -303,6 +246,22 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         var t19 = t18 * t13
         var t20 = t19.pow2k[5]()
         return t20 * t3
+
+    @always_inline
+    def pow_p58(self) -> FieldElement51:
+        var t0 = self.square()
+        var t1 = t0.pow2k[2]()
+        var t2 = self * t1
+        var t3 = t0 * t2
+        var t5 = t2 * t3.square()
+        var t7 = t5.pow2k[5]() * t5
+        var t9 = t7.pow2k[10]() * t7
+        var t11 = t9.pow2k[20]() * t9
+        var t13 = t11.pow2k[10]() * t7
+        var t15 = t13.pow2k[50]() * t13
+        var t17 = t15.pow2k[100]() * t15
+        var t19 = t17.pow2k[50]() * t13
+        return t19.pow2k[2]() * self
 
     @always_inline
     def pow2k[exp: Int](self) -> FieldElement51:
