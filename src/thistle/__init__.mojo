@@ -18,12 +18,22 @@ from .aes_ni import has_aes_ni, aes_gcm_ctr_kernel, aes_gcm_encrypt, aes_gcm_dec
 from .aes_gpu import aes_gpu_kernel_ecb, aes_gpu_kernel_ctr, aes_gpu_kernel_gcm
 from .camellia import CamelliaCipher
 from .chacha20 import ChaCha20, chacha20_block
+from .poly1305 import Poly1305, poly1305_mac
+from .chacha20poly1305 import (
+    chacha20_poly1305_encrypt, chacha20_poly1305_decrypt,
+    xchacha20_poly1305_encrypt, xchacha20_poly1305_decrypt,
+    hchacha20,
+)
 from .kcipher2 import KCipher2
 
 from .x25519 import x25519
 from .ed25519 import ed25519_generate_public_key, ed25519_sign, ed25519_verify
 from .p256 import p256_public_key, p256_ecdh, P256_SIZE, P256_POINT_SIZE
 from .p384 import p384_public_key, p384_ecdh, P384_SIZE, P384_POINT_SIZE
+from .rsa import (
+    RsaPublicKey, rsa_pss_verify, rsa_pss_sha256_verify,
+    rsa_pss_sha384_verify, rsa_pss_sha512_verify,
+)
 
 from .ml_kem import mlkem512_keygen, mlkem768_keygen, mlkem1024_keygen
 from .ml_kem import mlkem512_encaps, mlkem768_encaps, mlkem1024_encaps

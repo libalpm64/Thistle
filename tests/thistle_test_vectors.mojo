@@ -24,6 +24,12 @@ from thistle.camellia import (
     camellia_ctr_kernel,
 )
 from thistle.chacha20 import ChaCha20
+from thistle.chacha20poly1305 import (
+    chacha20_poly1305_encrypt,
+    chacha20_poly1305_decrypt,
+    xchacha20_poly1305_encrypt,
+    xchacha20_poly1305_decrypt,
+)
 from thistle.kcipher2 import KCipher2
 from thistle.pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
 from thistle.aes import (
@@ -747,6 +753,86 @@ def test_aes_gcm(data: PythonObject, py: PythonObject) raises -> TestResult:
     return TestResult(passed, failed, failures^)
 
 
+def test_chacha20_poly1305(data: PythonObject, py: PythonObject, xchacha: Bool) raises -> TestResult:
+    var passed, failed = 0, 0
+    var failures = List[String]()
+    var name = "XChaCha20-Poly1305 tc" if xchacha else "ChaCha20-Poly1305 tc"
+    for g in data["testGroups"]:
+        for t in g["tests"]:
+            var tc_id = String(t["tcId"])
+            var key = hex_to_bytes(String(t["key"]))
+            var iv = hex_to_bytes(String(t["iv"]))
+            var aad = hex_to_bytes(String(t["aad"]))
+            var msg = hex_to_bytes(String(t["msg"]))
+            var ct = hex_to_bytes(String(t["ct"]))
+            var tag = hex_to_bytes(String(t["tag"]))
+            var valid = String(t["result"]) == "valid"
+            var n = len(msg)
+
+            var out_ct = List[UInt8](capacity=n + 1)
+            var out_pt = List[UInt8](capacity=n + 1)
+            for _ in range(n + 1):
+                out_ct.append(0)
+                out_pt.append(0)
+            var out_tag = List[UInt8](capacity=16)
+            for _ in range(16):
+                out_tag.append(0)
+
+            var enc_matches = False
+            var dec_ok = False
+            try:
+                if xchacha:
+                    xchacha20_poly1305_encrypt(
+                        Span[UInt8, ...](key), Span[UInt8, ...](iv), Span[UInt8, ...](aad),
+                        Span[UInt8, ...](msg), out_ct.unsafe_ptr(), out_tag.unsafe_ptr(),
+                    )
+                else:
+                    chacha20_poly1305_encrypt(
+                        Span[UInt8, ...](key), Span[UInt8, ...](iv), Span[UInt8, ...](aad),
+                        Span[UInt8, ...](msg), out_ct.unsafe_ptr(), out_tag.unsafe_ptr(),
+                    )
+                enc_matches = len(ct) == n and len(tag) == 16
+                for i in range(n):
+                    if out_ct[i] != ct[i]:
+                        enc_matches = False
+                if enc_matches:
+                    for i in range(16):
+                        if out_tag[i] != tag[i]:
+                            enc_matches = False
+            except:
+                enc_matches = False
+
+            try:
+                if xchacha:
+                    dec_ok = xchacha20_poly1305_decrypt(
+                        Span[UInt8, ...](key), Span[UInt8, ...](iv), Span[UInt8, ...](aad),
+                        Span[UInt8, ...](ct), Span[UInt8, ...](tag), out_pt.unsafe_ptr(),
+                    )
+                else:
+                    dec_ok = chacha20_poly1305_decrypt(
+                        Span[UInt8, ...](key), Span[UInt8, ...](iv), Span[UInt8, ...](aad),
+                        Span[UInt8, ...](ct), Span[UInt8, ...](tag), out_pt.unsafe_ptr(),
+                    )
+                if dec_ok:
+                    for i in range(len(ct)):
+                        if i < n and out_pt[i] != msg[i]:
+                            dec_ok = False
+            except:
+                dec_ok = False
+
+            var ok: Bool
+            if valid:
+                ok = enc_matches and dec_ok
+            else:
+                ok = not dec_ok
+            if ok:
+                passed += 1
+            else:
+                failed += 1
+                failures.append(name + tc_id)
+    return TestResult(passed, failed, failures^)
+
+
 def _expand_aes_key(key: List[UInt8]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
     var kp = alloc[UInt8](len(key))
     for i in range(len(key)):
@@ -1033,6 +1119,38 @@ def main() raises:
         )
     except e:
         print("AES-CPU-Modes [error] " + String(e))
+        af = True
+    print()
+
+    try:
+        print("Loading ChaCha20-Poly1305 Wycheproof vectors...")
+        print_result(
+            "ChaCha20-Poly1305",
+            test_chacha20_poly1305(
+                load_json("tests/Wycheproof/chacha20_poly1305_test.json", py), py, False
+            ),
+            tp,
+            tf,
+            af,
+        )
+    except e:
+        print("ChaCha20-Poly1305 [error] " + String(e))
+        af = True
+    print()
+
+    try:
+        print("Loading XChaCha20-Poly1305 Wycheproof vectors...")
+        print_result(
+            "XChaCha20-Poly1305",
+            test_chacha20_poly1305(
+                load_json("tests/Wycheproof/xchacha20_poly1305_test.json", py), py, True
+            ),
+            tp,
+            tf,
+            af,
+        )
+    except e:
+        print("XChaCha20-Poly1305 [error] " + String(e))
         af = True
     print()
 
