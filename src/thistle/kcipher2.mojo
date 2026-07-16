@@ -3,6 +3,7 @@ KCipher-2 stream cipher implemented in Mojo.
 """
 
 from std.memory import bitcast
+from .utils import transpose8x8
 from .aes_ni import (
     _aese,
     _aesmc,
@@ -48,21 +49,6 @@ def _amul4(b: SIMD[DType.uint32, 4]) -> SIMD[DType.uint32, 4]:
     r ^= (zero - ((b >> 6) & 1)) & AMUL_BASIS_6
     r ^= (zero - ((b >> 7) & 1)) & AMUL_BASIS_7
     return r
-
-
-@always_inline
-def _transpose8x8(x0: UInt64) -> UInt64:
-	# Transpose 8x8 bit (credit: Hacker's Delight for pattern)
-    # bit j of output byte i = bit i of input byte j.
-	# See Chapter 7 on rearranging bits and bytes for Involution.
-    var x = x0
-    var t = (x ^ (x >> 7)) & 0x00AA00AA00AA00AA
-    x = x ^ t ^ (t << 7)
-    t = (x ^ (x >> 14)) & 0x0000CCCC0000CCCC
-    x = x ^ t ^ (t << 14)
-    t = (x ^ (x >> 28)) & 0x00000000F0F0F0F0
-    x = x ^ t ^ (t << 28)
-    return x
 
 
 @always_inline
@@ -251,8 +237,8 @@ def _sub_k2_x4_bitsliced(
     w0: UInt32, w1: UInt32, w2: UInt32, w3: UInt32
 ) -> SIMD[DType.uint32, 4]:
     # Attempt to defeat SROA
-    var tlo = _transpose8x8(UInt64(w0) | (UInt64(w1) << 32))
-    var thi = _transpose8x8(UInt64(w2) | (UInt64(w3) << 32))
+    var tlo = transpose8x8(UInt64(w0) | (UInt64(w1) << 32))
+    var thi = transpose8x8(UInt64(w2) | (UInt64(w3) << 32))
     var p = InlineArray[UInt32, 8](fill=0)
 
     comptime for j in range(8):
@@ -291,8 +277,8 @@ def _sub_k2_x4_bitsliced(
     comptime for j in range(8):
         olo |= UInt64(q[j] & 0xFF) << UInt64(8 * j)
         ohi |= UInt64((q[j] >> 8) & 0xFF) << UInt64(8 * j)
-    olo = _transpose8x8(olo)
-    ohi = _transpose8x8(ohi)
+    olo = transpose8x8(olo)
+    ohi = transpose8x8(ohi)
 
     return SIMD[DType.uint32, 4](
         UInt32(olo & 0xFFFFFFFF),

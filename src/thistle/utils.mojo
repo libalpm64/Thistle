@@ -1,3 +1,6 @@
+from std.bit import byte_swap
+
+
 struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
     var _data: InlineArray[Self.ElementType, Self.size]
 
@@ -187,6 +190,97 @@ struct StackBuffer[T: Copyable & ImplicitlyDestructible, N: Int](Movable):
     def ptr(mut self) -> UnsafePointer[Self.T, MutAnyOrigin]:
         return self._data.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
 
-    @always_inline
-    def const_ptr(mut self) -> UnsafePointer[Self.T, MutAnyOrigin]:
-        return self.ptr()
+
+@always_inline
+def load_32be(ptr: UnsafePointer[UInt8, ImmutAnyOrigin], offset: Int) -> UInt32:
+    return byte_swap((ptr + offset).bitcast[UInt32]().load[width=1, alignment=1]())
+
+
+@always_inline
+def load_64be(ptr: UnsafePointer[UInt8, ImmutAnyOrigin], offset: Int) -> UInt64:
+    return byte_swap((ptr + offset).bitcast[UInt64]().load[width=1, alignment=1]())
+
+
+@always_inline
+def store_64be(p: UnsafePointer[UInt8, MutAnyOrigin], off: Int, v: UInt64):
+    for i in range(8):
+        p[off + i] = UInt8((v >> UInt64(56 - 8 * i)) & 0xFF)
+
+
+@always_inline
+def transpose8x8(x0: UInt64) -> UInt64:
+    # Transpose an 8x8 bit matrix: bit j of output byte i = bit i of input byte j.
+    # (Hacker's Delight, chapter 7, rearranging bits and bytes.)
+    var x = x0
+    var t = (x ^ (x >> 7)) & 0x00AA00AA00AA00AA
+    x ^= t ^ (t << 7)
+    t = (x ^ (x >> 14)) & 0x0000CCCC0000CCCC
+    x ^= t ^ (t << 14)
+    t = (x ^ (x >> 28)) & 0x00000000F0F0F0F0
+    x ^= t ^ (t << 28)
+    return x
+
+
+@always_inline
+def u64_nonzero_choice(x: UInt64) -> UInt64:
+    return ((x | (UInt64(0) - x)) >> UInt64(63)) & UInt64(1)
+
+
+@always_inline
+def u64_zero_choice(x: UInt64) -> UInt64:
+    return u64_nonzero_choice(x) ^ UInt64(1)
+
+
+def zero_stack_u8(mut data: StackBuffer[UInt8, ...]):
+    var ptr = data.ptr()
+    for i in range(data.len()):
+        ptr.store[volatile=True](i, UInt8(0))
+    data.clear()
+
+
+@always_inline
+def nibble_to_hex_char(nibble: UInt8) -> UInt8:
+    """Convert a nibble (0-15) to its hex character ASCII value."""
+    if nibble < 10:
+        return nibble + 0x30
+    else:
+        return nibble - 10 + 0x61
+
+
+@always_inline
+def bytes_to_hex_simd(data: UnsafePointer[UInt8, ImmutAnyOrigin], len: Int) -> String:
+    var result = String(capacity=len * 2)
+    for i in range(len):
+        var b = data[i]
+        result += chr(Int(nibble_to_hex_char((b >> 4) & 0x0F)))
+        result += chr(Int(nibble_to_hex_char(b & 0x0F)))
+    return result
+
+
+def bytes_to_hex(data: List[UInt8]) -> String:
+    """Convert a byte list to a hexadecimal string."""
+    return bytes_to_hex_simd(data.unsafe_ptr(), len(data))
+
+
+def bytes_to_hex(data: Span[UInt8, ...]) -> String:
+    """Convert a byte span to a hexadecimal string."""
+    return bytes_to_hex_simd(data.unsafe_ptr(), len(data))
+
+
+def bytes_to_hex(data: SIMD[DType.uint8, 16]) -> String:
+    """Convert a 16-byte SIMD vector to a hexadecimal string."""
+    var result = String(capacity=32)
+    for i in range(16):
+        var b = data[i]
+        result += chr(Int(nibble_to_hex_char((b >> 4) & 0x0F)))
+        result += chr(Int(nibble_to_hex_char(b & 0x0F)))
+    return result
+
+
+def string_to_bytes(s: String) -> List[UInt8]:
+    """Convert a string to a list of bytes."""
+    var bytes = s.as_bytes()
+    var data = List[UInt8](capacity=len(bytes))
+    for i in range(len(bytes)):
+        data.append(bytes[i])
+    return data^

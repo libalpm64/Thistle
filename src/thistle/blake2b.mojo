@@ -5,6 +5,7 @@ RFC 7693
 
 from std.collections import List
 from std.memory import UnsafePointer, alloc, memcpy, memset_zero
+from .utils import bytes_to_hex, string_to_bytes
 
 comptime BLAKE2B_IV = SIMD[DType.uint64, 8](
     0x6A09E667F3BCC908,
@@ -77,16 +78,6 @@ def round_fn[r: Int](
     v3, v4, v9, v14 = g(v3, v4, v9, v14, _mload(m, Int(s[14])), _mload(m, Int(s[15])))
 
     return (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15)
-
-
-@always_inline
-def zero_buffer(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
-    memset_zero(ptr, len)
-
-@always_inline
-def zero_and_free(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
-    zero_buffer(ptr, len)
-    ptr.free()
 
 
 struct Blake2b(Movable):
@@ -267,32 +258,6 @@ struct Blake2b(Movable):
             output.append(0)
         self.finalize_into(output.unsafe_ptr())
         return output^
-
-
-def nibble_to_hex_char(nibble: UInt8) -> UInt8:
-    if nibble < 10:
-        return nibble + 0x30
-    else:
-        return nibble - 10 + 0x61
-
-
-def bytes_to_hex(data: List[UInt8]) -> String:
-    var result = String(capacity=len(data) * 2)
-    for i in range(len(data)):
-        var b = data[i]
-        var high = (b >> 4) & 0x0F
-        var low = b & 0x0F
-        result += chr(Int(nibble_to_hex_char(high)))
-        result += chr(Int(nibble_to_hex_char(low)))
-    return result
-
-
-def string_to_bytes(s: String) -> List[UInt8]:
-    var data = List[UInt8]()
-    var bytes = s.as_bytes()
-    for i in range(len(bytes)):
-        data.append(bytes[i])
-    return data^
 
 
 def blake2b_hash(data: Span[UInt8, ...], out_len: Int = 64) raises -> List[UInt8]:

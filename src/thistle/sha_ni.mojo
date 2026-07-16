@@ -116,11 +116,6 @@ def Load(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]) -> SIMD128:
 
 
 @always_inline("nodebug")
-def Load_aligned(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]) -> SIMD128:
-    return byte_swap32(ptr.bitcast[UInt32]().load[width=4, alignment=16]())
-
-
-@always_inline("nodebug")
 def prefetch_next_block(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]):
     prefetch[PrefetchOptions().for_read().high_locality().to_data_cache()](ptr + 64)
 
@@ -341,11 +336,6 @@ comptime SHA512NI_K = SIMD[DType.uint64, 80](
     0x113F9804BEF90DAE, 0x1B710B35131C471B, 0x28DB77F523047D84, 0x32CAAB7B40C72493, 0x3C9EBE0A15C9BEBC,
     0x431D67C49C100D4C, 0x4CC5D4BECB3E42B6, 0x597F299CFC657E2A, 0x5FCB6FAB3AD6FAEC, 0x6C44198C4A475817,
 )
-
-
-@always_inline
-def has_arm_sha512() -> Bool:
-    return CompilationTarget.has_neon() and CompilationTarget._has_feature["sha3"]() and not CompilationTarget.is_x86()
 
 
 @always_inline("nodebug")

@@ -16,9 +16,9 @@ Thistle is a high-performance Crypto Library written in Mojo.
 * **KCipher-2**
 * **ML-KEM/ML-DSA**
 * **AES-GPU** (ECB/CTR/GCM)
-* **AES-NI** (XTS/CBC/ECB/CTR/GCM/ECB/CTR)
-* **AES-Software** (XTS/CBC/ECB/CTR/GCM/ECB/CTR/AHEAD)
-* **ECDSA** (ED25519/X25519)
+* **AES-NI** (XTS/CBC/ECB/CTR/GCM)
+* **AES-Software** (XTS/CBC/ECB/CTR/GCM)
+* **Ed25519/X25519**
 * **ECDH** (NIST P-256, P-384)
 * **RSA-PSS**
 

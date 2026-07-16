@@ -10,6 +10,7 @@ from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
 from std.sys import CompilationTarget
 from .sha_ni import sha512ni_transform_blocks, sha256ni_transform_blocks
+from .utils import nibble_to_hex_char, bytes_to_hex, string_to_bytes, load_32be, load_64be
 
 comptime SHA256_K = SIMD[DType.uint32, 64](
     0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5, 0x3956C25B,
@@ -135,101 +136,6 @@ comptime SHA384Config = SHA2Config[
 ]
 
 
-@always_inline
-def ch_generic[WordType: DType](x: SIMD[WordType, 1], y: SIMD[WordType, 1], z: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
-    return (x & y) ^ ((~x) & z)
-
-
-@always_inline
-def maj_generic[WordType: DType](x: SIMD[WordType, 1], y: SIMD[WordType, 1], z: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
-    return (x & y) ^ (x & z) ^ (y & z)
-
-
-@always_inline
-def sigma0_generic[WordType: DType](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
-    comptime if WordType == DType.uint32:
-        return SIMD[WordType, 1](rotate_bits_right[2](x[0]) ^ rotate_bits_right[13](x[0]) ^ rotate_bits_right[22](x[0]))
-    else:
-        return SIMD[WordType, 1](rotate_bits_right[28](x[0]) ^ rotate_bits_right[34](x[0]) ^ rotate_bits_right[39](x[0]))
-
-
-@always_inline
-def sigma1_generic[WordType: DType](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
-    comptime if WordType == DType.uint32:
-        return SIMD[WordType, 1](rotate_bits_right[6](x[0]) ^ rotate_bits_right[11](x[0]) ^ rotate_bits_right[25](x[0]))
-    else:
-        return SIMD[WordType, 1](rotate_bits_right[14](x[0]) ^ rotate_bits_right[18](x[0]) ^ rotate_bits_right[41](x[0]))
-
-
-@always_inline
-def small_sigma0_generic[WordType: DType](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
-    comptime if WordType == DType.uint32:
-        return SIMD[WordType, 1](rotate_bits_right[7](x[0]) ^ rotate_bits_right[18](x[0]) ^ (x[0] >> 3))
-    else:
-        return SIMD[WordType, 1](rotate_bits_right[1](x[0]) ^ rotate_bits_right[8](x[0]) ^ (x[0] >> 7))
-
-
-@always_inline
-def small_sigma1_generic[WordType: DType](x: SIMD[WordType, 1]) -> SIMD[WordType, 1]:
-    comptime if WordType == DType.uint32:
-        return SIMD[WordType, 1](rotate_bits_right[17](x[0]) ^ rotate_bits_right[19](x[0]) ^ (x[0] >> 10))
-    else:
-        return SIMD[WordType, 1](rotate_bits_right[19](x[0]) ^ rotate_bits_right[61](x[0]) ^ (x[0] >> 6))
-
-
-@always_inline
-def nibble_to_hex_char(nibble: UInt8) -> UInt8:
-    """Convert a nibble (0-15) to its hex character ASCII value."""
-    if nibble < 10:
-        return nibble + 0x30
-    else:
-        return nibble - 10 + 0x61
-
-
-def bytes_to_hex(data: List[UInt8]) -> String:
-    """Convert a byte list to a hexadecimal string."""
-    var result = String(capacity=len(data) * 2)
-    for i in range(len(data)):
-        var b = data[i]
-        var high = (b >> 4) & 0x0F
-        var low = b & 0x0F
-        result += chr(Int(nibble_to_hex_char(high)))
-        result += chr(Int(nibble_to_hex_char(low)))
-    return result
-
-
-def bytes_to_hex(data: SIMD[DType.uint8, 16]) -> String:
-    """Convert a 16-byte SIMD vector to a hexadecimal string."""
-    var result = String(capacity=32)
-    for i in range(16):
-        var b = data[i]
-        var high = (b >> 4) & 0x0F
-        var low = b & 0x0F
-        result += chr(Int(nibble_to_hex_char(high)))
-        result += chr(Int(nibble_to_hex_char(low)))
-    return result
-
-
-def bytes_to_hex(data: Span[UInt8, ...]) -> String:
-    """Convert a byte span to a hexadecimal string."""
-    var result = String(capacity=len(data) * 2)
-    for i in range(len(data)):
-        var b = data[i]
-        var high = (b >> 4) & 0x0F
-        var low = b & 0x0F
-        result += chr(Int(nibble_to_hex_char(high)))
-        result += chr(Int(nibble_to_hex_char(low)))
-    return result
-
-
-def string_to_bytes(s: String) -> List[UInt8]:
-    """Convert a string to a list of bytes."""
-    var bytes = s.as_bytes()
-    var data = List[UInt8](capacity=len(bytes))
-    for i in range(len(bytes)):
-        data.append(bytes[i])
-    return data^
-
 comptime SHA256_IV = SIMD[DType.uint32, 8](
     0x6A09E667,
     0xBB67AE85,
@@ -273,25 +179,6 @@ comptime SHA384_IV = SIMD[DType.uint64, 8](
     0xDB0C2E0D64F98FA7,
     0x47B5481DBEFA4FA4,
 )
-
-@always_inline
-def zero_buffer(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
-    memset_zero(ptr, len)
-
-
-@always_inline
-def load_32be(ptr: UnsafePointer[UInt8, ImmutAnyOrigin], offset: Int) -> UInt32:
-    return byte_swap((ptr + offset).bitcast[UInt32]().load[width=1, alignment=1]())
-
-
-@always_inline
-def load_64be(ptr: UnsafePointer[UInt8, ImmutAnyOrigin], offset: Int) -> UInt64:
-    return byte_swap((ptr + offset).bitcast[UInt64]().load[width=1, alignment=1]())
-
-@always_inline
-def zero_and_free(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
-    zero_buffer(ptr, len)
-    ptr.free()
 
 struct SHA256Context(Movable):
     var state: SIMD[DType.uint32, 8]

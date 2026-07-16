@@ -5,7 +5,7 @@ FIPS 202
 
 from std.collections import List
 from std.memory import UnsafePointer, memcpy, memset_zero
-from .utils import StackBuffer
+from .utils import StackBuffer, bytes_to_hex, string_to_bytes
 from std.bit import rotate_bits_left
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
@@ -25,12 +25,6 @@ comptime KECCAK_RC = SIMD[DType.uint64, 24](
     0x8000000080008081, 0x8000000000008080,
     0x0000000080000001, 0x8000000080008008,
 )
-
-comptime HEX_CHARS = SIMD[DType.uint8, 16](
-    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
-    0x38, 0x39, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66,
-)
-
 
 @always_inline
 def rotl64[n: Int](x: UInt64) -> UInt64:
@@ -340,36 +334,6 @@ def _keccak_f1600_scalar(state: UnsafePointer[UInt64, MutAnyOrigin]):
     state[24] = a24
 
 
-@always_inline
-def nibble_to_hex_char(nibble: UInt8) -> UInt8:
-    if nibble < 10:
-        return nibble + 0x30
-    else:
-        return nibble - 10 + 0x61
-
-
-@always_inline
-def bytes_to_hex_simd(data: UnsafePointer[UInt8, ImmutAnyOrigin], len: Int) -> String:
-    var result = String(capacity=len * 2)
-    for i in range(len):
-        var b = data[i]
-        result += chr(Int(nibble_to_hex_char((b >> 4) & 0x0F)))
-        result += chr(Int(nibble_to_hex_char(b & 0x0F)))
-    return result
-
-
-def bytes_to_hex(data: List[UInt8]) -> String:
-    return bytes_to_hex_simd(data.unsafe_ptr(), len(data))
-
-
-def string_to_bytes(s: String) -> List[UInt8]:
-    var bytes = s.as_bytes()
-    var data = List[UInt8](capacity=len(bytes))
-    for i in range(len(bytes)):
-        data.append(bytes[i])
-    return data^
-
-
 struct SHA3Context(Movable):
     var state: StackBuffer[UInt64, 25]
     var rate_bytes: Int
@@ -583,39 +547,6 @@ def shake_finalize(mut ctx: SHA3Context):
     ctx.buffer[ctx.rate_bytes - 1] |= 0x80
     sha3_absorb_block(ctx.state.ptr(), ctx.buffer.ptr(), ctx.rate_bytes)
     ctx.buffer_len = 0
-
-
-@always_inline
-def shake_squeeze_block_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...]):
-    output.clear()
-    output.set_len_unchecked(ctx.rate_bytes)
-    memcpy(
-        dest=output.ptr(),
-        src=ctx.state.ptr().bitcast[UInt8](),
-        count=ctx.rate_bytes,
-    )
-    keccak_f1600(ctx.state.ptr())
-
-
-@always_inline
-def shake_squeeze_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], output_len: Int):
-    output.clear()
-    output.set_len_unchecked(output_len)
-
-    var offset = 0
-    while offset < output_len:
-        var limit = ctx.rate_bytes
-        if output_len - offset < limit:
-            limit = output_len - offset
-
-        memcpy(
-            dest=output.ptr() + offset,
-            src=ctx.state.ptr().bitcast[UInt8](),
-            count=limit,
-        )
-
-        offset += limit
-        keccak_f1600(ctx.state.ptr())
 
 
 @always_inline

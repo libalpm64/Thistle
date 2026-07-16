@@ -3,6 +3,7 @@ NIST P-256 / secp256r1 implementation.
 """
 
 from .p256_table import p256_base_table
+from .utils import u64_nonzero_choice, u64_zero_choice
 
 comptime P256_SIZE = 32
 comptime P256_POINT_SIZE = 65
@@ -187,12 +188,6 @@ def _add_mod(a: U256, b: U256) -> U256:
 @always_inline
 def _sub_mod(a: U256, b: U256) -> U256:
     return _sub_mod(a, b, _p())
-
-
-@always_inline
-def _add_small_mod(a: U256, small: UInt64, m: U256) -> U256:
-    var b = U256(small, 0, 0, 0)
-    return _add_mod(a, b, m)
 
 
 @always_inline
@@ -539,36 +534,11 @@ def _select_u256(a: U256, b: U256, choice: UInt64) -> U256:
 
 
 @always_inline
-def _select_jacobian(
-    a: P256JacobianPoint, b: P256JacobianPoint, choice: UInt64
-) -> P256JacobianPoint:
-    var infinity = a.infinity
-    if choice != 0:
-        infinity = b.infinity
-    return P256JacobianPoint(
-        _select_u256(a.x, b.x, choice),
-        _select_u256(a.y, b.y, choice),
-        _select_u256(a.z, b.z, choice),
-        infinity,
-    )
-
-
-@always_inline
-def _u64_nonzero_choice(x: UInt64) -> UInt64:
-    return ((x | (UInt64(0) - x)) >> UInt64(63)) & UInt64(1)
-
-
-@always_inline
-def _u64_zero_choice(x: UInt64) -> UInt64:
-    return _u64_nonzero_choice(x) ^ UInt64(1)
-
-
-@always_inline
 def _u256_zero_choice(x: U256) -> UInt64:
     var acc: UInt64 = 0
     comptime for i in range(4):
         acc |= x.limbs[i]
-    return _u64_zero_choice(acc)
+    return u64_zero_choice(acc)
 
 
 @always_inline
@@ -743,12 +713,12 @@ def _scalar_mult(k: U256, p: P256Point) -> P256Point:
         var qx = tx[0]
         var qy = ty[0]
         for i in range(1, 15):
-            var hit = _u64_zero_choice(UInt64(i + 1) ^ d)
+            var hit = u64_zero_choice(UInt64(i + 1) ^ d)
             qx = _select_u256(qx, tx[i], hit)
             qy = _select_u256(qy, ty[i], hit)
 
         var added = _jacobian_add_affine_ct(acc, P256Point(qx, qy, False))
-        acc = _select_jacobian_ct(acc, added, _u64_nonzero_choice(d))
+        acc = _select_jacobian_ct(acc, added, u64_nonzero_choice(d))
     return _jacobian_to_affine(acc)
 
 
@@ -759,7 +729,7 @@ def _base_table_entry(
     var qx = U256()
     var qy = U256()
     for t in range(1, 16):
-        var hit = _u64_zero_choice(UInt64(t) ^ d)
+        var hit = u64_zero_choice(UInt64(t) ^ d)
         var base = (j * 15 + (t - 1)) * 8
         var ex = U256(tptr[base], tptr[base + 1], tptr[base + 2], tptr[base + 3])
         var ey = U256(tptr[base + 4], tptr[base + 5], tptr[base + 6], tptr[base + 7])
@@ -778,7 +748,7 @@ def _scalar_mult_base(k: U256) -> P256Point:
         var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
         var q = _base_table_entry(tptr, i >> 1, d)
         var added = _jacobian_add_affine_ct(acc, q)
-        acc = _select_jacobian_ct(acc, added, _u64_nonzero_choice(d))
+        acc = _select_jacobian_ct(acc, added, u64_nonzero_choice(d))
 
     acc = _jacobian_double_ct(acc)
     acc = _jacobian_double_ct(acc)
@@ -789,7 +759,7 @@ def _scalar_mult_base(k: U256) -> P256Point:
         var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
         var q = _base_table_entry(tptr, i >> 1, d)
         var added = _jacobian_add_affine_ct(acc, q)
-        acc = _select_jacobian_ct(acc, added, _u64_nonzero_choice(d))
+        acc = _select_jacobian_ct(acc, added, u64_nonzero_choice(d))
 
     return _jacobian_to_affine(acc)
 

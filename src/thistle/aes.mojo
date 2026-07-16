@@ -674,14 +674,6 @@ def cpu_aes_ct_encrypt4(
     _ct_encrypt_blocks[1](blocks, skey.unsafe_ptr(), rounds)
 
 
-def cpu_aes_ct_encrypt8(
-    blocks: UnsafePointer[UInt8, MutAnyOrigin],
-    skey: List[UInt64],
-    rounds: Int,
-) -> None:
-    _ct_encrypt_blocks[2](blocks, skey.unsafe_ptr(), rounds)
-
-
 def cpu_aes_ct_encrypt16(
     blocks: UnsafePointer[UInt8, MutAnyOrigin],
     skey: List[UInt64],

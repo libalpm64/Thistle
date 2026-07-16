@@ -8,6 +8,7 @@ from std.collections import InlineArray
 from std.sys import llvm_intrinsic
 from std.utils import StaticTuple
 from .aes import _ct_sbox, _ct_ortho, _ctr_write_block
+from .utils import transpose8x8
 from .aes_ni import (
     _aese,
     _mm_aesenclast_si128,
@@ -265,18 +266,6 @@ def _wipe_u64(ptr: UnsafePointer[UInt64, MutAnyOrigin], count: Int):
 
 
 @always_inline
-def _transpose8x8(x0: UInt64) -> UInt64:
-    var x = x0
-    var t = (x ^ (x >> 7)) & 0x00AA00AA00AA00AA
-    x ^= t ^ (t << 7)
-    t = (x ^ (x >> 14)) & 0x0000CCCC0000CCCC
-    x ^= t ^ (t << 14)
-    t = (x ^ (x >> 28)) & 0x00000000F0F0F0F0
-    x ^= t ^ (t << 28)
-    return x
-
-
-@always_inline
 def _p_tail(sout0: UInt64) -> UInt64:
     var sout = sout0
     var ol = ((sout << 1) & ~_BIT0_OF_EACH_BYTE) | ((sout >> 7) & _BIT0_OF_EACH_BYTE)
@@ -324,7 +313,7 @@ def _f_scalar(f_in: UInt64, ke: UInt64) -> UInt64:
     var rol1 = ((pin << 1) & ~_BIT0_OF_EACH_BYTE) | ((pin >> 7) & _BIT0_OF_EACH_BYTE)
     pin = (pin & ~_LANES_S4) | (rol1 & _LANES_S4)
 
-    var xt = _transpose8x8(pin)
+    var xt = transpose8x8(pin)
     var q = InlineArray[SIMD[DType.uint64, 1], 8](fill=0)
     comptime for k in range(8):
         q[k] = (xt >> UInt64(8 * k)) & 0xFF
@@ -353,7 +342,7 @@ def _f_scalar(f_in: UInt64, ke: UInt64) -> UInt64:
     var packed: UInt64 = 0
     comptime for k in range(8):
         packed |= (UInt64(b[k]) & 0xFF) << UInt64(8 * k)
-    return _p_tail(_transpose8x8(packed))
+    return _p_tail(transpose8x8(packed))
 
 
 @always_inline

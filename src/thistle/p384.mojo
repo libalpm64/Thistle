@@ -3,6 +3,7 @@ NIST P-384 / secp384r1 implementation.
 """
 
 from .p384_table import p384_base_table
+from .utils import u64_nonzero_choice, u64_zero_choice
 
 comptime P384_SIZE = 48
 comptime P384_POINT_SIZE = 97
@@ -214,12 +215,6 @@ def _add_mod(a: U384, b: U384) -> U384:
 @always_inline
 def _sub_mod(a: U384, b: U384) -> U384:
     return _sub_mod(a, b, _p())
-
-
-@always_inline
-def _add_small_mod(a: U384, small: UInt64, m: U384) -> U384:
-    var b = U384(small, 0, 0, 0, 0, 0)
-    return _add_mod(a, b, m)
 
 
 @always_inline
@@ -484,36 +479,11 @@ def _select_u384(a: U384, b: U384, choice: UInt64) -> U384:
 
 
 @always_inline
-def _select_jacobian(
-    a: P384JacobianPoint, b: P384JacobianPoint, choice: UInt64
-) -> P384JacobianPoint:
-    var infinity = a.infinity
-    if choice != 0:
-        infinity = b.infinity
-    return P384JacobianPoint(
-        _select_u384(a.x, b.x, choice),
-        _select_u384(a.y, b.y, choice),
-        _select_u384(a.z, b.z, choice),
-        infinity,
-    )
-
-
-@always_inline
-def _u64_nonzero_choice(x: UInt64) -> UInt64:
-    return ((x | (UInt64(0) - x)) >> UInt64(63)) & UInt64(1)
-
-
-@always_inline
-def _u64_zero_choice(x: UInt64) -> UInt64:
-    return _u64_nonzero_choice(x) ^ UInt64(1)
-
-
-@always_inline
 def _u384_zero_choice(x: U384) -> UInt64:
     var acc: UInt64 = 0
     comptime for i in range(6):
         acc |= x.limbs[i]
-    return _u64_zero_choice(acc)
+    return u64_zero_choice(acc)
 
 
 @always_inline
@@ -674,277 +644,12 @@ def _scalar_mult(k: U384, p: P384Point) -> P384Point:
         var qx = tx[0]
         var qy = ty[0]
         for i in range(1, 15):
-            var hit = _u64_zero_choice(UInt64(i + 1) ^ d)
+            var hit = u64_zero_choice(UInt64(i + 1) ^ d)
             qx = _select_u384(qx, tx[i], hit)
             qy = _select_u384(qy, ty[i], hit)
 
         var added = _jacobian_add_affine_ct(acc, P384Point(qx, qy, False))
-        acc = _select_jacobian_ct(acc, added, _u64_nonzero_choice(d))
-    return _jacobian_to_affine(acc)
-
-
-def _scalar_mult_generator(k: U384) -> P384Point:
-    var tx = InlineArray[U384, 15](uninitialized=True)
-    var ty = InlineArray[U384, 15](uninitialized=True)
-    tx[0] = U384(
-        0x3DD0756649C0B528,
-        0x20E378E2A0D6CE38,
-        0x879C3AFC541B4D6E,
-        0x6454868459A30EFF,
-        0x812FF723614EDE2B,
-        0x4D3AADC2299E1513,
-    )
-    tx[1] = U384(
-        0xC8229E55783DDE91,
-        0x8E6C8F2E022B53F0,
-        0x3504E6F0FF9D48A1,
-        0xDA821495F0687F50,
-        0x9C90A4FD2DE4B506,
-        0xDB93B776427460C3,
-    )
-    tx[2] = U384(
-        0x05E4DBE6C1DC4073,
-        0xC54EA9FFF04F779C,
-        0x6B2034E9A170CCF0,
-        0x3A48D732D51C6C3E,
-        0xE36F7E2D263AA470,
-        0xD283FE68E7C1C3AC,
-    )
-    tx[3] = U384(
-        0x0AAE8477EBB68F2C,
-        0x30594CCBEE0421E3,
-        0x2E4F153B0AECAC46,
-        0x078358D4736400AD,
-        0xFB40F647D685D979,
-        0xCFEEE6DD34179228,
-    )
-    tx[4] = U384(
-        0xBB595EBA68F1F0DF,
-        0xC185C0CBCC873466,
-        0x7F1EB1B5293C703B,
-        0x60DB2CF5AACC05E6,
-        0xC676B987E2E8E4C6,
-        0xE1BB26B11D178FFB,
-    )
-    tx[5] = U384(
-        0x7EB5C9317D56DAD8,
-        0xCB2454B339D3413A,
-        0xEC52930F580D57F2,
-        0x2A33F6661BDF6015,
-        0x4F0F6A962B02D33B,
-        0xC482E189F0430C40,
-    )
-    tx[6] = U384(
-        0xDF13B9D17D69222B,
-        0x4CE6415F874774B1,
-        0x731EDCF8211FAA95,
-        0x5F4215D1659753ED,
-        0xF893DB589DB2DF55,
-        0x932C9F811C89025B,
-    )
-    tx[7] = U384(
-        0x23F60A05DD9BCBBA,
-        0x9E336DE5AE9B587A,
-        0x1C5C2E7193D7E30F,
-        0x1D9AEBD64F3DDB37,
-        0x1C7B5FE116B66423,
-        0x5DB4F184349CD9B1,
-    )
-    tx[8] = U384(
-        0x2F5D200E2353B92F,
-        0xE35D87293FD7E4F9,
-        0x26094833A96D745D,
-        0xDC351DC13CBFFF3F,
-        0x26D464C6DAD54D6A,
-        0x5CAB1D1D53636C6A,
-    )
-    tx[9] = U384(
-        0x845539D3C8D99C02,
-        0x2A15A9A6E58D6787,
-        0xE9F6368EAB225FA3,
-        0x54A612D7EB32CABE,
-        0xC2F646025C4845EC,
-        0xA91A5280DB1C212E,
-    )
-    tx[10] = U384(
-        0xC7708B19B68B8C7D,
-        0x4532077C44377ABA,
-        0x0DCC67706CDAD64F,
-        0x01B8BF56147B6602,
-        0xF8D89885F0561D79,
-        0x9C19E9FC7BA9C437,
-    )
-    tx[11] = U384(
-        0x3DB8477270313DE0,
-        0xD4258CC55D970420,
-        0x03ACED26C8EDFEE1,
-        0xF67EB42235D77D83,
-        0x523C40DBCF9AB45C,
-        0x627B415F9C35B26D,
-    )
-    tx[12] = U384(
-        0x9B7AEB7E75CCBDFB,
-        0xB25E28C5F6749A95,
-        0x8A7A8E4633B7D4AE,
-        0xDB5203A8D9C1BD56,
-        0xD2657265ED22DF97,
-        0xB51C56E18CF23C94,
-    )
-    tx[13] = U384(
-        0x5865E5018F75244C,
-        0xD02225FB01EC909F,
-        0xCA6B1AF8B1F85C2A,
-        0x44CE05FF88957166,
-        0x8058994C5710C0C9,
-        0x46D227C432F6B1BA,
-    )
-    tx[14] = U384(
-        0x446AD8884709F4A9,
-        0x2B7210E2EC3DABD8,
-        0x83CCF19550E07B34,
-        0x59500917789B3075,
-        0x0FC01FD4EB085993,
-        0xFB62D26F4903026B,
-    )
-    ty[0] = U384(
-        0x23043DAD4B03A4FE,
-        0xA1BFA8BF7BB4A9AC,
-        0x8BADE7562E83B050,
-        0xC6C3521968F4FFD9,
-        0xDD8002263969A840,
-        0x2B78ABC25A15C5E9,
-    )
-    ty[1] = U384(
-        0x42EA84633140BFDA,
-        0xE8E8E4A8C2AACCD8,
-        0x15E4F18BDC588258,
-        0x09F1FE415172BAD9,
-        0x070D430900B0E684,
-        0xE34947F7123DF0C2,
-    )
-    ty[2] = U384(
-        0x7E284821C04EE157,
-        0x92D789A77AE0E36D,
-        0x132663C04EF67446,
-        0x68012D5AD2E1D0B4,
-        0xF6DB68B15102B339,
-        0x465465FC983292AF,
-    )
-    ty[3] = U384(
-        0x54F3E8E79B3A03B2,
-        0xE74BB7F17BFEC97E,
-        0x8E3E61A34C542AD1,
-        0x147162D30418C693,
-        0xE607B9E33820017D,
-        0x50946875303DF319,
-    )
-    ty[4] = U384(
-        0x2B694BA07073FA21,
-        0x22C16E2E72F34566,
-        0x80B61B3101C35B99,
-        0x4B237FAF982C0411,
-        0xE6C5944024DE236D,
-        0x4DB1C9D6E209E4A3,
-    )
-    ty[5] = U384(
-        0x3F62B16EA7B08203,
-        0x739AC69D5B3D4DCE,
-        0x8BD4BFFCB79E33B0,
-        0x93C9E5F61B546F05,
-        0x586D8EDEDF21559A,
-        0xC9962152AF2A9EBA,
-    )
-    ty[6] = U384(
-        0x0996B2207706A61E,
-        0x135349D5A8641C79,
-        0x65AAD76F50130844,
-        0x0FF37C0401FFF780,
-        0xF57F238E693B0706,
-        0xD90A16B6AF6C9B3E,
-    )
-    ty[7] = U384(
-        0x0D2CFE83E6655A44,
-        0x836DBB36B7E55E87,
-        0x701754BF7D8686E4,
-        0xE9923263A42DBBA2,
-        0x7008D943C48ECF0E,
-        0x3C0C6DD70D27EF61,
-    )
-    ty[8] = U384(
-        0xF2813072B18EC0B0,
-        0x3777E270D742AA2F,
-        0x27F061C7033CA7C2,
-        0xA6ECACCC68EAD0D8,
-        0x7D9429F4EE69A754,
-        0xE770633431E8F5C6,
-    )
-    ty[9] = U384(
-        0xBB971F78E67B5FCE,
-        0x03A530EB13B9E85C,
-        0x592AC0BA794EABFD,
-        0x81961B8CCFD7FD1D,
-        0x3E03370A47A9B8AA,
-        0x6EB995BEC80174E8,
-    )
-    ty[10] = U384(
-        0x764EB146BDC4BA25,
-        0x604FE46BAC144B83,
-        0x3CE813298A77E780,
-        0x2E070F36FE9E682E,
-        0x41821D0C3A53287A,
-        0x9AA62F9F3533F918,
-    )
-    ty[11] = U384(
-        0xFACC45E48BE55ED8,
-        0x80D60AF627AA651A,
-        0x8C79848FD0E102AC,
-        0x40C64A4E66BED5AF,
-        0x0329EAB1F7942F0E,
-        0x0C6E430EF9C4AF3D,
-    )
-    ty[12] = U384(
-        0xF4D394596C3D812D,
-        0xD8E88F1A87CAE0C2,
-        0x789A2A48CF4D0FE3,
-        0xB7FEAC2DFEC38D60,
-        0x81FDBD1C3B490EC3,
-        0x4617ADB7CC6979E1,
-    )
-    ty[13] = U384(
-        0xBE4B4A9003CB68E5,
-        0x540B8B82730A99D1,
-        0x1ECC8585E11DBBBF,
-        0x72445345D9C3B691,
-        0x647D24DB13690A74,
-        0x4429839DDEFBADF5,
-    )
-    ty[14] = U384(
-        0x2309CC9D6FE989BB,
-        0x61609CBD144BD586,
-        0x4B23D3A0DE06610C,
-        0xDDDC2866D898F470,
-        0x8733FC41400C5797,
-        0x5A68C6FED0BC2716,
-    )
-
-    var acc = _jacobian_infinity()
-    for w in range(95, -1, -1):
-        if w != 95:
-            acc = _jacobian_double_ct(acc)
-            acc = _jacobian_double_ct(acc)
-            acc = _jacobian_double_ct(acc)
-            acc = _jacobian_double_ct(acc)
-
-        var d = (k.limbs[w >> 4] >> UInt64(4 * (w & 15))) & UInt64(0xF)
-        var qx = tx[0]
-        var qy = ty[0]
-        for i in range(1, 15):
-            var hit = _u64_zero_choice(UInt64(i + 1) ^ d)
-            qx = _select_u384(qx, tx[i], hit)
-            qy = _select_u384(qy, ty[i], hit)
-
-        var added = _jacobian_add_affine_ct(acc, P384Point(qx, qy, False))
-        acc = _select_jacobian_ct(acc, added, _u64_nonzero_choice(d))
+        acc = _select_jacobian_ct(acc, added, u64_nonzero_choice(d))
     return _jacobian_to_affine(acc)
 
 
@@ -956,7 +661,7 @@ def _base_table_entry(
     var qx = U384()
     var qy = U384()
     for t in range(1, 16):
-        var hit = _u64_zero_choice(UInt64(t) ^ d)
+        var hit = u64_zero_choice(UInt64(t) ^ d)
         var base = (j * 15 + (t - 1)) * 12
         var ex = U384(tptr[base], tptr[base + 1], tptr[base + 2], tptr[base + 3], tptr[base + 4], tptr[base + 5])
         var ey = U384(tptr[base + 6], tptr[base + 7], tptr[base + 8], tptr[base + 9], tptr[base + 10], tptr[base + 11])
@@ -976,7 +681,7 @@ def _scalar_mult_base(k: U384) -> P384Point:
         var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
         var q = _base_table_entry(tptr, i >> 1, d)
         var added = _jacobian_add_affine_ct(acc, q)
-        acc = _select_jacobian_ct(acc, added, _u64_nonzero_choice(d))
+        acc = _select_jacobian_ct(acc, added, u64_nonzero_choice(d))
 
     acc = _jacobian_double_ct(acc)
     acc = _jacobian_double_ct(acc)
@@ -987,7 +692,7 @@ def _scalar_mult_base(k: U384) -> P384Point:
         var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
         var q = _base_table_entry(tptr, i >> 1, d)
         var added = _jacobian_add_affine_ct(acc, q)
-        acc = _select_jacobian_ct(acc, added, _u64_nonzero_choice(d))
+        acc = _select_jacobian_ct(acc, added, u64_nonzero_choice(d))
 
     return _jacobian_to_affine(acc)
 

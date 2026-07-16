@@ -435,20 +435,9 @@ def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
 
     return DecodeResult(False, EdwardsPoint())
 
-@no_inline
-def edwards_decode_checked(data: Span[UInt8, ...]) -> DecodeResult:
-    return edwards_decode(data, strict=True)
-
 def edwards_decode_verify_compatible(data: Span[UInt8, ...]) -> DecodeResult:
     # strict RFC decoding only, no ZIP-215
     return edwards_decode(data, strict=True)
-
-@no_inline
-def edwards_decode_canonical(data: Span[UInt8, ...]) -> EdwardsPoint:
-    var p = edwards_decode_checked(data)
-    if p.ok:
-        return p.p
-    return EdwardsPoint()
 
 @no_inline
 def sqrt_ratio_checked(u: FieldElement51, v: FieldElement51) -> Optional[FieldElement51]:
@@ -484,13 +473,6 @@ def sqrt_ratio_checked(u: FieldElement51, v: FieldElement51) -> Optional[FieldEl
             2233514472574048, 2117202627021982, 765476049583133)
         return Optional[FieldElement51](x * sqrtm1)
     return None
-
-@no_inline
-def sqrt_ratio(u: FieldElement51, v: FieldElement51) -> FieldElement51:
-    var x = sqrt_ratio_checked(u, v)
-    if x:
-        return x.unsafe_value()
-    return FieldElement51.ZERO()
 
 struct AffineNielsPoint(Movable, Copyable, ImplicitlyCopyable):
     var y_plus_x: FieldElement51

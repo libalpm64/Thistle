@@ -7,7 +7,7 @@ from std.sys import llvm_intrinsic, CompilationTarget
 from std.memory import alloc, bitcast, memset_zero, memcpy, UnsafePointer, Span
 from std.utils import StaticTuple
 from .aes import cpu_aes_encrypt, cpu_aes_ct_encrypt, cpu_aes_ct_encrypt16, cpu_aes_ct_skey, expand_key_128, expand_key_192, expand_key_256, expand_key_128_into, expand_key_192_into, expand_key_256_into
-from .utils import StackBuffer
+from .utils import StackBuffer, load_64be, store_64be
 
 comptime SIMD16 = SIMD[DType.uint8, 16]
 comptime SIMD128 = SIMD[DType.uint64, 2]
@@ -57,18 +57,6 @@ def _mm_aesenclast_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
         )
     else:
         return SIMD128(0)
-
-@always_inline
-def _mm_aeskeygenassist_si128(v: SIMD128, imm8: Int) -> SIMD128:
-    comptime if has_x86_aes_ni():
-        return llvm_intrinsic[
-            "llvm.x86.aesni.aeskeygenassist",
-            SIMD128,
-            has_side_effect=False,
-        ](v, imm8)
-    else:
-        return SIMD128(0)
-
 
 @always_inline
 def _mm_loadu_si128(ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> SIMD128:
@@ -721,20 +709,6 @@ def has_aes_ni() -> Bool:
 
 # AES-GCM authenticated encryption (NIST SP 800-38D)
 
-@always_inline
-def _be_load64(p: UnsafePointer[UInt8, MutAnyOrigin], off: Int) -> UInt64:
-    var v: UInt64 = 0
-    for i in range(8):
-        v = (v << UInt64(8)) | UInt64(p[off + i])
-    return v
-
-
-@always_inline
-def _be_store64(p: UnsafePointer[UInt8, MutAnyOrigin], off: Int, v: UInt64):
-    for i in range(8):
-        p[off + i] = UInt8((v >> UInt64(56 - 8 * i)) & 0xFF)
-
-
 @always_inline("nodebug")
 def _bitrev64(v: UInt64) -> UInt64:
     return llvm_intrinsic["llvm.bitreverse.i64", UInt64, has_side_effect=False](v)
@@ -910,8 +884,8 @@ struct _GHash(Copyable, Movable):
             if n > 16:
                 n = 16
             memcpy(dest=block.unsafe_ptr(), src=data + off, count=n)
-            self.y_hi ^= _be_load64(block.unsafe_ptr(), 0)
-            self.y_lo ^= _be_load64(block.unsafe_ptr(), 8)
+            self.y_hi ^= load_64be(block.unsafe_ptr(), 0)
+            self.y_lo ^= load_64be(block.unsafe_ptr(), 8)
             self._mul_y_by_h_soft()
             off += 16
 
@@ -920,17 +894,6 @@ struct _GHash(Copyable, Movable):
         self.y_hi ^= aad_bits
         self.y_lo ^= text_bits
         self._mul_y_by_h()
-
-
-def _gcm_expand(key: Span[UInt8, ...], mut key_buf: InlineArray[UInt8, 32]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
-    for i in range(len(key)):
-        key_buf[i] = key[i]
-    var kp = key_buf.unsafe_ptr()
-    if len(key) == 16:
-        return expand_key_128(kp)
-    if len(key) == 24:
-        return expand_key_192(kp)
-    return expand_key_256(kp)
 
 
 @always_inline
@@ -966,8 +929,8 @@ def _derive_j0(
     iv_buf.extend(iv)
     gh.update(iv_buf.unsafe_ptr(), len(iv))
     gh.update_lengths(UInt64(0), UInt64(len(iv)) * 8)
-    _be_store64(j0.unsafe_ptr(), 0, gh.y_hi)
-    _be_store64(j0.unsafe_ptr(), 8, gh.y_lo)
+    store_64be(j0.unsafe_ptr(), 0, gh.y_hi)
+    store_64be(j0.unsafe_ptr(), 8, gh.y_lo)
 
 
 def _gctr_and_ghash(
@@ -1050,10 +1013,10 @@ def _gcm_core_keyed(
 
     var ek_j0 = InlineArray[UInt8, 16](fill=0)
     _encrypt_block(rk, rounds, j0.unsafe_ptr(), ek_j0.unsafe_ptr())
-    var t_hi = gh.y_hi ^ _be_load64(ek_j0.unsafe_ptr(), 0)
-    var t_lo = gh.y_lo ^ _be_load64(ek_j0.unsafe_ptr(), 8)
-    _be_store64(tag.unsafe_ptr(), 0, t_hi)
-    _be_store64(tag.unsafe_ptr(), 8, t_lo)
+    var t_hi = gh.y_hi ^ load_64be(ek_j0.unsafe_ptr(), 0)
+    var t_lo = gh.y_lo ^ load_64be(ek_j0.unsafe_ptr(), 8)
+    store_64be(tag.unsafe_ptr(), 0, t_hi)
+    store_64be(tag.unsafe_ptr(), 8, t_lo)
 
 
 struct AESGCMContext(Copyable, Movable):
@@ -1082,7 +1045,7 @@ struct AESGCMContext(Copyable, Movable):
         var h_block = InlineArray[UInt8, 16](fill=0)
         _encrypt_block(self._rk.unsafe_ptr(), self._rounds, zero_block.unsafe_ptr(), h_block.unsafe_ptr())
         self._gh0 = _GHash(
-            _be_load64(h_block.unsafe_ptr(), 0), _be_load64(h_block.unsafe_ptr(), 8)
+            load_64be(h_block.unsafe_ptr(), 0), load_64be(h_block.unsafe_ptr(), 8)
         )
         memset_zero(h_block.unsafe_ptr(), 16)
 

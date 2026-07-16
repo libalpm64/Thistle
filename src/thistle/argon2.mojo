@@ -186,42 +186,12 @@ def compression_g_with_pool(
         out_ptr[i] = block[i] ^ block_xy[i]
 
 @always_inline
-def compression_g(
-    out_ptr: UnsafePointer[UInt64, MutAnyOrigin],
-    x_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
-    y_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
-    with_xor: Bool,
-):
-    var pool = MemoryPool(128)
-    compression_g_with_pool(out_ptr, x_ptr, y_ptr, with_xor, pool)
-
-@always_inline
 def store_le32(ptr: UnsafePointer[UInt8, MutAnyOrigin], offset: Int, val: Int):
     ptr[offset + 0] = UInt8(val & 0xFF)
     ptr[offset + 1] = UInt8((val >> 8) & 0xFF)
     ptr[offset + 2] = UInt8((val >> 16) & 0xFF)
     ptr[offset + 3] = UInt8((val >> 24) & 0xFF)
 
-@always_inline
-def store_le64(ptr: UnsafePointer[UInt8, MutAnyOrigin], offset: Int, val: Int):
-    ptr[offset + 0] = UInt8(val & 0xFF)
-    ptr[offset + 1] = UInt8((val >> 8) & 0xFF)
-    ptr[offset + 2] = UInt8((val >> 16) & 0xFF)
-    ptr[offset + 3] = UInt8((val >> 24) & 0xFF)
-    ptr[offset + 4] = UInt8((val >> 32) & 0xFF)
-    ptr[offset + 5] = UInt8((val >> 40) & 0xFF)
-    ptr[offset + 6] = UInt8((val >> 48) & 0xFF)
-    ptr[offset + 7] = UInt8((val >> 56) & 0xFF)
-
-
-def blake2b_with_le32_prefix(digest_size: Int, prefix_val: Int, input: Span[UInt8, ...]) -> List[UInt8]:
-    var ctx = Blake2b(digest_size)
-    var le_buf = alloc[UInt8](4)
-    store_le32(le_buf, 0, prefix_val)
-    ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
-    ctx.update(input)
-    le_buf.free()
-    return ctx.finalize()
 
 def variable_length_hash_to_ptr(t_len: Int, input: Span[UInt8, ...], out_ptr: UnsafePointer[UInt8, MutAnyOrigin]):
     var le_buf = alloc[UInt8](4)

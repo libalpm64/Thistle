@@ -17,7 +17,7 @@ from std.memory import memset_zero
 from std.sys import simd_width_of
 from thistle.sha3 import SHA3Context, sha3_update, shake_final, shake128, shake256
 from thistle.random import random_bytes
-from thistle.utils import StackBuffer
+from thistle.utils import StackBuffer, zero_stack_u8
 
 comptime MLDSA44_PUBLICKEYBYTES = 1312
 comptime MLDSA44_SECRETKEYBYTES = 2560
@@ -208,15 +208,6 @@ def _zero_poly_vec(count: Int) -> List[List[UInt32]]:
     return v^
 
 
-def _zero_hint_vec(count: Int) -> List[List[UInt8]]:
-    var v = List[List[UInt8]](capacity=count)
-    for _ in range(count):
-        var row = List[UInt8](unsafe_uninit_length=N)
-        memset_zero(row.unsafe_ptr(), N)
-        v.append(row^)
-    return v^
-
-
 def _copy_bytes(src: Span[UInt8, ...]) -> List[UInt8]:
     var out = List[UInt8](capacity=len(src))
     out.extend(src)
@@ -246,12 +237,6 @@ def _ct_select_u8(false_value: UInt8, true_value: UInt8, choice: UInt32) -> UInt
     return false_value ^ (mask & (false_value ^ true_value))
 
 
-@always_inline
-def _ct_select_u32(false_value: UInt32, true_value: UInt32, choice: UInt32) -> UInt32:
-    var mask = UInt32(0) - choice
-    return false_value ^ (mask & (false_value ^ true_value))
-
-
 # volatile stores so the wipe can't be optimized away
 def _zero_list_u8(mut data: List[UInt8]):
     var ptr = data.unsafe_ptr()
@@ -273,13 +258,6 @@ def _zero_poly_vec_u32(mut data: List[List[UInt32]]):
 def _zero_poly_vec_u8(mut data: List[List[UInt8]]):
     for i in range(len(data)):
         _zero_list_u8(data[i])
-
-
-def _zero_stack_u8(mut data: StackBuffer[UInt8, ...]):
-    var ptr = data.ptr()
-    for i in range(data.len()):
-        ptr.store[volatile=True](i, UInt8(0))
-    data.clear()
 
 
 def _bytes_equal(a: Span[UInt8, ...], b: Span[UInt8, ...]) -> Bool:
@@ -400,11 +378,6 @@ def _poly_sub_into(mut r: List[UInt32], b: List[UInt32]):
 def _dsa_poly_sub_into(mut r: DSAPoly, b: DSAPoly):
     for i in range(N):
         r[i] = _field_sub(r[i], b[i])
-
-
-def _copy_poly_into(mut r: List[UInt32], a: List[UInt32]):
-    for i in range(N):
-        r[i] = a[i]
 
 
 def _dsa_copy_poly_into(mut r: DSAPoly, a: DSAPoly):
@@ -774,15 +747,6 @@ def _make_hint_elem(ct0: UInt32, w: UInt32, cs2: UInt32, p: MLDSAParams) -> UInt
     return UInt8(_ct_bool_to_u32(v1 != r1))
 
 
-def _make_hint_into(mut h: List[UInt8], ct0: List[UInt32], w: List[UInt32], cs2: List[UInt32], p: MLDSAParams) -> Int:
-    var count = 0
-    for i in range(N):
-        var bit = _make_hint_elem(ct0[i], w[i], cs2[i], p)
-        h[i] = bit
-        count += Int(bit)
-    return count
-
-
 def _dsa_make_hint_into(mut h: DSAHintRow, ct0: DSAPoly, w: DSAPoly, cs2: DSAPoly, p: MLDSAParams) -> Int:
     var count = 0
     for i in range(N):
@@ -790,12 +754,6 @@ def _dsa_make_hint_into(mut h: DSAHintRow, ct0: DSAPoly, w: DSAPoly, cs2: DSAPol
         h[i] = bit
         count += Int(bit)
     return count
-
-
-def _make_hint(ct0: List[UInt32], w: List[UInt32], cs2: List[UInt32], p: MLDSAParams) -> Tuple[List[UInt8], Int]:
-    var h = List[UInt8](unsafe_uninit_length=N)
-    var count = _make_hint_into(h, ct0, w, cs2, p)
-    return (h^, count)
 
 
 def _coefficients_exceed_bound(w: List[UInt32], bound: UInt32) -> Bool:
@@ -809,19 +767,6 @@ def _dsa_coefficients_exceed_bound(w: DSAPoly, bound: UInt32) -> Bool:
     var fail = UInt32(0)
     for i in range(N):
         fail |= _ct_bool_to_u32(_infinity_norm(w[i]) >= bound)
-    return fail != UInt32(0)
-
-
-def _low_bits_exceed_bound(w: List[UInt32], bound: UInt32, p: MLDSAParams) -> Bool:
-    var fail = UInt32(0)
-    if p.gamma2_denom == 32:
-        for i in range(N):
-            var d = _decompose32(w[i])
-            fail |= _ct_bool_to_u32(_abs_i32(d[1]) >= bound)
-    else:
-        for i in range(N):
-            var d = _decompose88(w[i])
-            fail |= _ct_bool_to_u32(_abs_i32(d[1]) >= bound)
     return fail != UInt32(0)
 
 
@@ -944,12 +889,6 @@ def _dsa_bit_unpack18_into(mut r: DSAPoly, v: Span[UInt8, ...]):
         j += 4
 
 
-def _bit_unpack18(v: Span[UInt8, ...]) -> List[UInt32]:
-    var r = List[UInt32](unsafe_uninit_length=N)
-    _bit_unpack18_into(r, v)
-    return r^
-
-
 def _bit_unpack20_into(mut r: List[UInt32], v: Span[UInt8, ...]):
     var off = 0
     var j = 0
@@ -974,12 +913,6 @@ def _dsa_bit_unpack20_into(mut r: DSAPoly, v: Span[UInt8, ...]):
         j += 2
 
 
-def _bit_unpack20(v: Span[UInt8, ...]) -> List[UInt32]:
-    var r = List[UInt32](unsafe_uninit_length=N)
-    _bit_unpack20_into(r, v)
-    return r^
-
-
 def _bit_unpack_into(mut r: List[UInt32], v: Span[UInt8, ...], p: MLDSAParams):
     if p.gamma1_log == 17:
         _bit_unpack18_into(r, v)
@@ -998,41 +931,6 @@ def _bit_unpack(v: Span[UInt8, ...], p: MLDSAParams) -> List[UInt32]:
     var r = List[UInt32](unsafe_uninit_length=N)
     _bit_unpack_into(r, v, p)
     return r^
-
-
-def _bit_pack18(mut out: List[UInt8], r: List[UInt32]):
-    for i in range(0, N, 4):
-        var w0 = Int32(1 << 17) - _centered_mod(r[i])
-        var w1 = Int32(1 << 17) - _centered_mod(r[i + 1])
-        var w2 = Int32(1 << 17) - _centered_mod(r[i + 2])
-        var w3 = Int32(1 << 17) - _centered_mod(r[i + 3])
-        out.append(UInt8(w0))
-        out.append(UInt8(w0 >> 8))
-        out.append(UInt8((w0 >> 16) | (w1 << 2)))
-        out.append(UInt8(w1 >> 6))
-        out.append(UInt8((w1 >> 14) | (w2 << 4)))
-        out.append(UInt8(w2 >> 4))
-        out.append(UInt8((w2 >> 12) | (w3 << 6)))
-        out.append(UInt8(w3 >> 2))
-        out.append(UInt8(w3 >> 10))
-
-
-def _bit_pack20(mut out: List[UInt8], r: List[UInt32]):
-    for i in range(0, N, 2):
-        var w0 = Int32(1 << 19) - _centered_mod(r[i])
-        var w1 = Int32(1 << 19) - _centered_mod(r[i + 1])
-        out.append(UInt8(w0))
-        out.append(UInt8(w0 >> 8))
-        out.append(UInt8((w0 >> 16) | (w1 << 4)))
-        out.append(UInt8(w1 >> 4))
-        out.append(UInt8(w1 >> 12))
-
-
-def _bit_pack(mut out: List[UInt8], r: List[UInt32], p: MLDSAParams):
-    if p.gamma1_log == 17:
-        _bit_pack18(out, r)
-    else:
-        _bit_pack20(out, r)
 
 
 def _dsa_bit_pack18(mut out: List[UInt8], r: DSAPoly):
@@ -1099,23 +997,6 @@ def _bit_unpack_slow(v: Span[UInt8, ...], a: Int, b: Int) raises -> List[UInt32]
     return r^
 
 
-def _append_w1_encoded_stack(mut out: StackBuffer[UInt8, ...], w: List[UInt32], p: MLDSAParams):
-    if p.gamma2_denom == 32:
-        for i in range(0, N, 2):
-            var b0 = _high_bits32(_field_from_montgomery(w[i]))
-            var b1 = _high_bits32(_field_from_montgomery(w[i + 1]))
-            out.push_unchecked(b0 | (b1 << 4))
-    else:
-        for i in range(0, N, 4):
-            var b0 = _high_bits88(_field_from_montgomery(w[i]))
-            var b1 = _high_bits88(_field_from_montgomery(w[i + 1]))
-            var b2 = _high_bits88(_field_from_montgomery(w[i + 2]))
-            var b3 = _high_bits88(_field_from_montgomery(w[i + 3]))
-            out.push_unchecked((b0 >> 0) | (b1 << 6))
-            out.push_unchecked((b1 >> 2) | (b2 << 4))
-            out.push_unchecked((b2 >> 4) | (b3 << 2))
-
-
 def _dsa_append_w1_encoded_stack(mut out: StackBuffer[UInt8, ...], w: DSAPoly, p: MLDSAParams):
     if p.gamma2_denom == 32:
         for i in range(0, N, 2):
@@ -1148,20 +1029,6 @@ def _append_use_hint_encoded_stack(mut out: StackBuffer[UInt8, ...], w: List[UIn
             out.push_unchecked((b0 >> 0) | (b1 << 6))
             out.push_unchecked((b1 >> 2) | (b2 << 4))
             out.push_unchecked((b2 >> 4) | (b3 << 2))
-
-
-def _hint_encode(mut out: List[UInt8], h: List[List[UInt8]], p: MLDSAParams):
-    var y = List[UInt8](unsafe_uninit_length=p.omega + p.k)
-    _zero_list_u8(y)
-    var idx: UInt8 = 0
-    for i in range(p.k):
-        for j in range(N):
-            if h[i][j] != 0:
-                y[Int(idx)] = UInt8(j)
-                idx += 1
-        y[p.omega + i] = idx
-    _append_bytes(out, Span[UInt8, ...](y))
-    _zero_list_u8(y)
 
 
 def _dsa_hint_encode(mut out: List[UInt8], h: DSAHintVec, p: MLDSAParams):
@@ -1204,15 +1071,6 @@ def _hint_decode(y: Span[UInt8, ...], p: MLDSAParams) raises -> List[List[UInt8]
     return h^
 
 
-def _sig_encode(ch: Span[UInt8, ...], z: List[List[UInt32]], h: List[List[UInt8]], p: MLDSAParams) -> List[UInt8]:
-    var sig = List[UInt8](capacity=signature_size(p))
-    _append_bytes(sig, ch)
-    for i in range(p.l):
-        _bit_pack(sig, z[i], p)
-    _hint_encode(sig, h, p)
-    return sig^
-
-
 def _dsa_sig_encode(ch: InlineArray[UInt8, MLDSA_CRHBYTES], z: DSAPolyVec[MAX_L], h: DSAHintVec, p: MLDSAParams) -> List[UInt8]:
     var sig = List[UInt8](capacity=signature_size(p))
     for i in range(p.lambda_bits // 4):
@@ -1249,7 +1107,7 @@ def _compute_message_hash(tr: Span[UInt8, ...], msg: Span[UInt8, ...], context: 
     prefix.push_unchecked(UInt8(0))
     prefix.push_unchecked(UInt8(len(context)))
     sha3_update(ctx, Span[UInt8, ...](ptr=prefix.ptr(), length=prefix.len()))
-    _zero_stack_u8(prefix)
+    zero_stack_u8(prefix)
 
     sha3_update(ctx, context)
     sha3_update(ctx, msg)
@@ -1268,7 +1126,7 @@ def mldsa_private_key_from_seed(seed: Span[UInt8, ...], p: MLDSAParams) raises -
     xi.push_unchecked(UInt8(p.k))
     xi.push_unchecked(UInt8(p.l))
     var expanded = shake256(Span[UInt8, ...](ptr=xi.ptr(), length=xi.len()), 128)
-    _zero_stack_u8(xi)
+    zero_stack_u8(xi)
     var rho = _slice_bytes(Span[UInt8, ...](expanded), 0, 32)
     var rho_s = _slice_bytes(Span[UInt8, ...](expanded), 32, 64)
     var k_seed = _slice_bytes(Span[UInt8, ...](expanded), 96, 32)
@@ -1413,7 +1271,7 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
     _append_bytes_stack(h_input, random)
     _append_bytes_stack(h_input, mu)
     var nonce = shake256(Span[UInt8, ...](ptr=h_input.ptr(), length=h_input.len()), 64)
-    _zero_stack_u8(h_input)
+    zero_stack_u8(h_input)
 
     # signing scratch allocated once and reused across attempts
     var y = DSAPolyVec[MAX_L]()
@@ -1436,7 +1294,7 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
             seed.push_unchecked(UInt8((kappa >> 8) & 0xFF))
             kappa += 1
             var v = shake256(Span[UInt8, ...](ptr=seed.ptr(), length=seed.len()), (p.gamma1_log + 1) * N // 8)
-            _zero_stack_u8(seed)
+            zero_stack_u8(seed)
             _dsa_bit_unpack_into(y[_r], Span[UInt8, ...](v), p)
             _zero_list_u8(v)
 
@@ -1456,7 +1314,7 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
         for i in range(p.k):
             _dsa_append_w1_encoded_stack(ch_input, w[i], p)
         var ch_list = shake256(Span[UInt8, ...](ptr=ch_input.ptr(), length=ch_input.len()), p.lambda_bits // 4)
-        _zero_stack_u8(ch_input)
+        zero_stack_u8(ch_input)
         var ch = InlineArray[UInt8, MLDSA_CRHBYTES](fill=0)
         for i in range(p.lambda_bits // 4):
             ch[i] = ch_list[i]
@@ -1613,7 +1471,7 @@ def mldsa_verify_external_mu(pub: MLDSAPublicKey, mu: Span[UInt8, ...], sig: Spa
     for i in range(p.k):
         _append_use_hint_encoded_stack(ch_input, w[i], h[i], p)
     var computed = shake256(Span[UInt8, ...](ptr=ch_input.ptr(), length=ch_input.len()), p.lambda_bits // 4)
-    _zero_stack_u8(ch_input)
+    zero_stack_u8(ch_input)
     var ok = _bytes_equal(Span[UInt8, ...](ch), Span[UInt8, ...](computed))
     _zero_list_u8(ch)
     _zero_poly_vec_u32(z)
