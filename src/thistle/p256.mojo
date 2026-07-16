@@ -4,35 +4,21 @@ NIST P-256 / secp256r1 implementation.
 
 comptime P256_SIZE = 32
 comptime P256_POINT_SIZE = 65
-comptime _MASK32 = UInt64(0xFFFFFFFF)
+comptime _MASK64 = UInt128(0xFFFFFFFFFFFFFFFF)
 
 
 struct U256(Copyable, ImplicitlyCopyable, Movable):
-    var limbs: InlineArray[UInt64, 8]
+    var limbs: InlineArray[UInt64, 4]
 
     def __init__(out self):
-        self.limbs = InlineArray[UInt64, 8](fill=0)
+        self.limbs = InlineArray[UInt64, 4](fill=0)
 
-    def __init__(
-        out self,
-        l0: UInt64,
-        l1: UInt64,
-        l2: UInt64,
-        l3: UInt64,
-        l4: UInt64,
-        l5: UInt64,
-        l6: UInt64,
-        l7: UInt64,
-    ):
-        self.limbs = InlineArray[UInt64, 8](uninitialized=True)
-        self.limbs[0] = l0 & _MASK32
-        self.limbs[1] = l1 & _MASK32
-        self.limbs[2] = l2 & _MASK32
-        self.limbs[3] = l3 & _MASK32
-        self.limbs[4] = l4 & _MASK32
-        self.limbs[5] = l5 & _MASK32
-        self.limbs[6] = l6 & _MASK32
-        self.limbs[7] = l7 & _MASK32
+    def __init__(out self, l0: UInt64, l1: UInt64, l2: UInt64, l3: UInt64):
+        self.limbs = InlineArray[UInt64, 4](uninitialized=True)
+        self.limbs[0] = l0
+        self.limbs[1] = l1
+        self.limbs[2] = l2
+        self.limbs[3] = l3
 
     def __copyinit__(out self, copy: Self):
         self.limbs = copy.limbs
@@ -42,127 +28,106 @@ struct U256(Copyable, ImplicitlyCopyable, Movable):
 
     @staticmethod
     def one() -> U256:
-        return U256(1, 0, 0, 0, 0, 0, 0, 0)
+        return U256(1, 0, 0, 0)
 
     def is_zero(self) -> Bool:
-        for i in range(8):
+        for i in range(4):
             if self.limbs[i] != 0:
                 return False
         return True
 
     def bit(self, i: Int) -> UInt64:
-        return (self.limbs[i // 32] >> UInt64(i % 32)) & 1
+        return (self.limbs[i // 64] >> UInt64(i % 64)) & 1
 
 
 def _p() -> U256:
     return U256(
-        0xFFFFFFFF,
-        0xFFFFFFFF,
-        0xFFFFFFFF,
-        0x00000000,
-        0x00000000,
-        0x00000000,
-        0x00000001,
-        0xFFFFFFFF,
+        0xFFFFFFFFFFFFFFFF,
+        0x00000000FFFFFFFF,
+        0x0000000000000000,
+        0xFFFFFFFF00000001,
     )
 
 
 def _a() -> U256:
     return U256(
-        0xFFFFFFFC,
-        0xFFFFFFFF,
-        0xFFFFFFFF,
-        0x00000000,
-        0x00000000,
-        0x00000000,
-        0x00000001,
-        0xFFFFFFFF,
+        0xFFFFFFFFFFFFFFFC,
+        0x00000000FFFFFFFF,
+        0x0000000000000000,
+        0xFFFFFFFF00000001,
     )
 
 
 def _b() -> U256:
     return U256(
-        0x27D2604B,
-        0x3BCE3C3E,
-        0xCC53B0F6,
-        0x651D06B0,
-        0x769886BC,
-        0xB3EBBD55,
-        0xAA3A93E7,
-        0x5AC635D8,
+        0x3BCE3C3E27D2604B,
+        0x651D06B0CC53B0F6,
+        0xB3EBBD55769886BC,
+        0x5AC635D8AA3A93E7,
     )
 
 
 def _n() -> U256:
     return U256(
-        0xFC632551,
-        0xF3B9CAC2,
-        0xA7179E84,
-        0xBCE6FAAD,
-        0xFFFFFFFF,
-        0xFFFFFFFF,
-        0x00000000,
-        0xFFFFFFFF,
+        0xF3B9CAC2FC632551,
+        0xBCE6FAADA7179E84,
+        0xFFFFFFFFFFFFFFFF,
+        0xFFFFFFFF00000000,
     )
 
 
 def _gx() -> U256:
     return U256(
-        0xD898C296,
-        0xF4A13945,
-        0x2DEB33A0,
-        0x77037D81,
-        0x63A440F2,
-        0xF8BCE6E5,
-        0xE12C4247,
-        0x6B17D1F2,
+        0xF4A13945D898C296,
+        0x77037D812DEB33A0,
+        0xF8BCE6E563A440F2,
+        0x6B17D1F2E12C4247,
     )
 
 
 def _gy() -> U256:
     return U256(
-        0x37BF51F5,
-        0xCBB64068,
-        0x6B315ECE,
-        0x2BCE3357,
-        0x7C0F9E16,
-        0x8EE7EB4A,
-        0xFE1A7F9B,
-        0x4FE342E2,
+        0xCBB6406837BF51F5,
+        0x2BCE33576B315ECE,
+        0x8EE7EB4A7C0F9E16,
+        0x4FE342E2FE1A7F9B,
     )
 
 
 def _sqrt_exp() -> U256:
-    # p == 3 mod 4, so sqrt(x) = x^((p + 1) / 4).
+    # p == 3 mod 4
     return U256(
-        0x00000000,
-        0x00000000,
-        0x40000000,
-        0x00000000,
-        0x00000000,
-        0x40000000,
-        0xC0000000,
-        0x3FFFFFFF,
+        0x0000000000000000,
+        0x0000000040000000,
+        0x4000000000000000,
+        0x3FFFFFFFC0000000,
     )
 
 
-def _p_overflow_correction() -> U256:
+def _rr() -> U256:
+    # 2^512 mod p
     return U256(
-        0x00000001,
-        0x00000000,
-        0x00000000,
-        0xFFFFFFFF,
-        0xFFFFFFFF,
-        0xFFFFFFFF,
-        0xFFFFFFFE,
-        0x00000000,
+        0x0000000000000003,
+        0xFFFFFFFBFFFFFFFF,
+        0xFFFFFFFFFFFFFFFE,
+        0x00000004FFFFFFFD,
+    )
+
+
+def _one_mont() -> U256:
+    # 2^256 mod p
+    return U256(
+        0x0000000000000001,
+        0xFFFFFFFF00000000,
+        0xFFFFFFFFFFFFFFFF,
+        0x00000000FFFFFFFE,
     )
 
 
 @always_inline
 def _cmp(a: U256, b: U256) -> Int:
-    comptime for j in range(8):
-        var i = 7 - j
+    comptime for j in range(4):
+        var i = 3 - j
         if a.limbs[i] > b.limbs[i]:
             return 1
         if a.limbs[i] < b.limbs[i]:
@@ -179,10 +144,10 @@ def _eq(a: U256, b: U256) -> Bool:
 def _sub_raw(a: U256, b: U256) -> Tuple[U256, UInt64]:
     var out = U256()
     var borrow: UInt64 = 0
-    comptime for i in range(8):
-        var d = (UInt64(1) << UInt64(32)) + a.limbs[i] - b.limbs[i] - borrow
-        out.limbs[i] = d & _MASK32
-        borrow = (d >> UInt64(32)) ^ UInt64(1)
+    comptime for i in range(4):
+        var d = UInt128(a.limbs[i]) - UInt128(b.limbs[i]) - UInt128(borrow)
+        out.limbs[i] = UInt64(d & _MASK64)
+        borrow = UInt64((d >> UInt128(64)) & UInt128(1))
     return out, borrow
 
 
@@ -190,20 +155,19 @@ def _sub_raw(a: U256, b: U256) -> Tuple[U256, UInt64]:
 def _add_raw(a: U256, b: U256) -> Tuple[U256, UInt64]:
     var out = U256()
     var carry: UInt64 = 0
-    comptime for i in range(8):
+    comptime for i in range(4):
         var s = UInt128(a.limbs[i]) + UInt128(b.limbs[i]) + UInt128(carry)
-        out.limbs[i] = UInt64(s & UInt128(_MASK32))
-        carry = UInt64(s >> UInt128(32))
+        out.limbs[i] = UInt64(s & _MASK64)
+        carry = UInt64(s >> UInt128(64))
     return out, carry
 
 
 @always_inline
 def _add_mod(a: U256, b: U256, m: U256) -> U256:
     var sum, carry = _add_raw(a, b)
-    var sum_folded, _ = _add_raw(sum, _p_overflow_correction())
-    sum = _select_u256(sum, sum_folded, carry)
-    var sum_minus_m, borrow = _sub_raw(sum, m)
-    return _select_u256(sum_minus_m, sum, borrow)
+    var d, borrow = _sub_raw(sum, m)
+    var take_d = (carry | (borrow ^ UInt64(1))) & UInt64(1)
+    return _select_u256(sum, d, take_d)
 
 
 @always_inline
@@ -214,147 +178,219 @@ def _sub_mod(a: U256, b: U256, m: U256) -> U256:
 
 
 @always_inline
+def _add_mod(a: U256, b: U256) -> U256:
+    return _add_mod(a, b, _p())
+
+
+@always_inline
+def _sub_mod(a: U256, b: U256) -> U256:
+    return _sub_mod(a, b, _p())
+
+
+@always_inline
 def _add_small_mod(a: U256, small: UInt64, m: U256) -> U256:
-    var b = U256(small, 0, 0, 0, 0, 0, 0, 0)
+    var b = U256(small, 0, 0, 0)
     return _add_mod(a, b, m)
 
 
 @always_inline
-def _add_signed_limb(
-    acc: InlineArray[Int64, 9], i: Int, value: UInt64, multiplier: Int64
-) -> InlineArray[Int64, 9]:
-    var out = acc
-    out[i] += Int64(value) * multiplier
-    return out
+def _mont_final_sub(
+    acc0: UInt64, acc1: UInt64, acc2: UInt64, acc3: UInt64, acc4: UInt64
+) -> U256:
+    var out = U256(acc0, acc1, acc2, acc3)
+    var d, borrow = _sub_raw(out, _p())
+    var take_d = (acc4 | (borrow ^ UInt64(1))) & UInt64(1)
+    return _select_u256(out, d, take_d)
 
 
 @always_inline
-def _normalize_signed_p256(acc_in: InlineArray[Int64, 9]) -> U256:
-    var acc = acc_in
+def _mont_mul(a: U256, b: U256) -> U256:
+    # -p^-1 mod 2^64 == 1, reduce digit is acc0 acp0*p folds shift+add
+    var a0 = a.limbs[0]
+    var a1 = a.limbs[1]
+    var a2 = a.limbs[2]
+    var a3 = a.limbs[3]
+
+    var bi = b.limbs[0]
+    var p0 = UInt128(a0) * UInt128(bi)
+    var p1 = UInt128(a1) * UInt128(bi)
+    var p2 = UInt128(a2) * UInt128(bi)
+    var p3 = UInt128(a3) * UInt128(bi)
+    var acc0 = UInt64(p0 & _MASK64)
+    var s = (p1 & _MASK64) + (p0 >> UInt128(64))
+    var acc1 = UInt64(s & _MASK64)
+    s = (p2 & _MASK64) + (p1 >> UInt128(64)) + (s >> UInt128(64))
+    var acc2 = UInt64(s & _MASK64)
+    s = (p3 & _MASK64) + (p2 >> UInt128(64)) + (s >> UInt128(64))
+    var acc3 = UInt64(s & _MASK64)
+    var acc4 = UInt64(p3 >> UInt128(64)) + UInt64(s >> UInt128(64))
+    var acc5 = UInt64(0)
+
+    comptime for i in range(1, 4):
+        var t0 = acc0 << 32
+        var t1 = acc0 >> 32
+        var brw = UInt64(1) if acc0 < t0 else UInt64(0)
+        var t2 = acc0 - t0
+        var t3 = acc0 - t1 - brw
+        s = UInt128(acc1) + UInt128(t0)
+        acc0 = UInt64(s & _MASK64)
+        s = UInt128(acc2) + UInt128(t1) + (s >> UInt128(64))
+        acc1 = UInt64(s & _MASK64)
+        s = UInt128(acc3) + UInt128(t2) + (s >> UInt128(64))
+        acc2 = UInt64(s & _MASK64)
+        s = UInt128(acc4) + UInt128(t3) + (s >> UInt128(64))
+        acc3 = UInt64(s & _MASK64)
+        acc4 = acc5 + UInt64(s >> UInt128(64))
+
+        bi = b.limbs[i]
+        p0 = UInt128(a0) * UInt128(bi)
+        p1 = UInt128(a1) * UInt128(bi)
+        p2 = UInt128(a2) * UInt128(bi)
+        p3 = UInt128(a3) * UInt128(bi)
+        s = UInt128(acc0) + (p0 & _MASK64)
+        acc0 = UInt64(s & _MASK64)
+        s = UInt128(acc1) + (p1 & _MASK64) + (s >> UInt128(64))
+        acc1 = UInt64(s & _MASK64)
+        s = UInt128(acc2) + (p2 & _MASK64) + (s >> UInt128(64))
+        acc2 = UInt64(s & _MASK64)
+        s = UInt128(acc3) + (p3 & _MASK64) + (s >> UInt128(64))
+        acc3 = UInt64(s & _MASK64)
+        acc4 += UInt64(s >> UInt128(64))
+        s = UInt128(acc1) + (p0 >> UInt128(64))
+        acc1 = UInt64(s & _MASK64)
+        s = UInt128(acc2) + (p1 >> UInt128(64)) + (s >> UInt128(64))
+        acc2 = UInt64(s & _MASK64)
+        s = UInt128(acc3) + (p2 >> UInt128(64)) + (s >> UInt128(64))
+        acc3 = UInt64(s & _MASK64)
+        s = UInt128(acc4) + (p3 >> UInt128(64)) + (s >> UInt128(64))
+        acc4 = UInt64(s & _MASK64)
+        acc5 = UInt64(s >> UInt128(64))
+
+    var t0 = acc0 << 32
+    var t1 = acc0 >> 32
+    var brw = UInt64(1) if acc0 < t0 else UInt64(0)
+    var t2 = acc0 - t0
+    var t3 = acc0 - t1 - brw
+    s = UInt128(acc1) + UInt128(t0)
+    acc0 = UInt64(s & _MASK64)
+    s = UInt128(acc2) + UInt128(t1) + (s >> UInt128(64))
+    acc1 = UInt64(s & _MASK64)
+    s = UInt128(acc3) + UInt128(t2) + (s >> UInt128(64))
+    acc2 = UInt64(s & _MASK64)
+    s = UInt128(acc4) + UInt128(t3) + (s >> UInt128(64))
+    acc3 = UInt64(s & _MASK64)
+    acc4 = acc5 + UInt64(s >> UInt128(64))
+
+    return _mont_final_sub(acc0, acc1, acc2, acc3, acc4)
+
+
+@always_inline
+def _mont_sqr(a: U256) -> U256:
+    var a0 = a.limbs[0]
+    var a1 = a.limbs[1]
+    var a2 = a.limbs[2]
+    var a3 = a.limbs[3]
+
+    # off-diagonal products
+    var p10 = UInt128(a1) * UInt128(a0)
+    var p20 = UInt128(a2) * UInt128(a0)
+    var p30 = UInt128(a3) * UInt128(a0)
+    var p21 = UInt128(a2) * UInt128(a1)
+    var p31 = UInt128(a3) * UInt128(a1)
+    var p32 = UInt128(a3) * UInt128(a2)
+
+    var acc1 = UInt64(p10 & _MASK64)
+    var s = (p20 & _MASK64) + (p10 >> UInt128(64))
+    var acc2 = UInt64(s & _MASK64)
+    s = (
+        (p30 & _MASK64)
+        + (p20 >> UInt128(64))
+        + (p21 & _MASK64)
+        + (s >> UInt128(64))
+    )
+    var acc3 = UInt64(s & _MASK64)
+    s = (
+        (p30 >> UInt128(64))
+        + (p21 >> UInt128(64))
+        + (p31 & _MASK64)
+        + (s >> UInt128(64))
+    )
+    var acc4 = UInt64(s & _MASK64)
+    s = (p31 >> UInt128(64)) + (p32 & _MASK64) + (s >> UInt128(64))
+    var acc5 = UInt64(s & _MASK64)
+    var acc6 = UInt64(p32 >> UInt128(64)) + UInt64(s >> UInt128(64))
+
+    # double
+    var acc7 = acc6 >> 63
+    acc6 = (acc6 << 1) | (acc5 >> 63)
+    acc5 = (acc5 << 1) | (acc4 >> 63)
+    acc4 = (acc4 << 1) | (acc3 >> 63)
+    acc3 = (acc3 << 1) | (acc2 >> 63)
+    acc2 = (acc2 << 1) | (acc1 >> 63)
+    acc1 = acc1 << 1
+
+    # add diagonals
+    var d0 = UInt128(a0) * UInt128(a0)
+    var d1 = UInt128(a1) * UInt128(a1)
+    var d2 = UInt128(a2) * UInt128(a2)
+    var d3 = UInt128(a3) * UInt128(a3)
+    var acc0 = UInt64(d0 & _MASK64)
+    s = UInt128(acc1) + (d0 >> UInt128(64))
+    acc1 = UInt64(s & _MASK64)
+    s = UInt128(acc2) + (d1 & _MASK64) + (s >> UInt128(64))
+    acc2 = UInt64(s & _MASK64)
+    s = UInt128(acc3) + (d1 >> UInt128(64)) + (s >> UInt128(64))
+    acc3 = UInt64(s & _MASK64)
+    s = UInt128(acc4) + (d2 & _MASK64) + (s >> UInt128(64))
+    acc4 = UInt64(s & _MASK64)
+    s = UInt128(acc5) + (d2 >> UInt128(64)) + (s >> UInt128(64))
+    acc5 = UInt64(s & _MASK64)
+    s = UInt128(acc6) + (d3 & _MASK64) + (s >> UInt128(64))
+    acc6 = UInt64(s & _MASK64)
+    acc7 = acc7 + UInt64(d3 >> UInt128(64)) + UInt64(s >> UInt128(64))
+
+    # four reduction folds on the lower half
     comptime for _ in range(4):
-        comptime for i in range(8):
-            var carry = acc[i] >> 32
-            acc[i] -= carry << 32
-            acc[i + 1] += carry
+        var t0 = acc0 << 32
+        var t1 = acc0 >> 32
+        var brw = UInt64(1) if acc0 < t0 else UInt64(0)
+        var t2 = acc0 - t0
+        var t3 = acc0 - t1 - brw
+        s = UInt128(acc1) + UInt128(t0)
+        acc0 = UInt64(s & _MASK64)
+        s = UInt128(acc2) + UInt128(t1) + (s >> UInt128(64))
+        acc1 = UInt64(s & _MASK64)
+        s = UInt128(acc3) + UInt128(t2) + (s >> UInt128(64))
+        acc2 = UInt64(s & _MASK64)
+        acc3 = t3 + UInt64(s >> UInt128(64))
 
-        # Fold overflow 2^256 ≡ 2^224 - 2^192 - 2^96 + 1 mod p256.
-        var hi = acc[8]
-        acc[8] = 0
-        acc[0] += hi
-        acc[3] -= hi
-        acc[6] -= hi
-        acc[7] += hi
+    # accumulate upper half
+    s = UInt128(acc0) + UInt128(acc4)
+    acc0 = UInt64(s & _MASK64)
+    s = UInt128(acc1) + UInt128(acc5) + (s >> UInt128(64))
+    acc1 = UInt64(s & _MASK64)
+    s = UInt128(acc2) + UInt128(acc6) + (s >> UInt128(64))
+    acc2 = UInt64(s & _MASK64)
+    s = UInt128(acc3) + UInt128(acc7) + (s >> UInt128(64))
+    acc3 = UInt64(s & _MASK64)
+    acc4 = UInt64(s >> UInt128(64))
 
-    var out = U256()
-    comptime for i in range(8):
-        var carry = acc[i] >> 32
-        acc[i] -= carry << 32
-        if i < 7:
-            acc[i + 1] += carry
-        out.limbs[i] = UInt64(acc[i])
-
-    var minus_p, borrow = _sub_raw(out, _p())
-    out = _select_u256(minus_p, out, borrow)
-    var minus_p2, borrow2 = _sub_raw(out, _p())
-    return _select_u256(minus_p2, out, borrow2)
+    return _mont_final_sub(acc0, acc1, acc2, acc3, acc4)
 
 
 @always_inline
-def _reduce_p256(t: InlineArray[UInt64, 16]) -> U256:
-    # FIPS 186-4 D.2.3 P-256 Mersenne reduction:
-    # r = s1 + 2*s2 + 2*s3 + s4 + s5 - s6 - s7 - s8 - s9 mod p.
-    var acc = InlineArray[Int64, 9](fill=0)
+def _to_mont(x: U256) -> U256:
+    return _mont_mul(x, _rr())
 
-    # s1 = (c7, ..., c0)
-    comptime for i in range(8):
-        acc = _add_signed_limb(acc, i, t[i], 1)
 
-    # 2*s2 = 2 * (c15, c14, c13, c12, c11, 0, 0, 0)
-    acc = _add_signed_limb(acc, 3, t[11], 2)
-    acc = _add_signed_limb(acc, 4, t[12], 2)
-    acc = _add_signed_limb(acc, 5, t[13], 2)
-    acc = _add_signed_limb(acc, 6, t[14], 2)
-    acc = _add_signed_limb(acc, 7, t[15], 2)
-
-    # 2*s3 = 2 * (0, c15, c14, c13, c12, 0, 0, 0)
-    acc = _add_signed_limb(acc, 3, t[12], 2)
-    acc = _add_signed_limb(acc, 4, t[13], 2)
-    acc = _add_signed_limb(acc, 5, t[14], 2)
-    acc = _add_signed_limb(acc, 6, t[15], 2)
-
-    # s4 = (c15, c14, 0, 0, 0, c10, c9, c8)
-    acc = _add_signed_limb(acc, 0, t[8], 1)
-    acc = _add_signed_limb(acc, 1, t[9], 1)
-    acc = _add_signed_limb(acc, 2, t[10], 1)
-    acc = _add_signed_limb(acc, 6, t[14], 1)
-    acc = _add_signed_limb(acc, 7, t[15], 1)
-
-    # s5 = (c8, c13, c15, c14, c13, c11, c10, c9)
-    acc = _add_signed_limb(acc, 0, t[9], 1)
-    acc = _add_signed_limb(acc, 1, t[10], 1)
-    acc = _add_signed_limb(acc, 2, t[11], 1)
-    acc = _add_signed_limb(acc, 3, t[13], 1)
-    acc = _add_signed_limb(acc, 4, t[14], 1)
-    acc = _add_signed_limb(acc, 5, t[15], 1)
-    acc = _add_signed_limb(acc, 6, t[13], 1)
-    acc = _add_signed_limb(acc, 7, t[8], 1)
-
-    # s6 = (c10, c8, 0, 0, 0, c13, c12, c11)
-    acc = _add_signed_limb(acc, 0, t[11], -1)
-    acc = _add_signed_limb(acc, 1, t[12], -1)
-    acc = _add_signed_limb(acc, 2, t[13], -1)
-    acc = _add_signed_limb(acc, 6, t[8], -1)
-    acc = _add_signed_limb(acc, 7, t[10], -1)
-
-    # s7 = (c11, c9, 0, 0, c15, c14, c13, c12)
-    acc = _add_signed_limb(acc, 0, t[12], -1)
-    acc = _add_signed_limb(acc, 1, t[13], -1)
-    acc = _add_signed_limb(acc, 2, t[14], -1)
-    acc = _add_signed_limb(acc, 3, t[15], -1)
-    acc = _add_signed_limb(acc, 6, t[9], -1)
-    acc = _add_signed_limb(acc, 7, t[11], -1)
-
-    # s8 = (c12, 0, c10, c9, c8, c15, c14, c13)
-    acc = _add_signed_limb(acc, 0, t[13], -1)
-    acc = _add_signed_limb(acc, 1, t[14], -1)
-    acc = _add_signed_limb(acc, 2, t[15], -1)
-    acc = _add_signed_limb(acc, 3, t[8], -1)
-    acc = _add_signed_limb(acc, 4, t[9], -1)
-    acc = _add_signed_limb(acc, 5, t[10], -1)
-    acc = _add_signed_limb(acc, 7, t[12], -1)
-
-    # s9 = (c13, 0, c11, c10, c9, 0, c15, c14)
-    acc = _add_signed_limb(acc, 0, t[14], -1)
-    acc = _add_signed_limb(acc, 1, t[15], -1)
-    acc = _add_signed_limb(acc, 3, t[9], -1)
-    acc = _add_signed_limb(acc, 4, t[10], -1)
-    acc = _add_signed_limb(acc, 5, t[11], -1)
-    acc = _add_signed_limb(acc, 7, t[13], -1)
-
-    return _normalize_signed_p256(acc)
+@always_inline
+def _from_mont(x: U256) -> U256:
+    return _mont_mul(x, U256.one())
 
 
 @always_inline
 def _mul_mod(a: U256, b: U256, m: U256) -> U256:
-    var t = InlineArray[UInt64, 16](fill=0)
-    comptime for i in range(8):
-        var carry = UInt128(0)
-        comptime for j in range(8):
-            var k = i + j
-            var prod = (
-                UInt128(a.limbs[i]) * UInt128(b.limbs[j])
-                + UInt128(t[k])
-                + carry
-            )
-            t[k] = UInt64(prod & UInt128(_MASK32))
-            carry = prod >> UInt128(32)
-        var k2 = i + 8
-        while carry != 0:
-            var s = UInt128(t[k2]) + carry
-            t[k2] = UInt64(s & UInt128(_MASK32))
-            carry = s >> UInt128(32)
-            k2 += 1
-    return _reduce_p256(t)
+    return _mont_mul(_to_mont(a), b)
 
 
 @always_inline
@@ -363,18 +399,41 @@ def _square_mod(a: U256, m: U256) -> U256:
 
 
 def _pow_mod(base_in: U256, exponent: U256) -> U256:
-    var result = U256.one()
-    var base = base_in
+    # runs in the Montgomery domain internally
+    var result = _one_mont()
+    var base = _to_mont(base_in)
     for i in range(256):
         if exponent.bit(i) != 0:
-            result = _mul_mod(result, base, _p())
-        base = _square_mod(base, _p())
-    return result
+            result = _mont_mul(result, base)
+        base = _mont_sqr(base)
+    return _from_mont(result)
+
+
+@always_inline
+def _sqn_p(x: U256, n: Int) -> U256:
+    var r = x
+    for _ in range(n):
+        r = _mont_sqr(r)
+    return r
 
 
 def _inv_p(x: U256) -> U256:
-    var exponent = _sub_mod(_p(), U256(2, 0, 0, 0, 0, 0, 0, 0), _p())
-    return _pow_mod(x, exponent)
+    # x^(p-2) p-2 = ffffffff 00000001 0 0 0 ffffffff ffffffff fffffffd
+    var x2 = _mont_mul(_mont_sqr(x), x)
+    var x3 = _mont_mul(_mont_sqr(x2), x)
+    var x6 = _mont_mul(_sqn_p(x3, 3), x3)
+    var x12 = _mont_mul(_sqn_p(x6, 6), x6)
+    var x15 = _mont_mul(_sqn_p(x12, 3), x3)
+    var x30 = _mont_mul(_sqn_p(x15, 15), x15)
+    var x32 = _mont_mul(_sqn_p(x30, 2), x2)
+
+    var t = _mont_mul(_sqn_p(x32, 32), x)
+    t = _sqn_p(t, 96)
+    t = _mont_mul(_sqn_p(t, 32), x32)
+    t = _mont_mul(_sqn_p(t, 32), x32)
+    t = _mont_mul(_sqn_p(t, 30), x30)
+    t = _mont_mul(_sqn_p(t, 2), x)
+    return t
 
 
 def _sqrt_p(x: U256) -> U256:
@@ -382,28 +441,21 @@ def _sqrt_p(x: U256) -> U256:
 
 
 def _from_be(bytes: Span[UInt8, ...]) -> U256:
-    # SEC 1: fixed-width big-endian integer/field encoding.
     var out = U256()
-    for i in range(8):
-        var off = 28 - i * 4
-        out.limbs[i] = (
-            (UInt64(bytes[off]) << UInt64(24))
-            | (UInt64(bytes[off + 1]) << UInt64(16))
-            | (UInt64(bytes[off + 2]) << UInt64(8))
-            | UInt64(bytes[off + 3])
-        )
+    for i in range(4):
+        var off = 24 - i * 8
+        var v: UInt64 = 0
+        for k in range(8):
+            v = (v << 8) | UInt64(bytes[off + k])
+        out.limbs[i] = v
     return out
 
 
 def _to_be(x: U256, output: UnsafePointer[UInt8, MutAnyOrigin]):
-    # SEC 1: fixed-width big-endian integer/field encoding.
-    for i in range(8):
-        var limb = x.limbs[7 - i]
-        var off = i * 4
-        output[off] = UInt8((limb >> UInt64(24)) & 0xFF)
-        output[off + 1] = UInt8((limb >> UInt64(16)) & 0xFF)
-        output[off + 2] = UInt8((limb >> UInt64(8)) & 0xFF)
-        output[off + 3] = UInt8(limb & 0xFF)
+    for i in range(4):
+        var limb = x.limbs[3 - i]
+        for k in range(8):
+            output[i * 8 + k] = UInt8((limb >> UInt64(56 - 8 * k)) & 0xFF)
 
 
 struct P256Point(Copyable, ImplicitlyCopyable, Movable):
@@ -470,14 +522,16 @@ struct P256JacobianPoint(Copyable, ImplicitlyCopyable, Movable):
     def from_affine(point: P256Point) -> P256JacobianPoint:
         if point.infinity:
             return P256JacobianPoint()
-        return P256JacobianPoint(point.x, point.y, U256.one(), False)
+        return P256JacobianPoint(
+            _to_mont(point.x), _to_mont(point.y), _one_mont(), False
+        )
 
 
 @always_inline
 def _select_u256(a: U256, b: U256, choice: UInt64) -> U256:
     var mask = UInt64(0) - choice
     var out = U256()
-    comptime for i in range(8):
+    comptime for i in range(4):
         out.limbs[i] = a.limbs[i] ^ (mask & (a.limbs[i] ^ b.limbs[i]))
     return out
 
@@ -510,15 +564,15 @@ def _u64_zero_choice(x: UInt64) -> UInt64:
 @always_inline
 def _u256_zero_choice(x: U256) -> UInt64:
     var acc: UInt64 = 0
-    comptime for i in range(8):
+    comptime for i in range(4):
         acc |= x.limbs[i]
     return _u64_zero_choice(acc)
 
 
 @always_inline
 def _jacobian_infinity() -> P256JacobianPoint:
-    # Scalar-core infinity is Z == 0.
-    return P256JacobianPoint(U256(), U256.one(), U256(), False)
+    # infinity Z == 0.
+    return P256JacobianPoint(U256(), _one_mont(), U256(), False)
 
 
 @always_inline
@@ -553,7 +607,6 @@ def _mul_small_mod(x: U256, c: UInt64) -> U256:
 
 
 def _is_on_curve(point: P256Point) -> Bool:
-    # SEC 1 public key validation
     if point.infinity:
         return False
     if _cmp(point.x, _p()) >= 0 or _cmp(point.y, _p()) >= 0:
@@ -567,22 +620,22 @@ def _is_on_curve(point: P256Point) -> Bool:
 
 
 def _jacobian_double_ct(p: P256JacobianPoint) -> P256JacobianPoint:
-    var delta = _square_mod(p.z, _p())
-    var gamma = _square_mod(p.y, _p())
-    var beta = _mul_mod(p.x, gamma, _p())
+    var delta = _mont_sqr(p.z)
+    var gamma = _mont_sqr(p.y)
+    var beta = _mont_mul(p.x, gamma)
     var alpha = _mul_small_mod(
-        _mul_mod(_sub_mod(p.x, delta, _p()), _add_mod(p.x, delta, _p()), _p()),
+        _mont_mul(_sub_mod(p.x, delta), _add_mod(p.x, delta)),
         3,
     )
-    var x3 = _sub_mod(_square_mod(alpha, _p()), _mul_small_mod(beta, 8), _p())
+    var x3 = _sub_mod(_mont_sqr(alpha), _mul_small_mod(beta, 8))
     var z3 = _sub_mod(
-        _sub_mod(_square_mod(_add_mod(p.y, p.z, _p()), _p()), gamma, _p()),
+        _sub_mod(_mont_sqr(_add_mod(p.y, p.z)), gamma),
         delta,
         _p(),
     )
     var y3 = _sub_mod(
-        _mul_mod(alpha, _sub_mod(_mul_small_mod(beta, 4), x3, _p()), _p()),
-        _mul_small_mod(_square_mod(gamma, _p()), 8),
+        _mont_mul(alpha, _sub_mod(_mul_small_mod(beta, 4), x3)),
+        _mul_small_mod(_mont_sqr(gamma), 8),
         _p(),
     )
     return P256JacobianPoint(x3, y3, z3, False)
@@ -591,26 +644,24 @@ def _jacobian_double_ct(p: P256JacobianPoint) -> P256JacobianPoint:
 def _jacobian_add_affine_ct(
     p: P256JacobianPoint, q: P256Point
 ) -> P256JacobianPoint:
-    var z1z1 = _square_mod(p.z, _p())
-    var u2 = _mul_mod(q.x, z1z1, _p())
-    var s2 = _mul_mod(q.y, _mul_mod(p.z, z1z1, _p()), _p())
-    var h = _sub_mod(u2, p.x, _p())
-    var r = _mul_small_mod(_sub_mod(s2, p.y, _p()), 2)
+    var z1z1 = _mont_sqr(p.z)
+    var u2 = _mont_mul(q.x, z1z1)
+    var s2 = _mont_mul(q.y, _mont_mul(p.z, z1z1))
+    var h = _sub_mod(u2, p.x)
+    var r = _mul_small_mod(_sub_mod(s2, p.y), 2)
 
-    var i = _square_mod(_mul_small_mod(h, 2), _p())
-    var j = _mul_mod(h, i, _p())
-    var v = _mul_mod(p.x, i, _p())
-    var x3 = _sub_mod(
-        _sub_mod(_square_mod(r, _p()), j, _p()), _mul_small_mod(v, 2), _p()
-    )
+    var i = _mont_sqr(_mul_small_mod(h, 2))
+    var j = _mont_mul(h, i)
+    var v = _mont_mul(p.x, i)
+    var x3 = _sub_mod(_sub_mod(_mont_sqr(r), j), _mul_small_mod(v, 2), _p())
     var y3 = _sub_mod(
-        _mul_mod(r, _sub_mod(v, x3, _p()), _p()),
-        _mul_small_mod(_mul_mod(p.y, j, _p()), 2),
+        _mont_mul(r, _sub_mod(v, x3)),
+        _mul_small_mod(_mont_mul(p.y, j), 2),
         _p(),
     )
-    var hh = _square_mod(h, _p())
+    var hh = _mont_sqr(h)
     var z3 = _sub_mod(
-        _sub_mod(_square_mod(_add_mod(p.z, h, _p()), _p()), z1z1, _p()),
+        _sub_mod(_mont_sqr(_add_mod(p.z, h)), z1z1),
         hh,
         _p(),
     )
@@ -618,7 +669,7 @@ def _jacobian_add_affine_ct(
 
     var doubled = _jacobian_double_ct(p)
     var inf = _jacobian_infinity()
-    var q_as_jac = P256JacobianPoint(q.x, q.y, U256.one(), False)
+    var q_as_jac = P256JacobianPoint(q.x, q.y, _one_mont(), False)
 
     var p_is_inf = _u256_zero_choice(p.z)
     var h_is_zero = _u256_zero_choice(h)
@@ -638,25 +689,67 @@ def _jacobian_to_affine(p: P256JacobianPoint) -> P256Point:
     if p.infinity or p.z.is_zero():
         return P256Point()
     var zinv = _inv_p(p.z)
-    var zinv2 = _square_mod(zinv, _p())
-    var zinv3 = _mul_mod(zinv2, zinv, _p())
+    var zinv2 = _mont_sqr(zinv)
+    var zinv3 = _mont_mul(zinv2, zinv)
     return P256Point(
-        _mul_mod(p.x, zinv2, _p()), _mul_mod(p.y, zinv3, _p()), False
+        _from_mont(_mont_mul(p.x, zinv2)),
+        _from_mont(_mont_mul(p.y, zinv3)),
+        False,
     )
 
 
 def _scalar_mult(k: U256, p: P256Point) -> P256Point:
+    # fixed 4-bit window, table scanned in full and the add always computed
+    # so scalar bits only drive constant-time selects
+    var pm = P256Point(_to_mont(p.x), _to_mont(p.y), False)
+    var jac = InlineArray[P256JacobianPoint, 15](uninitialized=True)
+    jac[0] = P256JacobianPoint(pm.x, pm.y, _one_mont(), False)
+    jac[1] = _jacobian_double_ct(jac[0])
+    for i in range(2, 15):
+        jac[i] = _jacobian_add_affine_ct(jac[i - 1], pm)
+
+    # batch-normalize the table to affine with one inversion
+    var prefix = InlineArray[U256, 15](uninitialized=True)
+    prefix[0] = jac[0].z
+    for i in range(1, 15):
+        prefix[i] = _mont_mul(prefix[i - 1], jac[i].z)
+    var inv_acc = _inv_p(prefix[14])
+
+    var tx = InlineArray[U256, 15](uninitialized=True)
+    var ty = InlineArray[U256, 15](uninitialized=True)
+    for jj in range(15):
+        var j = 14 - jj
+        var zinv = inv_acc
+        if j > 0:
+            zinv = _mont_mul(inv_acc, prefix[j - 1])
+            inv_acc = _mont_mul(inv_acc, jac[j].z)
+        var zinv2 = _mont_sqr(zinv)
+        tx[j] = _mont_mul(jac[j].x, zinv2)
+        ty[j] = _mont_mul(jac[j].y, _mont_mul(zinv2, zinv))
+
     var acc = _jacobian_infinity()
-    for j in range(256):
-        var i = 255 - j
-        var doubled = _jacobian_double_ct(acc)
-        var added = _jacobian_add_affine_ct(doubled, p)
-        acc = _select_jacobian_ct(doubled, added, k.bit(i))
+    for w in range(63, -1, -1):
+        if w != 63:
+            acc = _jacobian_double_ct(acc)
+            acc = _jacobian_double_ct(acc)
+            acc = _jacobian_double_ct(acc)
+            acc = _jacobian_double_ct(acc)
+
+        var d = (k.limbs[w >> 4] >> UInt64(4 * (w & 15))) & UInt64(0xF)
+        var qx = tx[0]
+        var qy = ty[0]
+        for i in range(1, 15):
+            var hit = _u64_zero_choice(UInt64(i + 1) ^ d)
+            qx = _select_u256(qx, tx[i], hit)
+            qy = _select_u256(qy, ty[i], hit)
+
+        var added = _jacobian_add_affine_ct(acc, P256Point(qx, qy, False))
+        acc = _select_jacobian_ct(acc, added, _u64_nonzero_choice(d))
     return _jacobian_to_affine(acc)
 
 
 def p256_decode_uncompressed(point: Span[UInt8, ...]) -> P256Point:
-    # compressed 02/03||X and uncompressed 04||X||Y.
+    # 02/03||X, 04||X||Y.
     if len(point) == 33 and (point[0] == 0x02 or point[0] == 0x03):
         var x = _from_be(
             Span[UInt8, ...](ptr=point.unsafe_ptr() + 1, length=32)
@@ -689,7 +782,7 @@ def p256_decode_uncompressed(point: Span[UInt8, ...]) -> P256Point:
 def p256_encode_uncompressed(
     point: P256Point, output: UnsafePointer[UInt8, MutAnyOrigin]
 ) -> Bool:
-    # uncompressed point encoding: 04 || X || Y.
+    # 04 || X || Y.
     if point.infinity or not _is_on_curve(point):
         return False
     output[0] = 0x04
@@ -702,7 +795,7 @@ def p256_encode_uncompressed(
 def p256_public_key(
     private_key: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]
 ) -> Bool:
-    # Q = dG with d in [1, n - 1].
+    # Q = dG - d in [1, n - 1].
     if len(private_key) != 32:
         return False
     var d = _from_be(private_key)
@@ -718,7 +811,6 @@ def p256_ecdh(
     public_key: Span[UInt8, ...],
     output: UnsafePointer[UInt8, MutAnyOrigin],
 ) -> Bool:
-    # validate Q, compute dQ, reject infinity, output x-coordinate.
     if len(private_key) != 32:
         return False
     var d = _from_be(private_key)

@@ -17,6 +17,7 @@ from thistle.sha3 import sha3_256
 from thistle.aes import AESKey, cpu_aes_ct_encrypt16, cpu_aes_ct_skey, ROUNDS_128, expand_key_128
 from thistle.x25519 import x25519
 from thistle.ed25519 import ed25519_sign, ed25519_verify, ed25519_generate_public_key
+from thistle.p384 import p384_public_key
 from thistle.utils import StackInlineArray
 from std.memory import alloc
 from std.utils import StaticTuple
@@ -57,6 +58,22 @@ def benchmark_x25519(duration_secs: Float64) raises -> String:
     var duration = perf_counter() - start
     var ops = Float64(count) / duration
     return "x25519 | throughput: " + String(ops)[byte=:8] + " ops/s, ops: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+
+
+def benchmark_p384(duration_secs: Float64) -> String:
+    var scalar = InlineArray[UInt8, 48](fill=0)
+    var out = InlineArray[UInt8, 97](fill=0)
+    scalar[47] = 7
+    var scalar_span = Span[UInt8, ...](scalar)
+    _ = p384_public_key(scalar_span, out.unsafe_ptr())
+    var count = 0
+    var start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        _ = p384_public_key(scalar_span, out.unsafe_ptr())
+        count += 1
+    var duration = perf_counter() - start
+    var ops = Float64(count) / duration
+    return "p384-public-key | throughput: " + String(ops)[byte=:8] + " ops/s, ops: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
 def benchmark_ed25519(duration_secs: Float64) raises -> String:
@@ -612,6 +629,7 @@ def main() raises:
     print(benchmark_aes_gpu_gcm())
     print(benchmark_argon2(duration))
     print(benchmark_x25519(duration))
+    print(benchmark_p384(duration))
     print(benchmark_ed25519(duration))
 
     print()
