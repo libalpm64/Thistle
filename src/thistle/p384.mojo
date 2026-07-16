@@ -2,6 +2,8 @@
 NIST P-384 / secp384r1 implementation.
 """
 
+from .p384_table import p384_base_table
+
 comptime P384_SIZE = 48
 comptime P384_POINT_SIZE = 97
 comptime _MASK64 = UInt128(0xFFFFFFFFFFFFFFFF)
@@ -564,6 +566,7 @@ def _is_on_curve(point: P384Point) -> Bool:
     return _eq(yy, rhs)
 
 
+@always_inline
 def _jacobian_double_ct(p: P384JacobianPoint) -> P384JacobianPoint:
     # Jacobian doubling a = -3.
     var delta = _mont_sqr(p.z)
@@ -587,6 +590,7 @@ def _jacobian_double_ct(p: P384JacobianPoint) -> P384JacobianPoint:
     return P384JacobianPoint(x3, y3, z3, False)
 
 
+@always_inline
 def _jacobian_add_affine_ct(
     p: P384JacobianPoint, q: P384Point
 ) -> P384JacobianPoint:
@@ -944,6 +948,50 @@ def _scalar_mult_generator(k: U384) -> P384Point:
     return _jacobian_to_affine(acc)
 
 
+@always_inline
+def _base_table_entry(
+    tptr: UnsafePointer[UInt64, _], j: Int, d: UInt64
+) -> P384Point:
+    # constant-time scan of the 15 entries for window j
+    var qx = U384()
+    var qy = U384()
+    for t in range(1, 16):
+        var hit = _u64_zero_choice(UInt64(t) ^ d)
+        var base = (j * 15 + (t - 1)) * 12
+        var ex = U384(tptr[base], tptr[base + 1], tptr[base + 2], tptr[base + 3], tptr[base + 4], tptr[base + 5])
+        var ey = U384(tptr[base + 6], tptr[base + 7], tptr[base + 8], tptr[base + 9], tptr[base + 10], tptr[base + 11])
+        qx = _select_u384(qx, ex, hit)
+        qy = _select_u384(qy, ey, hit)
+    return P384Point(qx, qy, False)
+
+
+def _scalar_mult_base(k: U384) -> P384Point:
+    # fixed-base multiply from the precomputed d * 16^(2j) * G table:
+    # odd radix-16 digits, four doublings, then even digits
+    var table = p384_base_table()
+    var tptr = table.unsafe_ptr()
+
+    var acc = _jacobian_infinity()
+    for i in range(1, 96, 2):
+        var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
+        var q = _base_table_entry(tptr, i >> 1, d)
+        var added = _jacobian_add_affine_ct(acc, q)
+        acc = _select_jacobian_ct(acc, added, _u64_nonzero_choice(d))
+
+    acc = _jacobian_double_ct(acc)
+    acc = _jacobian_double_ct(acc)
+    acc = _jacobian_double_ct(acc)
+    acc = _jacobian_double_ct(acc)
+
+    for i in range(0, 96, 2):
+        var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
+        var q = _base_table_entry(tptr, i >> 1, d)
+        var added = _jacobian_add_affine_ct(acc, q)
+        acc = _select_jacobian_ct(acc, added, _u64_nonzero_choice(d))
+
+    return _jacobian_to_affine(acc)
+
+
 def p384_decode_uncompressed(point: Span[UInt8, ...]) -> P384Point:
     if len(point) == 49 and (point[0] == 0x02 or point[0] == 0x03):
         var x = _from_be(
@@ -994,7 +1042,7 @@ def p384_public_key(
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
         return False
-    var q = _scalar_mult_generator(d)
+    var q = _scalar_mult_base(d)
     return p384_encode_uncompressed(q, output)
 
 

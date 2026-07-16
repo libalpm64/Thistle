@@ -9,7 +9,7 @@ from std.bit import rotate_bits_left, rotate_bits_right, byte_swap
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
 from std.sys import CompilationTarget
-from .sha_ni import sha512ni_transform_blocks
+from .sha_ni import sha512ni_transform_blocks, sha256ni_transform_blocks
 
 comptime SHA256_K = SIMD[DType.uint32, 64](
     0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5, 0x3956C25B,
@@ -338,6 +338,10 @@ def sha256_transform_blocks(
     data: UnsafePointer[UInt8, ImmutAnyOrigin],
     nblocks: Int,
 ):
+    comptime if (CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86()) or (CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]()):
+        sha256ni_transform_blocks(state, data, nblocks)
+        return
+
     var a0 = state[0]
     var b0 = state[1]
     var c0 = state[2]

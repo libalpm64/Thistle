@@ -274,6 +274,53 @@ def has_sha_ni() -> Bool:
     return has_x86_sha_ni() or has_arm_sha2()
 
 
+def sha256ni_transform_blocks(
+    mut state: SIMD[DType.uint32, 8],
+    data: UnsafePointer[UInt8, ImmutAnyOrigin],
+    nblocks: Int,
+):
+    comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86():
+        var st0 = SIMD128(state[0], state[1], state[2], state[3])
+        var st1 = SIMD128(state[4], state[5], state[6], state[7])
+
+        for blk in range(nblocks):
+            var ptr = data + blk * 64
+            if blk + 1 < nblocks:
+                prefetch_next_block(ptr)
+            var old_st0 = st0
+            var old_st1 = st1
+
+            var w = InlineArray[SIMD128, 4](uninitialized=True)
+            w[0] = Load(ptr)
+            w[1] = Load(ptr + 16)
+            w[2] = Load(ptr + 32)
+            w[3] = Load(ptr + 48)
+
+            comptime for i in range(16):
+                var wk = w[i & 3] + SIMD128(SHA256_K[4 * i], SHA256_K[4 * i + 1], SHA256_K[4 * i + 2], SHA256_K[4 * i + 3])
+                comptime if i < 12:
+                    w[i & 3] = _arm_sha256su1(
+                        _arm_sha256su0(w[i & 3], w[(i + 1) & 3]),
+                        w[(i + 2) & 3],
+                        w[(i + 3) & 3],
+                    )
+                var tmp = st0
+                st0 = _arm_sha256h(st0, st1, wk)
+                st1 = _arm_sha256h2(st1, tmp, wk)
+
+            st0 += old_st0
+            st1 += old_st1
+
+        state = SIMD[DType.uint32, 8](
+            st0[0], st0[1], st0[2], st0[3], st1[0], st1[1], st1[2], st1[3]
+        )
+        return
+
+    for blk in range(nblocks):
+        var span = Span[UInt8, ...](ptr=data + blk * 64, length=64)
+        state = sha256ni_transform(state, span)
+
+
 comptime SIMD64x2 = SIMD[DType.uint64, 2]
 
 comptime SHA512NI_K = SIMD[DType.uint64, 80](

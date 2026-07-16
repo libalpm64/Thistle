@@ -570,20 +570,28 @@ def _sample_ntt(rho: Span[UInt8, ...], s: UInt8, r: UInt8) raises -> List[UInt32
     input.push_unchecked(s)
     input.push_unchecked(r)
 
-    var out_len = 168
+    var out_len = 840
     while True:
         var buf = _shake128_expand(Span[UInt8, ...](ptr=input.ptr(), length=input.len()), out_len)
-        var a = List[UInt32](capacity=N)
+        var a = List[UInt32](unsafe_uninit_length=N)
+        var ap = a.unsafe_ptr()
+        var bp = buf.unsafe_ptr()
+        var n = 0
         var off = 0
-        while off + 2 < len(buf) and len(a) < N:
-            var v = UInt32(buf[off]) | (UInt32(buf[off + 1]) << 8) | (UInt32(buf[off + 2]) << 16)
+        var limit = len(buf) - 2
+        while off < limit and n < N:
+            var v = (
+                UInt32(bp[off])
+                | (UInt32(bp[off + 1]) << 8)
+                | (UInt32(bp[off + 2]) << 16)
+            ) & 0x7FFFFF
             off += 3
-            v &= 0x7FFFFF
             if v < Q:
-                a.append(_field_to_montgomery_unchecked(v))
-        if len(a) == N:
+                ap[n] = _field_to_montgomery_unchecked(v)
+                n += 1
+        if n == N:
             return a^
-        out_len *= 2
+        out_len += 168
 
 
 def _coeff_from_half_byte(b: UInt8, p: MLDSAParams) -> Tuple[UInt32, Bool]:
@@ -606,7 +614,7 @@ def _sample_bounded_poly(rho: Span[UInt8, ...], r: UInt8, p: MLDSAParams) -> Lis
     input.push_unchecked(r)
     input.push_unchecked(0)
 
-    var out_len = 136
+    var out_len = 272
     while True:
         var buf = _shake256_expand(Span[UInt8, ...](ptr=input.ptr(), length=input.len()), out_len)
         var a = List[UInt32](capacity=N)
@@ -623,7 +631,7 @@ def _sample_bounded_poly(rho: Span[UInt8, ...], r: UInt8, p: MLDSAParams) -> Lis
                 a.append(c1[0])
                 if len(a) == N:
                     return a^
-        out_len *= 2
+        out_len += 136
 
 
 def _sample_in_ball(rho: Span[UInt8, ...], p: MLDSAParams) -> List[UInt32]:

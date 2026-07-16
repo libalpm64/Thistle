@@ -2,6 +2,8 @@
 NIST P-256 / secp256r1 implementation.
 """
 
+from .p256_table import p256_base_table
+
 comptime P256_SIZE = 32
 comptime P256_POINT_SIZE = 65
 comptime _MASK64 = UInt128(0xFFFFFFFFFFFFFFFF)
@@ -619,6 +621,7 @@ def _is_on_curve(point: P256Point) -> Bool:
     return _eq(yy, rhs)
 
 
+@always_inline
 def _jacobian_double_ct(p: P256JacobianPoint) -> P256JacobianPoint:
     var delta = _mont_sqr(p.z)
     var gamma = _mont_sqr(p.y)
@@ -641,6 +644,7 @@ def _jacobian_double_ct(p: P256JacobianPoint) -> P256JacobianPoint:
     return P256JacobianPoint(x3, y3, z3, False)
 
 
+@always_inline
 def _jacobian_add_affine_ct(
     p: P256JacobianPoint, q: P256Point
 ) -> P256JacobianPoint:
@@ -748,6 +752,48 @@ def _scalar_mult(k: U256, p: P256Point) -> P256Point:
     return _jacobian_to_affine(acc)
 
 
+@always_inline
+def _base_table_entry(
+    tptr: UnsafePointer[UInt64, _], j: Int, d: UInt64
+) -> P256Point:
+    var qx = U256()
+    var qy = U256()
+    for t in range(1, 16):
+        var hit = _u64_zero_choice(UInt64(t) ^ d)
+        var base = (j * 15 + (t - 1)) * 8
+        var ex = U256(tptr[base], tptr[base + 1], tptr[base + 2], tptr[base + 3])
+        var ey = U256(tptr[base + 4], tptr[base + 5], tptr[base + 6], tptr[base + 7])
+        qx = _select_u256(qx, ex, hit)
+        qy = _select_u256(qy, ey, hit)
+    return P256Point(qx, qy, False)
+
+
+def _scalar_mult_base(k: U256) -> P256Point:
+    # d * 16^(2j) * G table
+    var table = p256_base_table()
+    var tptr = table.unsafe_ptr()
+
+    var acc = _jacobian_infinity()
+    for i in range(1, 64, 2):
+        var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
+        var q = _base_table_entry(tptr, i >> 1, d)
+        var added = _jacobian_add_affine_ct(acc, q)
+        acc = _select_jacobian_ct(acc, added, _u64_nonzero_choice(d))
+
+    acc = _jacobian_double_ct(acc)
+    acc = _jacobian_double_ct(acc)
+    acc = _jacobian_double_ct(acc)
+    acc = _jacobian_double_ct(acc)
+
+    for i in range(0, 64, 2):
+        var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
+        var q = _base_table_entry(tptr, i >> 1, d)
+        var added = _jacobian_add_affine_ct(acc, q)
+        acc = _select_jacobian_ct(acc, added, _u64_nonzero_choice(d))
+
+    return _jacobian_to_affine(acc)
+
+
 def p256_decode_uncompressed(point: Span[UInt8, ...]) -> P256Point:
     # 02/03||X, 04||X||Y.
     if len(point) == 33 and (point[0] == 0x02 or point[0] == 0x03):
@@ -801,7 +847,7 @@ def p256_public_key(
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
         return False
-    var q = _scalar_mult(d, P256Point.generator())
+    var q = _scalar_mult_base(d)
     return p256_encode_uncompressed(q, output)
 
 
