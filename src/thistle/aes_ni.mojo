@@ -4,9 +4,9 @@ AES-NI implementation
 
 from std.collections import List, InlineArray
 from std.sys import llvm_intrinsic, CompilationTarget
-from std.memory import alloc, bitcast, memset_zero, memcpy, UnsafePointer, Span
+from std.memory import bitcast, memset_zero, memcpy, UnsafePointer, Span
 from std.utils import StaticTuple
-from .aes import cpu_aes_encrypt, cpu_aes_ct_encrypt, cpu_aes_ct_encrypt16, cpu_aes_ct_skey, expand_key_128, expand_key_192, expand_key_256, expand_key_128_into, expand_key_192_into, expand_key_256_into
+from .aes import cpu_aes_encrypt, cpu_aes_ct_encrypt, cpu_aes_ct_encrypt16, cpu_aes_ct_skey, expand_key_128_into, expand_key_192_into, expand_key_256_into
 from .utils import StackBuffer, load_64be, store_64be
 
 comptime SIMD16 = SIMD[DType.uint8, 16]
@@ -709,6 +709,8 @@ def has_aes_ni() -> Bool:
 
 # AES-GCM authenticated encryption (NIST SP 800-38D)
 
+comptime _GCM_MAX_INPUT_BYTES = 68719476704
+
 @always_inline("nodebug")
 def _bitrev64(v: UInt64) -> UInt64:
     return llvm_intrinsic["llvm.bitreverse.i64", UInt64, has_side_effect=False](v)
@@ -1050,7 +1052,8 @@ struct AESGCMContext(Copyable, Movable):
         memset_zero(h_block.unsafe_ptr(), 16)
 
     def __del__(deinit self):
-        memset_zero(self._rk.unsafe_ptr(), 60 * 4)
+        memset_zero(self._rk.unsafe_ptr(), 60)
+        memset_zero(UnsafePointer(to=self._gh0), 1)
 
     def encrypt(
         self, iv: Span[UInt8, ...], plaintext: Span[UInt8, ...], aad: Span[UInt8, ...]
@@ -1058,6 +1061,8 @@ struct AESGCMContext(Copyable, Movable):
         if len(iv) == 0:
             raise Error("invalid iv size")
         var n = len(plaintext)
+        if n > _GCM_MAX_INPUT_BYTES:
+            raise Error("plaintext too long for AES-GCM")
         var ciphertext = List[UInt8](unsafe_uninit_length=n)
         var pt_ptr = plaintext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
         var tag = InlineArray[UInt8, 16](fill=0)
@@ -1073,6 +1078,8 @@ struct AESGCMContext(Copyable, Movable):
         var tag_out = List[UInt8](capacity=16)
         for i in range(16):
             tag_out.append(tag[i])
+        memset_zero(rk.unsafe_ptr(), 60)
+        memset_zero(UnsafePointer(to=gh), 1)
         return (ciphertext^, tag_out^)
 
     def decrypt(
@@ -1084,6 +1091,8 @@ struct AESGCMContext(Copyable, Movable):
         if len(tag) != 16:
             raise Error("invalid tag size")
         var n = len(ciphertext)
+        if n > _GCM_MAX_INPUT_BYTES:
+            raise Error("ciphertext too long for AES-GCM")
         var plaintext = List[UInt8](unsafe_uninit_length=n)
         var ct_ptr = ciphertext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
         var computed_tag = InlineArray[UInt8, 16](fill=0)
@@ -1104,8 +1113,12 @@ struct AESGCMContext(Copyable, Movable):
             var pt_ptr = plaintext.unsafe_ptr()
             for i in range(n):
                 pt_ptr.store[volatile=True](i, UInt8(0))
+            memset_zero(rk.unsafe_ptr(), 60)
+            memset_zero(UnsafePointer(to=gh), 1)
             return (List[UInt8](), False)
 
+        memset_zero(rk.unsafe_ptr(), 60)
+        memset_zero(UnsafePointer(to=gh), 1)
         return (plaintext^, True)
 
 

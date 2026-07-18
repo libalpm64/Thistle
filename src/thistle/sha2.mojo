@@ -4,13 +4,13 @@ RFC 6234 / FIPS 180-4 / CAVP validated
 """
 
 from std.collections import List
-from std.memory import UnsafePointer, alloc, memcpy, memset_zero
-from std.bit import rotate_bits_left, rotate_bits_right, byte_swap
+from std.memory import UnsafePointer, memcpy, memset_zero
+from std.bit import rotate_bits_right, byte_swap
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
 from std.sys import CompilationTarget
 from .sha_ni import sha512ni_transform_blocks, sha256ni_transform_blocks
-from .utils import nibble_to_hex_char, bytes_to_hex, string_to_bytes, load_32be, load_64be
+from .utils import bytes_to_hex, string_to_bytes, load_32be, load_64be
 
 comptime SHA256_K = SIMD[DType.uint32, 64](
     0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5, 0x3956C25B,
@@ -105,35 +105,6 @@ def small_sigma0_64(x: UInt64) -> UInt64:
 @always_inline
 def small_sigma1_64(x: UInt64) -> UInt64:
     return rotate_bits_right[19](x) ^ rotate_bits_right[61](x) ^ (x >> 6)
-
-
-struct SHA2Config[
-    WordType: DType,
-    Rounds: Int,
-    BlockSize: Int,
-    DigestSize: Int,
-    WordByteSize: Int,
-    IV: SIMD[WordType, 8],
-    K: SIMD[WordType, Rounds],
-]:
-    alias word_size = WordByteSize
-    alias rounds = Rounds
-    alias block_size = BlockSize
-    alias digest_size = DigestSize
-
-
-comptime SHA256Config = SHA2Config[
-    DType.uint32, 64, 64, 32, 4, SHA256_IV, SHA256_K
-]
-comptime SHA512Config = SHA2Config[
-    DType.uint64, 80, 128, 64, 8, SHA512_IV, SHA512_K
-]
-comptime SHA224Config = SHA2Config[
-    DType.uint32, 64, 64, 32, 4, SHA224_IV, SHA256_K
-]
-comptime SHA384Config = SHA2Config[
-    DType.uint64, 80, 128, 64, 8, SHA384_IV, SHA512_K
-]
 
 
 comptime SHA256_IV = SIMD[DType.uint32, 8](

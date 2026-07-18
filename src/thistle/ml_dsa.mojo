@@ -11,10 +11,8 @@ data, zeroize sensitive temporaries with volatile stores when practical.
 """
 
 from std.collections import List
-from std.algorithm.functional import vectorize
 from std.builtin.globals import global_constant
 from std.memory import memset_zero
-from std.sys import simd_width_of
 from thistle.sha3 import SHA3Context, sha3_update, shake_final, shake128, shake256
 from thistle.random import random_bytes
 from thistle.utils import StackBuffer, zero_stack_u8
@@ -135,6 +133,26 @@ struct MLDSAPrivateKey(Copyable, Movable):
     var t0: List[List[UInt32]]
     var k_seed: List[UInt8]
 
+    def __del__(deinit self):
+        var seed_ptr = self.seed.unsafe_ptr()
+        for i in range(len(self.seed)):
+            seed_ptr.store[volatile=True](i, UInt8(0))
+        var key_ptr = self.k_seed.unsafe_ptr()
+        for i in range(len(self.k_seed)):
+            key_ptr.store[volatile=True](i, UInt8(0))
+        for row in range(len(self.s1)):
+            var ptr = self.s1[row].unsafe_ptr()
+            for i in range(len(self.s1[row])):
+                ptr.store[volatile=True](i, UInt32(0))
+        for row in range(len(self.s2)):
+            var ptr = self.s2[row].unsafe_ptr()
+            for i in range(len(self.s2[row])):
+                ptr.store[volatile=True](i, UInt32(0))
+        for row in range(len(self.t0)):
+            var ptr = self.t0[row].unsafe_ptr()
+            for i in range(len(self.t0[row])):
+                ptr.store[volatile=True](i, UInt32(0))
+
 
 def params44() -> MLDSAParams:
     return MLDSAParams(4, 4, 2, 17, 88, 128, 39, 80)
@@ -230,12 +248,6 @@ def _append_bytes_stack(mut out: StackBuffer[UInt8, ...], src: Span[UInt8, ...])
 @always_inline
 def _ct_bool_to_u32(b: Bool) -> UInt32:
     return UInt32(Int(b))
-
-@always_inline
-def _ct_select_u8(false_value: UInt8, true_value: UInt8, choice: UInt32) -> UInt8:
-    var mask = UInt8(0) - UInt8(choice)
-    return false_value ^ (mask & (false_value ^ true_value))
-
 
 # volatile stores so the wipe can't be optimized away
 def _zero_list_u8(mut data: List[UInt8]):

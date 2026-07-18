@@ -353,7 +353,12 @@ struct SHA3Context(Movable):
         self.buffer_len = take.buffer_len
 
     def __del__(deinit self):
-        pass
+        var state_ptr = self.state.ptr()
+        for i in range(25):
+            state_ptr.store[volatile=True](i, UInt64(0))
+        var buffer_ptr = self.buffer.ptr()
+        for i in range(168):
+            buffer_ptr.store[volatile=True](i, UInt8(0))
 
 
 @always_inline

@@ -5,17 +5,13 @@ ML-KEM primitives implementation in Mojo
 from std.collections import List
 from std.algorithm.functional import vectorize
 from std.builtin.globals import global_constant
-from std.memory import memset_zero
 from std.sys import simd_width_of
 from thistle.sha3 import (
     SHA3Context,
-    sha3_256,
     sha3_256_into,
-    sha3_512,
     sha3_512_into,
     sha3_update,
     shake128,
-    shake128_into,
     shake256,
     shake256_into,
     shake_advance,
@@ -88,9 +84,6 @@ comptime MLKEM1024_PUBLICKEYBYTES = ENCAPSKEYBYTES_1024
 comptime MLKEM1024_SECRETKEYBYTES = DECAPSKEYBYTES_1024
 comptime MLKEM1024_CIPHERTEXTBYTES = CIPHERTEXTBYTES_1024
 comptime MLKEM_BYTES = 32
-comptime MLKEM_SYMBYTES = 32
-comptime MLK_ERR_OK = 0
-comptime MLK_ERR_FAIL = -1
 
 
 comptime ZETAS_TABLE: InlineArray[Int16, 128] = [
@@ -1003,6 +996,15 @@ struct DecapsulationKey(Copyable, Movable):
         self.pke_dk = KPKEDecapsulationKey()
         self.ek = EncapsulationKey()
         self.z = InlineArray[UInt8, SYMBYTES](fill=0)
+
+    def __del__(deinit self):
+        for row in range(K_MAX):
+            var ptr = self.pke_dk.pv.vec[row].coeffs.unsafe_ptr()
+            for i in range(N):
+                ptr.store[volatile=True](i, Int16(0))
+        var z_ptr = self.z.unsafe_ptr()
+        for i in range(SYMBYTES):
+            z_ptr.store[volatile=True](i, UInt8(0))
 
 
 def pack_pk_stack(mut out: StackBuffer[UInt8, ...], ref pk: Polyvec, seed: InlineArray[UInt8, SYMBYTES], k: Int) -> Bool:

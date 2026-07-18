@@ -3,7 +3,6 @@ X25519 implementation
 """
 
 from .curve25519 import FieldElement51
-from .constants import APLUS2_OVER_FOUR
 from .utils import StackInlineArray
 
 @always_inline

@@ -515,14 +515,6 @@ struct P256JacobianPoint(Copyable, ImplicitlyCopyable, Movable):
         self.z = take.z
         self.infinity = take.infinity
 
-    @staticmethod
-    def from_affine(point: P256Point) -> P256JacobianPoint:
-        if point.infinity:
-            return P256JacobianPoint()
-        return P256JacobianPoint(
-            _to_mont(point.x), _to_mont(point.y), _one_mont(), False
-        )
-
 
 @always_inline
 def _select_u256(a: U256, b: U256, choice: UInt64) -> U256:

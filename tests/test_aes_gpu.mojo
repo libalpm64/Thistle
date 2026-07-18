@@ -4,7 +4,7 @@ from std.collections import List
 from std.sys import has_accelerator
 from thistle.sha2 import bytes_to_hex
 from thistle.aes import cpu_aes_ct_skey, expand_key_128, expand_key_192, expand_key_256
-from thistle.aes_gpu import aes_gpu_kernel_ecb, aes_gpu_kernel_ctr, aes_gpu_kernel_gcm
+from thistle.aes_gpu import aes_gpu_kernel_ecb, aes_gpu_kernel_ctr, aes_gpu_kernel_gcm_ctr
 from std.memory import alloc
 from std.gpu.host import DeviceContext
 from std.memory.unsafe_pointer import UnsafePointer
@@ -283,7 +283,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
             nonce_ptr[15] = 1
 
             ctx.enqueue_copy(nonce_buffer, nonce_ptr)
-            ctx.enqueue_function[aes_gpu_kernel_gcm](
+            ctx.enqueue_function[aes_gpu_kernel_gcm_ctr](
                 input_buffer.unsafe_ptr(),
                 output_buffer.unsafe_ptr(),
                 skey_buffer.unsafe_ptr(),

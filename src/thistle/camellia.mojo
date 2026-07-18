@@ -415,11 +415,6 @@ comptime _FL_SH_B = _mk_fl_idx(8, False, False)
 comptime _FL_SH2_B = _mk_fl_idx(8, True, False)
 comptime _FL_DOWN_B = _mk_fl_idx(8, False, True)
 
-comptime _SWAP_HALVES = StaticTuple[Int, 16](
-    8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7
-)
-
-
 @always_inline
 def _kv_a(k: UInt64) -> _U8x16:
     return bitcast[DType.uint8, 16](SIMD[DType.uint64, 2](k, 0))

@@ -8,10 +8,8 @@ from .utils import StackBuffer
 from .sha2 import (
     SHA256Context,
     SHA512Context,
-    sha256_hash,
     sha256_update,
     sha256_final_to_buffer,
-    sha512_hash,
     sha512_update,
     sha512_final_to_buffer,
 )

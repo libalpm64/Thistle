@@ -18,14 +18,6 @@ comptime L_LIMBS = SIMD[DType.uint64, 5](
 )
 comptime LFACTOR: UInt64 = 0x51da312547e1b
 
-comptime R_LIMBS = SIMD[DType.uint64, 5](
-    0x000f48bd6721e6ed,
-    0x0003bab5ac67e45a,
-    0x000fffffeb35e51b,
-    0x000fffffffffffff,
-    0x00000fffffffffff,
-)
-
 comptime RR_LIMBS = SIMD[DType.uint64, 5](
     0x0009d265e952d13b,
     0x000d63c715bea69f,
@@ -438,6 +430,20 @@ def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
 def edwards_decode_verify_compatible(data: Span[UInt8, ...]) -> DecodeResult:
     # strict RFC decoding only, no ZIP-215
     return edwards_decode(data, strict=True)
+
+
+def _is_small_order(p: EdwardsPoint) -> Bool:
+    var q = _edwards_double_standalone(p)
+    q = _edwards_double_standalone(q)
+    q = _edwards_double_standalone(q)
+    var x = InlineArray[UInt8, 32](uninitialized=True)
+    var yz = InlineArray[UInt8, 32](uninitialized=True)
+    q.X.to_bytes_into(x.unsafe_ptr())
+    (q.Y - q.Z).to_bytes_into(yz.unsafe_ptr())
+    var diff = UInt8(0)
+    for i in range(32):
+        diff |= x[i] | yz[i]
+    return diff == 0
 
 @no_inline
 def sqrt_ratio_checked(u: FieldElement51, v: FieldElement51) -> Optional[FieldElement51]:
@@ -886,15 +892,16 @@ struct Ed25519SigningKey(Copyable, Movable):
 
 @no_inline
 def ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], signature: Span[UInt8, ...]) -> Bool:
-    # RFC 8032 5.1.7 strict Ed25519 verification.
-    # Requires canonical A/R, S < L, and checks [S]B == R + [k]A.
-    # Not ZIP-215-compatible.
+    # Uses canonical decoding, S < L, and the uncofactored equation.
+    # Low-order public keys are rejected by library policy.
     if len(public_key) != 32 or len(signature) != 64:
         return False
     var A_res = edwards_decode_verify_compatible(public_key)
     if not A_res.ok:
         return False
     var A = A_res.p
+    if _is_small_order(A):
+        return False
 
     var R_enc = InlineArray[UInt8, 32](uninitialized=True)
     for i in range(32): R_enc[i] = signature[i]

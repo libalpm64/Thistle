@@ -371,6 +371,28 @@ struct RsaPublicKey:
             raise Error("RSA modulus must be 128 to 4224 bits")
         if len(exponent) == 0 or len(exponent) > 64:
             raise Error("RSA exponent size unsupported")
+        var exponent_lead = 0
+        while exponent_lead < len(exponent) and exponent[exponent_lead] == 0:
+            exponent_lead += 1
+        if exponent_lead == len(exponent):
+            raise Error("RSA exponent must be nonzero")
+        var exponent_len = len(exponent) - exponent_lead
+        if (exponent[len(exponent) - 1] & 1) == 0:
+            raise Error("RSA exponent must be odd")
+        if exponent_len == 1 and exponent[exponent_lead] < 3:
+            raise Error("RSA exponent must be at least 3")
+        if exponent_len > nb:
+            raise Error("RSA exponent must be smaller than modulus")
+        if exponent_len == nb:
+            var exponent_ge_modulus = True
+            for i in range(nb):
+                if exponent[exponent_lead + i] < modulus[lead + i]:
+                    exponent_ge_modulus = False
+                    break
+                if exponent[exponent_lead + i] > modulus[lead + i]:
+                    break
+            if exponent_ge_modulus:
+                raise Error("RSA exponent must be smaller than modulus")
         self.nb = nb
         self.k = (nb + 7) // 8
         var k = self.k
@@ -411,8 +433,8 @@ struct RsaPublicKey:
             if (target >> bit) & 1 == 1:
                 _bn_dbl_mod(self.r2, self.n, k)
 
-        self.e = List[UInt8](capacity=len(exponent))
-        for i in range(len(exponent)):
+        self.e = List[UInt8](capacity=exponent_len)
+        for i in range(exponent_lead, len(exponent)):
             self.e.append(exponent[i])
 
     def _public_op(
@@ -510,7 +532,7 @@ struct RsaPublicKey:
         var m_hash = InlineArray[UInt8, 64](uninitialized=True)
         _ = _hash_into(sha, message, m_hash.unsafe_ptr())
 
-        var mprime = InlineArray[UInt8, 200](uninitialized=True)
+        var mprime = InlineArray[UInt8, 534](uninitialized=True)
         for i in range(8):
             mprime[i] = 0
         for i in range(h_len):

@@ -121,7 +121,7 @@ def _gy() -> U384:
 
 
 def _sqrt_exp() -> U384:
-	# p == 3 mod 4
+    # p == 3 mod 4
     return U384(
         0x0000000040000000,
         0xBFFFFFFFC0000000,
@@ -459,14 +459,6 @@ struct P384JacobianPoint(Copyable, ImplicitlyCopyable, Movable):
         self.y = take.y
         self.z = take.z
         self.infinity = take.infinity
-
-    @staticmethod
-    def from_affine(point: P384Point) -> P384JacobianPoint:
-        if point.infinity:
-            return P384JacobianPoint()
-        return P384JacobianPoint(
-            _to_mont(point.x), _to_mont(point.y), _one_mont(), False
-        )
 
 
 @always_inline

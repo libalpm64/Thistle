@@ -180,7 +180,7 @@ def benchmark_sha3_256(data: List[UInt8], duration_secs: Float64) -> String:
     return "sha3-256 | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-def benchmark_blake2b(data: List[UInt8], duration_secs: Float64) -> String:
+def benchmark_blake2b(data: List[UInt8], duration_secs: Float64) raises -> String:
     var span = Span[UInt8, ...](data)
     var count = 0
     var start = perf_counter()
@@ -196,7 +196,7 @@ def benchmark_blake2b(data: List[UInt8], duration_secs: Float64) -> String:
     return "blake2b | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
 
 
-def benchmark_blake3(data: List[UInt8], duration_secs: Float64) -> String:
+def benchmark_blake3(data: List[UInt8], duration_secs: Float64) raises -> String:
     var span = Span[UInt8, ...](data)
     _ = blake3_parallel_hash(span)
     var count = 0
@@ -525,7 +525,7 @@ def benchmark_aes_gpu_gcm() raises -> String:
         return "aes-128-gpu-gcm | (GPU not available)"
     
     from std.gpu.host import DeviceContext
-    from thistle.aes_gpu import aes_gpu_kernel_gcm
+    from thistle.aes_gpu import aes_gpu_kernel_gcm_ctr
     
     var key_ptr = alloc[UInt8](16)
     for i in range(16):
@@ -559,7 +559,7 @@ def benchmark_aes_gpu_gcm() raises -> String:
         var block_dim = 256
         var grid_dim = ceildiv(num_blocks, block_dim)
         
-        ctx.enqueue_function[aes_gpu_kernel_gcm](
+        ctx.enqueue_function[aes_gpu_kernel_gcm_ctr](
             input_buffer.unsafe_ptr(),
             output_buffer.unsafe_ptr(),
             skey_buffer.unsafe_ptr(),
@@ -574,7 +574,7 @@ def benchmark_aes_gpu_gcm() raises -> String:
         var iterations = 50
         var start = perf_counter()
         for _ in range(iterations):
-            ctx.enqueue_function[aes_gpu_kernel_gcm](
+            ctx.enqueue_function[aes_gpu_kernel_gcm_ctr](
                 input_buffer.unsafe_ptr(),
                 output_buffer.unsafe_ptr(),
                 skey_buffer.unsafe_ptr(),

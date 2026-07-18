@@ -97,7 +97,7 @@ def aes_gpu_kernel_ctr(
                 op[j] = bp[j] ^ buf[k * 16 + j]
 
 @always_inline
-def aes_gpu_kernel_gcm(
+def aes_gpu_kernel_gcm_ctr(
     input_data: UnsafePointer[UInt8, MutAnyOrigin],
     output_data: UnsafePointer[UInt8, MutAnyOrigin],
     skey: UnsafePointer[UInt64, MutAnyOrigin],

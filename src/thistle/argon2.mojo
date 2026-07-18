@@ -193,7 +193,7 @@ def store_le32(ptr: UnsafePointer[UInt8, MutAnyOrigin], offset: Int, val: Int):
     ptr[offset + 3] = UInt8((val >> 24) & 0xFF)
 
 
-def variable_length_hash_to_ptr(t_len: Int, input: Span[UInt8, ...], out_ptr: UnsafePointer[UInt8, MutAnyOrigin]):
+def variable_length_hash_to_ptr(t_len: Int, input: Span[UInt8, ...], out_ptr: UnsafePointer[UInt8, MutAnyOrigin]) raises:
     var le_buf = alloc[UInt8](4)
 
     if t_len <= 64:
@@ -234,7 +234,7 @@ def variable_length_hash_to_ptr(t_len: Int, input: Span[UInt8, ...], out_ptr: Un
     zero_and_free(v_buf, 64)
     zero_and_free(le_buf, 4)
 
-def variable_length_hash(t_len: Int, input: Span[UInt8, ...]) -> List[UInt8]:
+def variable_length_hash(t_len: Int, input: Span[UInt8, ...]) raises -> List[UInt8]:
     var out_buf = alloc[UInt8](t_len)
     variable_length_hash_to_ptr(t_len, input, out_buf)
     var result = List[UInt8](capacity=t_len)
@@ -355,7 +355,7 @@ def _argon2_process_lane(
     zero_and_free_u64(zero_u64, 128)
     zero_and_free_u64(tmp_addr, 128)
 
-def _validate_params(parallelism: Int, tag_length: Int, memory_size_kb: Int, iterations: Int) raises:
+def _validate_params(parallelism: Int, tag_length: Int, memory_size_kb: Int, iterations: Int, version: Int) raises:
     # RFC 9106 section 3 parameter bounds
     if parallelism < 1 or parallelism >= (1 << 24):
         raise Error("Argon2 parallelism must be in [1, 2^24)")
@@ -365,6 +365,8 @@ def _validate_params(parallelism: Int, tag_length: Int, memory_size_kb: Int, ite
         raise Error("Argon2 memory must be in [8*parallelism, 2^32) KiB")
     if iterations < 1 or iterations >= (1 << 32):
         raise Error("Argon2 iterations must be in [1, 2^32)")
+    if version != 0x13:
+        raise Error("Argon2 version must be 0x13")
 
 
 struct Argon2id:
@@ -378,6 +380,11 @@ struct Argon2id:
     var secret: List[UInt8]
     var ad: List[UInt8]
 
+    def __del__(deinit self):
+        var secret_ptr = self.secret.unsafe_ptr()
+        for i in range(len(self.secret)):
+            secret_ptr.store[volatile=True](i, UInt8(0))
+
     def __init__(
         out self,
         salt: Span[UInt8, ...],
@@ -387,7 +394,7 @@ struct Argon2id:
         iterations: Int = 3,
         version: Int = 0x13,
     ) raises:
-        _validate_params(parallelism, tag_length, memory_size_kb, iterations)
+        _validate_params(parallelism, tag_length, memory_size_kb, iterations, version)
         self.parallelism = parallelism
         self.tag_length = tag_length
         self.memory_size_kb = memory_size_kb
@@ -411,7 +418,7 @@ struct Argon2id:
         iterations: Int = 3,
         version: Int = 0x13,
     ) raises:
-        _validate_params(parallelism, tag_length, memory_size_kb, iterations)
+        _validate_params(parallelism, tag_length, memory_size_kb, iterations, version)
         self.parallelism = parallelism
         self.tag_length = tag_length
         self.memory_size_kb = memory_size_kb
@@ -428,7 +435,7 @@ struct Argon2id:
         for i in range(len(ad)):
             self.ad.append(ad[i])
 
-    def hash(self, password: Span[UInt8, ...]) -> List[UInt8]:
+    def hash(self, password: Span[UInt8, ...]) raises -> List[UInt8]:
         var h0_ctx = Blake2b(64)
         var le_buf = alloc[UInt8](4)
         store_le32(le_buf, 0, self.parallelism)

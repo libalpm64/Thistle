@@ -7,9 +7,7 @@ from std.memory import alloc, memset_zero
 from std.utils import StaticTuple
 from .utils import StackBuffer
 
-comptime AESError = Error
 comptime ROUNDS_128: Int = 10
-comptime BLOCK_SIZE: Int = 16
 
 @always_inline
 def _ct_encrypt1(

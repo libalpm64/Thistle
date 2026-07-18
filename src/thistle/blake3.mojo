@@ -3,9 +3,8 @@ BLAKE3 cryptographic hash function
 """
 
 from std.algorithm import parallelize
-from std.bit._mask import splat
 from std.collections import List
-from std.memory import UnsafePointer, bitcast, stack_allocation
+from std.memory import UnsafePointer, bitcast
 from std.bit import count_trailing_zeros
 from std.utils import IndexList
 from thistle.utils import StackInlineArray
@@ -32,23 +31,6 @@ comptime ROOT = UInt8(1 << 3)
 """Flag indicating the root node of the hash tree."""
 comptime CHUNK_LEN = 1024
 """The length of a BLAKE3 chunk in bytes."""
-
-# fmt: off
-comptime _round_idxes_arr = [
-    [(0, 1), (2, 3), (4, 5), (6, 7), (8, 9), (10, 11), (12, 13), (14, 15)],
-    [(2, 6), (3, 10), (7, 0), (4, 13), (1, 11), (12, 5), (9, 14), (15, 8)],
-    [(3, 4), (10, 12), (13, 2), (7, 14), (6, 5), (9, 0), (11, 15), (8, 1)],
-    [(10, 7), (12, 9), (14, 3), (13, 15), (4, 0), (11, 2), (5, 8), (1, 6)],
-    [(12, 13), (9, 11), (15, 10), (14, 8), (7, 2), (5, 3), (0, 1), (6, 4)],
-    [(9, 14), (11, 5), (8, 12), (15, 1), (13, 3), (0, 10), (2, 6), (4, 7)],
-    [(11, 15), (5, 0), (1, 9), (8, 6), (14, 10), (2, 12), (3, 4), (7, 13)],
-]
-comptime _v_idxes_arr = [
-    (0, 4, 8, 12), (1, 5, 9, 13), (2, 6, 10, 14), (3, 7, 11, 15),
-    (0, 5, 10, 15), (1, 6, 11, 12), (2, 7, 8, 13), (3, 4, 9, 14)
-]
-# fmt: on
-
 
 @always_inline
 def bit_rotr[n: Int, w: Int](v: SIMD[DType.uint32, w]) -> SIMD[DType.uint32, w]:
@@ -369,8 +351,10 @@ struct Hasher:
         self.stack_len += 1
 
     @always_inline
-    def finalize(self, out_len: Int, out out_buf: List[UInt8]):
+    def finalize(self, out_len: Int, out out_buf: List[UInt8]) raises:
         """Finalize the hash and return the output."""
+        if out_len < 0:
+            raise Error("BLAKE3 output length must be non-negative")
         out_buf = {unsafe_uninit_length=out_len}
         var temp_buf = StackInlineArray[UInt8, 64](uninitialized=True)
 
@@ -434,7 +418,7 @@ struct Hasher:
 
 
 @always_inline
-def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) -> List[UInt8]:
+def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> List[UInt8]:
     var d = input
     var total_chunks = (len(d) + CHUNK_LEN - 1) // CHUNK_LEN
 
@@ -594,5 +578,5 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) -> List[UIn
     h.update(d[num_full_batches * 64 * 1024 :])
     return h.finalize(out_len)
 
-def blake3_hash(input: Span[UInt8, ...], out_len: Int = 32) -> List[UInt8]:
+def blake3_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> List[UInt8]:
     return blake3_parallel_hash(input, out_len)

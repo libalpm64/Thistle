@@ -82,6 +82,9 @@ def _aead_core[encrypt: Bool](
         )
     else:
         _aead_tag(poly_key_span, aad, input, tag)
+    var poly_key_ptr = poly_key.unsafe_ptr()
+    for i in range(32):
+        poly_key_ptr.store[volatile=True](i, UInt8(0))
 
 
 def chacha20_poly1305_encrypt(
@@ -133,11 +136,17 @@ def chacha20_poly1305_decrypt(
     for i in range(16):
         diff |= expected[i] ^ tag[i]
     if diff != 0:
+        var poly_key_ptr = poly_key.unsafe_ptr()
+        for i in range(32):
+            poly_key_ptr.store[volatile=True](i, UInt8(0))
         return False
 
     var cipher = ChaCha20(key_bytes, nonce_bytes, counter=1)
     var src = ciphertext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
     cipher._stream_xor(src, plaintext, len(ciphertext))
+    var poly_key_ptr = poly_key.unsafe_ptr()
+    for i in range(32):
+        poly_key_ptr.store[volatile=True](i, UInt8(0))
     return True
 
 
@@ -160,6 +169,8 @@ def xchacha20_poly1305_encrypt(
         Span[UInt8, ...](ptr=sp + 32, length=12),
         aad, plaintext, ciphertext, tag,
     )
+    for i in range(44):
+        sp.store[volatile=True](i, UInt8(0))
 
 
 def xchacha20_poly1305_decrypt(
@@ -176,11 +187,14 @@ def xchacha20_poly1305_decrypt(
         raise Error("XChaCha20-Poly1305 nonce must be 24 bytes")
     var sub = _xchacha_subkey_nonce(key, nonce)
     var sp = sub.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
-    return chacha20_poly1305_decrypt(
+    var ok = chacha20_poly1305_decrypt(
         Span[UInt8, ...](ptr=sp, length=32),
         Span[UInt8, ...](ptr=sp + 32, length=12),
         aad, ciphertext, tag, plaintext,
     )
+    for i in range(44):
+        sp.store[volatile=True](i, UInt8(0))
+    return ok
 
 
 def _xchacha_subkey_nonce(key: Span[UInt8, ...], nonce: Span[UInt8, ...]) raises -> InlineArray[UInt8, 44]:

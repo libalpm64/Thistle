@@ -4,7 +4,7 @@ RFC 7693
 """
 
 from std.collections import List
-from std.memory import UnsafePointer, alloc, memcpy, memset_zero
+from std.memory import UnsafePointer, memcpy, memset_zero
 from .utils import bytes_to_hex, string_to_bytes
 
 comptime BLAKE2B_IV = SIMD[DType.uint64, 8](
@@ -93,8 +93,9 @@ struct Blake2b(Movable):
     def _buf_ptr(mut self) -> UnsafePointer[UInt8, MutAnyOrigin]:
         return self.buffer.unsafe_ptr().bitcast[UInt8]().unsafe_origin_cast[MutAnyOrigin]()
 
-    def __init__(out self, out_len: Int = 64):
-        debug_assert(1 <= out_len <= 64, "BLAKE2b digest length must be 1..64")
+    def __init__(out self, out_len: Int = 64) raises:
+        if out_len < 1 or out_len > 64:
+            raise Error("BLAKE2b digest length must be 1..64")
         self.out_len = out_len
         self.key_len = 0
         self.h = BLAKE2B_IV
@@ -109,9 +110,11 @@ struct Blake2b(Movable):
 
         self.h[0] ^= p0
 
-    def __init__(out self, out_len: Int, key: Span[UInt8, ...]):
-        debug_assert(1 <= out_len <= 64, "BLAKE2b digest length must be 1..64")
-        debug_assert(len(key) <= 64, "BLAKE2b key must be at most 64 bytes")
+    def __init__(out self, out_len: Int, key: Span[UInt8, ...]) raises:
+        if out_len < 1 or out_len > 64:
+            raise Error("BLAKE2b digest length must be 1..64")
+        if len(key) > 64:
+            raise Error("BLAKE2b key must be at most 64 bytes")
         self.out_len = out_len
         self.key_len = len(key)
         self.h = BLAKE2B_IV
@@ -143,6 +146,9 @@ struct Blake2b(Movable):
         self.key_len = take.key_len
 
     def __del__(deinit self):
+        UnsafePointer(to=self.h).bitcast[UInt64]().store[volatile=True](
+            0, SIMD[DType.uint64, 8](0)
+        )
         memset_zero(self.buffer.unsafe_ptr(), 16)
 
     @always_inline
