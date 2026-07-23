@@ -13,11 +13,11 @@ from thistle.sha2 import sha256_hash, sha512_hash
 from thistle.sha3 import sha3_256
 from thistle.blake2b import blake2b_hash
 from thistle.blake3 import blake3_hash
-from thistle.pbkdf2 import hmac_sha256
+from thistle.pbkdf2 import hmac_sha256, hmac_sha384
 from thistle.x25519 import x25519
 from thistle.ed25519 import ed25519_sign
-from thistle.p256 import p256_public_key
-from thistle.p384 import p384_public_key
+from thistle.p256 import p256_public_key, p256_ecdsa_sign
+from thistle.p384 import p384_public_key, p384_ecdsa_sign
 from thistle.ml_kem import mlkem512_keygen, mlkem512_encaps, mlkem512_decaps
 
 comptime N_FAST = 100_000
@@ -343,6 +343,28 @@ def run_hmac(mut rng: Rng) raises -> Bool:
     return _report("hmac-sha256 (fixed/random key)", times, cls)
 
 
+def run_hmac_sha384(mut rng: Rng) -> Bool:
+    var cls = _classes(N_FAST, rng)
+    var inp = _fast_inputs(cls, 48, rng)
+    var data = List[UInt8](length=48, fill=0x5A)
+    var times = List[Float64](capacity=N_FAST)
+    var sink: UInt8 = 0
+    var key = List[UInt8](length=48, fill=0)
+    for i in range(N_FAST):
+        for j in range(48):
+            key[j] = inp[i * 48 + j]
+        var t0 = perf_counter_ns()
+        for _ in range(BATCH):
+            var mac = hmac_sha384(
+                Span[UInt8, ...](key), Span[UInt8, ...](data)
+            )
+            sink ^= mac[0]
+        times.append(Float64(perf_counter_ns() - t0))
+    if sink == 42:
+        print("")
+    return _report("hmac-sha384 (fixed/random key)", times, cls)
+
+
 def _valid_scalar(nbytes: Int, mut rng: Rng, fixed: Bool) -> List[UInt8]:
     # nonzero and < group order, top byte forced into [1,0x7f]
     var s = List[UInt8]()
@@ -455,6 +477,48 @@ def run_p384(mut rng: Rng) raises -> Bool:
     return _report("p-384 scalar mult (fixed/random scalar)", times, cls)
 
 
+def run_p256_sign(mut rng: Rng) -> Bool:
+    var cls = _classes(N_ASYM, rng)
+    var times = List[Float64](capacity=N_ASYM)
+    var message = List[UInt8](length=32, fill=0xA5)
+    var signature = List[UInt8](unsafe_uninit_length=64)
+    var sink: UInt8 = 0
+    for i in range(N_ASYM):
+        var private_key = _valid_scalar(32, rng, cls[i] == 0)
+        var t0 = perf_counter_ns()
+        var ok = p256_ecdsa_sign(
+            Span[UInt8, ...](private_key),
+            Span[UInt8, ...](message),
+            signature.unsafe_ptr(),
+        )
+        times.append(Float64(perf_counter_ns() - t0))
+        sink ^= signature[0] ^ (UInt8(1) if ok else UInt8(0))
+    if sink == 42:
+        print("")
+    return _report("p-256 ECDSA sign (fixed/random key)", times, cls)
+
+
+def run_p384_sign(mut rng: Rng) -> Bool:
+    var cls = _classes(N_ASYM, rng)
+    var times = List[Float64](capacity=N_ASYM)
+    var message = List[UInt8](length=48, fill=0xA5)
+    var signature = List[UInt8](unsafe_uninit_length=96)
+    var sink: UInt8 = 0
+    for i in range(N_ASYM):
+        var private_key = _valid_scalar(48, rng, cls[i] == 0)
+        var t0 = perf_counter_ns()
+        var ok = p384_ecdsa_sign(
+            Span[UInt8, ...](private_key),
+            Span[UInt8, ...](message),
+            signature.unsafe_ptr(),
+        )
+        times.append(Float64(perf_counter_ns() - t0))
+        sink ^= signature[0] ^ (UInt8(1) if ok else UInt8(0))
+    if sink == 42:
+        print("")
+    return _report("p-384 ECDSA sign (fixed/random key)", times, cls)
+
+
 def run_mlkem_decaps(mut rng: Rng) raises -> Bool:
     var kp = mlkem512_keygen()
     var ek = kp[0].copy()
@@ -523,6 +587,8 @@ def main() raises:
         any_leak = True
     if run_hmac(rng):
         any_leak = True
+    if run_hmac_sha384(rng):
+        any_leak = True
 
     print("asymmetric:")
     if run_x25519(rng):
@@ -532,6 +598,10 @@ def main() raises:
     if run_p256(rng):
         any_leak = True
     if run_p384(rng):
+        any_leak = True
+    if run_p256_sign(rng):
+        any_leak = True
+    if run_p384_sign(rng):
         any_leak = True
     if run_mlkem_decaps(rng):
         any_leak = True

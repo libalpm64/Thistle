@@ -4,9 +4,12 @@ NIST P-384 / secp384r1 implementation.
 
 from .p384_table import p384_base_table
 from .utils import u64_nonzero_choice, u64_zero_choice
+from .sha2 import sha384_hash
+from .pbkdf2 import hmac_sha384
 
 comptime P384_SIZE = 48
 comptime P384_POINT_SIZE = 97
+comptime P384_SIGNATURE_SIZE = 96
 comptime _MASK64 = UInt128(0xFFFFFFFFFFFFFFFF)
 comptime _N0 = UInt64(0x0000000100000001)  # -p^-1 mod 2^64
 
@@ -480,7 +483,6 @@ def _u384_zero_choice(x: U384) -> UInt64:
 
 @always_inline
 def _jacobian_infinity() -> P384JacobianPoint:
-    # Infinity Z = 0.
     return P384JacobianPoint(U384(), _one_mont(), U384(), False)
 
 
@@ -530,7 +532,6 @@ def _is_on_curve(point: P384Point) -> Bool:
 
 @always_inline
 def _jacobian_double_ct(p: P384JacobianPoint) -> P384JacobianPoint:
-    # Jacobian doubling a = -3.
     var delta = _mont_sqr(p.z)
     var gamma = _mont_sqr(p.y)
     var beta = _mont_mul(p.x, gamma)
@@ -553,10 +554,10 @@ def _jacobian_double_ct(p: P384JacobianPoint) -> P384JacobianPoint:
 
 
 @always_inline
-def _jacobian_add_affine_ct(
+def _jacobian_add_affine_non_equal_ct(
     p: P384JacobianPoint, q: P384Point
 ) -> P384JacobianPoint:
-    # H is nonzero for fixed-window inputs.
+    # Scalar multiplication adds distinct non-opposite multiples.
     var z1z1 = _mont_sqr(p.z)
     var u2 = _mont_mul(q.x, z1z1)
     var s2 = _mont_mul(q.y, _mont_mul(p.z, z1z1))
@@ -604,7 +605,7 @@ def _scalar_mult(k: U384, p: P384Point) -> P384Point:
     jac[0] = P384JacobianPoint(pm.x, pm.y, _one_mont(), False)
     jac[1] = _jacobian_double_ct(jac[0])
     for i in range(2, 15):
-        jac[i] = _jacobian_add_affine_ct(jac[i - 1], pm)
+        jac[i] = _jacobian_add_affine_non_equal_ct(jac[i - 1], pm)
 
     var prefix = InlineArray[U384, 15](uninitialized=True)
     prefix[0] = jac[0].z
@@ -640,7 +641,9 @@ def _scalar_mult(k: U384, p: P384Point) -> P384Point:
             qx = _select_u384(qx, tx[i], hit)
             qy = _select_u384(qy, ty[i], hit)
 
-        var added = _jacobian_add_affine_ct(acc, P384Point(qx, qy, False))
+        var added = _jacobian_add_affine_non_equal_ct(
+            acc, P384Point(qx, qy, False)
+        )
         acc = _select_jacobian_ct(acc, added, u64_nonzero_choice(d))
     return _jacobian_to_affine(acc)
 
@@ -649,7 +652,7 @@ def _scalar_mult(k: U384, p: P384Point) -> P384Point:
 def _base_table_entry(
     tptr: UnsafePointer[UInt64, _], j: Int, d: UInt64
 ) -> P384Point:
-    # constant-time scan of the 15 entries for window j
+    # Scan the whole window.
     var qx = U384()
     var qy = U384()
     for t in range(1, 16):
@@ -663,8 +666,7 @@ def _base_table_entry(
 
 
 def _scalar_mult_base(k: U384) -> P384Point:
-    # fixed-base multiply from the precomputed d * 16^(2j) * G table:
-    # odd radix-16 digits, four doublings, then even digits
+    # Split odd and even radix-16 digits.
     var table = p384_base_table()
     var tptr = table.unsafe_ptr()
 
@@ -672,7 +674,7 @@ def _scalar_mult_base(k: U384) -> P384Point:
     for i in range(1, 96, 2):
         var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
         var q = _base_table_entry(tptr, i >> 1, d)
-        var added = _jacobian_add_affine_ct(acc, q)
+        var added = _jacobian_add_affine_non_equal_ct(acc, q)
         acc = _select_jacobian_ct(acc, added, u64_nonzero_choice(d))
 
     acc = _jacobian_double_ct(acc)
@@ -683,7 +685,7 @@ def _scalar_mult_base(k: U384) -> P384Point:
     for i in range(0, 96, 2):
         var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
         var q = _base_table_entry(tptr, i >> 1, d)
-        var added = _jacobian_add_affine_ct(acc, q)
+        var added = _jacobian_add_affine_non_equal_ct(acc, q)
         acc = _select_jacobian_ct(acc, added, u64_nonzero_choice(d))
 
     return _jacobian_to_affine(acc)
@@ -738,9 +740,16 @@ def p384_public_key(
         return False
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
+        var dp = d.limbs.unsafe_ptr()
+        for i in range(6):
+            dp.store[volatile=True](i, UInt64(0))
         return False
     var q = _scalar_mult_base(d)
-    return p384_encode_uncompressed(q, output)
+    var ok = p384_encode_uncompressed(q, output)
+    var dp = d.limbs.unsafe_ptr()
+    for i in range(6):
+        dp.store[volatile=True](i, UInt64(0))
+    return ok
 
 
 @no_inline
@@ -753,12 +762,335 @@ def p384_ecdh(
         return False
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
+        var dp = d.limbs.unsafe_ptr()
+        for i in range(6):
+            dp.store[volatile=True](i, UInt64(0))
         return False
     var q = p384_decode_uncompressed(public_key)
     if q.infinity:
+        var dp = d.limbs.unsafe_ptr()
+        for i in range(6):
+            dp.store[volatile=True](i, UInt64(0))
         return False
     var shared = _scalar_mult(d, q)
+    var dp = d.limbs.unsafe_ptr()
+    for i in range(6):
+        dp.store[volatile=True](i, UInt64(0))
     if shared.infinity:
         return False
     _to_be(shared.x, output)
     return True
+
+
+def _n_rr() -> U384:
+    return U384(
+        0x2D319B2419B409A9,
+        0xFF3D81E5DF1AA419,
+        0xBC3E483AFCB82947,
+        0xD40D49174AAB1CC5,
+        0x3FB05B7A28266895,
+        0x0C84EE012B39BF21,
+    )
+
+
+def _n_one_mont() -> U384:
+    return U384(
+        0x1313E695333AD68D,
+        0xA7E5F24DB74F5885,
+        0x389CB27E0BC8D220,
+        0,
+        0,
+        0,
+    )
+
+
+def _n_minus_2() -> U384:
+    return U384(
+        0xECEC196ACCC52971,
+        0x581A0DB248B0A77A,
+        0xC7634D81F4372DDF,
+        0xFFFFFFFFFFFFFFFF,
+        0xFFFFFFFFFFFFFFFF,
+        0xFFFFFFFFFFFFFFFF,
+    )
+
+
+@always_inline
+def _n_mont_mul(a: U384, b: U384) -> U384:
+    comptime n0 = UInt64(0x6ED46089E88FDC45)
+    var n = _n()
+    var t = U384()
+    var t_hi = UInt64(0)
+    comptime for i in range(6):
+        var ai = a.limbs[i]
+        var s = UInt128(ai) * UInt128(b.limbs[0]) + UInt128(t.limbs[0])
+        var m = s.cast[DType.uint64]() * n0
+        var q = UInt128(m) * UInt128(n.limbs[0]) + UInt128(s.cast[DType.uint64]())
+        var ca = s >> 64
+        var cb = q >> 64
+        comptime for j in range(1, 6):
+            var u = UInt128(ai) * UInt128(b.limbs[j]) + UInt128(t.limbs[j]) + ca
+            ca = u >> 64
+            var v = UInt128(m) * UInt128(n.limbs[j]) + UInt128(u.cast[DType.uint64]()) + cb
+            t.limbs[j - 1] = v.cast[DType.uint64]()
+            cb = v >> 64
+        var w = UInt128(t_hi) + ca + cb
+        t.limbs[5] = w.cast[DType.uint64]()
+        t_hi = (w >> 64).cast[DType.uint64]()
+    var reduced, borrow = _sub_raw(t, n)
+    var take = u64_nonzero_choice(t_hi) | (borrow ^ UInt64(1))
+    return _select_u384(t, reduced, take & UInt64(1))
+
+
+@always_inline
+def _n_to_mont(x: U384) -> U384:
+    return _n_mont_mul(x, _n_rr())
+
+
+@always_inline
+def _n_from_mont(x: U384) -> U384:
+    return _n_mont_mul(x, U384.one())
+
+
+@always_inline
+def _n_mul(a: U384, b: U384) -> U384:
+    return _n_mont_mul(_n_to_mont(a), b)
+
+
+def _n_inv(x: U384) -> U384:
+    var result = _n_one_mont()
+    var base = _n_to_mont(x)
+    var exponent = _n_minus_2()
+    for i in range(383, -1, -1):
+        result = _n_mont_mul(result, result)
+        var product = _n_mont_mul(result, base)
+        result = _select_u384(result, product, exponent.bit(i))
+    return _n_from_mont(result)
+
+
+@always_inline
+def _reduce_n(x: U384) -> U384:
+    var reduced, borrow = _sub_raw(x, _n())
+    return _select_u384(reduced, x, borrow)
+
+
+def _wipe_u384(mut x: U384):
+    var ptr = x.limbs.unsafe_ptr()
+    for i in range(6):
+        ptr.store[volatile=True](i, UInt64(0))
+
+
+def _wipe_list_u8(mut data: List[UInt8]):
+    var ptr = data.unsafe_ptr()
+    for i in range(len(data)):
+        ptr.store[volatile=True](i, UInt8(0))
+
+
+def _rfc6979_p384(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int) -> U384:
+    var h1 = _reduce_n(_from_be(digest))
+    var h1_bytes = InlineArray[UInt8, 48](uninitialized=True)
+    _to_be(h1, h1_bytes.unsafe_ptr())
+    var k = List[UInt8](length=48, fill=0)
+    var v = List[UInt8](length=48, fill=1)
+
+    var seed = List[UInt8](capacity=145)
+    for i in range(48):
+        seed.append(v[i])
+    seed.append(0)
+    for i in range(48):
+        seed.append(private_key[i])
+    for i in range(48):
+        seed.append(h1_bytes[i])
+    var next_k = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](seed))
+    _wipe_list_u8(k)
+    k = next_k^
+    var next_v = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](v))
+    _wipe_list_u8(v)
+    v = next_v^
+
+    _wipe_list_u8(seed)
+    seed.clear()
+    for i in range(48):
+        seed.append(v[i])
+    seed.append(1)
+    for i in range(48):
+        seed.append(private_key[i])
+    for i in range(48):
+        seed.append(h1_bytes[i])
+    next_k = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](seed))
+    _wipe_list_u8(k)
+    k = next_k^
+    next_v = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](v))
+    _wipe_list_u8(v)
+    v = next_v^
+
+    var accepted = 0
+    while True:
+        next_v = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](v))
+        _wipe_list_u8(v)
+        v = next_v^
+        var candidate = _from_be(Span[UInt8, ...](v))
+        if not candidate.is_zero() and _cmp(candidate, _n()) < 0:
+            if accepted == skip:
+                _wipe_list_u8(k)
+                _wipe_list_u8(v)
+                _wipe_list_u8(seed)
+                var hp = h1_bytes.unsafe_ptr()
+                for i in range(48):
+                    hp.store[volatile=True](i, UInt8(0))
+                _wipe_u384(h1)
+                return candidate
+            accepted += 1
+        _wipe_u384(candidate)
+        _wipe_list_u8(seed)
+        seed.clear()
+        for i in range(48):
+            seed.append(v[i])
+        seed.append(0)
+        next_k = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](seed))
+        _wipe_list_u8(k)
+        k = next_k^
+        next_v = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](v))
+        _wipe_list_u8(v)
+        v = next_v^
+
+
+def p384_ecdsa_sign_digest(
+    private_key: Span[UInt8, ...],
+    digest: Span[UInt8, ...],
+    signature: UnsafePointer[UInt8, MutAnyOrigin],
+) -> Bool:
+    if len(private_key) != 48 or len(digest) != 48:
+        return False
+    var d = _from_be(private_key)
+    if d.is_zero() or _cmp(d, _n()) >= 0:
+        _wipe_u384(d)
+        return False
+    var z = _reduce_n(_from_be(digest))
+    var retry = 0
+    while True:
+        var k = _rfc6979_p384(private_key, digest, retry)
+        var point = _scalar_mult_base(k)
+        var r = _reduce_n(point.x)
+        if r.is_zero():
+            _wipe_u384(k)
+            retry += 1
+            continue
+        var rd = _n_mul(r, d)
+        var total = _add_mod(z, rd, _n())
+        var kinv = _n_inv(k)
+        var s = _n_mul(kinv, total)
+        if s.is_zero():
+            _wipe_u384(k)
+            _wipe_u384(kinv)
+            _wipe_u384(rd)
+            _wipe_u384(total)
+            retry += 1
+            continue
+        _to_be(r, signature)
+        _to_be(s, signature + 48)
+        _wipe_u384(d)
+        _wipe_u384(z)
+        _wipe_u384(k)
+        _wipe_u384(kinv)
+        _wipe_u384(rd)
+        _wipe_u384(total)
+        return True
+
+
+def p384_ecdsa_sign(
+    private_key: Span[UInt8, ...],
+    message: Span[UInt8, ...],
+    signature: UnsafePointer[UInt8, MutAnyOrigin],
+) -> Bool:
+    var digest = sha384_hash(message)
+    var ok = p384_ecdsa_sign_digest(private_key, Span[UInt8, ...](digest), signature)
+    _wipe_list_u8(digest)
+    return ok
+
+
+def _p384_add_public(a: P384Point, b: P384Point) -> P384Point:
+    if a.infinity:
+        return b
+    if b.infinity:
+        return a
+    if _eq(a.x, b.x):
+        if not _eq(a.y, b.y) or a.y.is_zero():
+            return P384Point()
+        var am = P384JacobianPoint(_to_mont(a.x), _to_mont(a.y), _one_mont(), False)
+        return _jacobian_to_affine(_jacobian_double_ct(am))
+    var dx = _sub_mod(b.x, a.x, _p())
+    var dy = _sub_mod(b.y, a.y, _p())
+    var dx_inv = _from_mont(_inv_p(_to_mont(dx)))
+    var slope = _mul_mod(dy, dx_inv, _p())
+    var x3 = _sub_mod(_sub_mod(_square_mod(slope, _p()), a.x, _p()), b.x, _p())
+    var y3 = _sub_mod(_mul_mod(slope, _sub_mod(a.x, x3, _p()), _p()), a.y, _p())
+    return P384Point(x3, y3, False)
+
+
+def p384_ecdsa_verify_digest(
+    public_key: Span[UInt8, ...],
+    digest: Span[UInt8, ...],
+    signature: Span[UInt8, ...],
+) -> Bool:
+    if len(digest) != 48 or len(signature) != 96:
+        return False
+    var q = p384_decode_uncompressed(public_key)
+    if q.infinity:
+        return False
+    var r = _from_be(signature[0:48])
+    var s = _from_be(signature[48:96])
+    if r.is_zero() or s.is_zero() or _cmp(r, _n()) >= 0 or _cmp(s, _n()) >= 0:
+        return False
+    var z = _reduce_n(_from_be(digest))
+    var w = _n_inv(s)
+    var u1 = _n_mul(z, w)
+    var u2 = _n_mul(r, w)
+    var point = _p384_add_public(_scalar_mult_base(u1), _scalar_mult(u2, q))
+    if point.infinity:
+        return False
+    return _eq(_reduce_n(point.x), r)
+
+
+def p384_ecdsa_verify(
+    public_key: Span[UInt8, ...],
+    message: Span[UInt8, ...],
+    signature: Span[UInt8, ...],
+) -> Bool:
+    var digest = sha384_hash(message)
+    return p384_ecdsa_verify_digest(public_key, Span[UInt8, ...](digest), signature)
+
+
+def p384_ecdsa_sign_der(
+    private_key: Span[UInt8, ...], message: Span[UInt8, ...]
+) raises -> List[UInt8]:
+    from .ecdsa_der import ecdsa_der_encode
+    var raw = List[UInt8](unsafe_uninit_length=P384_SIGNATURE_SIZE)
+    if not p384_ecdsa_sign(private_key, message, raw.unsafe_ptr()):
+        raise Error("P-384 ECDSA signing failed")
+    return ecdsa_der_encode(Span[UInt8, ...](raw), P384_SIZE)
+
+
+def p384_ecdsa_verify_der(
+    public_key: Span[UInt8, ...], message: Span[UInt8, ...],
+    signature: Span[UInt8, ...],
+) -> Bool:
+    from .ecdsa_der import ecdsa_der_decode
+    var raw = ecdsa_der_decode(signature, P384_SIZE)
+    if len(raw) != P384_SIGNATURE_SIZE:
+        return False
+    return p384_ecdsa_verify(public_key, message, Span[UInt8, ...](raw))
+
+
+def p384_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
+    from .random import random_bytes
+    while True:
+        var private_key = random_bytes(48)
+        var d = _from_be(Span[UInt8, ...](private_key))
+        if not d.is_zero() and _cmp(d, _n()) < 0:
+            var public_key = List[UInt8](unsafe_uninit_length=97)
+            if p384_public_key(Span[UInt8, ...](private_key), public_key.unsafe_ptr()):
+                _wipe_u384(d)
+                return (private_key^, public_key^)
+        _wipe_u384(d)
+        _wipe_list_u8(private_key)

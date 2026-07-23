@@ -4,6 +4,8 @@ X25519 implementation
 
 from .curve25519 import FieldElement51
 from .utils import StackInlineArray
+from .random import random_bytes
+from std.collections import List
 
 @always_inline
 def _cswap_fe(swap: UInt64, mut a: FieldElement51, mut b: FieldElement51):
@@ -38,7 +40,7 @@ def x25519(scalar_in: Span[UInt8, ...], point: Span[UInt8, ...], output: UnsafeP
     scalar[31] |= 64
 
     var u = FieldElement51.from_bytes_span(point)
-    # RFC 7748: mask the top bit of the u-coordinate (kept explicit here)
+    # RFC 7748 ignores the top input bit.
     u.limbs[4] &= (UInt64(1) << UInt64(51)) - UInt64(1)
 
     var x_1 = u
@@ -76,3 +78,22 @@ def x25519(scalar_in: Span[UInt8, ...], point: Span[UInt8, ...], output: UnsafeP
     var scalar_ptr = scalar.unsafe_ptr()
     for i in range(32):
         scalar_ptr.store[volatile=True](i, UInt8(0))
+
+
+def x25519_public_key(
+    private_key: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]
+) raises:
+    if len(private_key) != 32:
+        raise Error("X25519 private key must be 32 bytes")
+    var base = StackInlineArray[UInt8, 32](uninitialized=True)
+    for i in range(32):
+        base[i] = 0
+    base[0] = 9
+    x25519(private_key, Span[UInt8, ...](ptr=base.unsafe_ptr(), length=32), output)
+
+
+def x25519_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
+    var private_key = random_bytes(32)
+    var public_key = List[UInt8](unsafe_uninit_length=32)
+    x25519_public_key(Span[UInt8, ...](private_key), public_key.unsafe_ptr())
+    return (private_key^, public_key^)

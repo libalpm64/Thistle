@@ -6,12 +6,15 @@ from std.collections import List
 from std.memory import memset_zero, memcpy, UnsafePointer
 from .utils import StackBuffer
 from .sha2 import (
+    SHA384_IV,
     SHA256Context,
     SHA512Context,
+    sha384_hash,
     sha256_update,
     sha256_final_to_buffer,
     sha512_update,
     sha512_final_to_buffer,
+    sha512_final_with_len,
 )
 
 @always_inline
@@ -244,4 +247,46 @@ def hmac_sha512(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
     var result = List[UInt8](capacity=64)
     for i in range(64):
         result.append(ctx.u_block[i])
+    return result^
+
+
+def hmac_sha384(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
+    var k = StackBuffer[UInt8, 128](fill=0)
+    if len(key) > 128:
+        var kh = sha384_hash(key)
+        memcpy(dest=k.ptr(), src=kh.unsafe_ptr(), count=48)
+        var khp = kh.unsafe_ptr()
+        for i in range(48):
+            khp.store[volatile=True](i, UInt8(0))
+    else:
+        memcpy(dest=k.ptr(), src=key.unsafe_ptr(), count=len(key))
+
+    var ipad = StackBuffer[UInt8, 128](fill=0)
+    var opad = StackBuffer[UInt8, 128](fill=0)
+    for i in range(128):
+        ipad[i] = k[i] ^ 0x36
+        opad[i] = k[i] ^ 0x5C
+
+    var inner = SHA512Context(SHA384_IV)
+    sha512_update(inner, Span[UInt8, ...](ptr=ipad.ptr(), length=128))
+    sha512_update(inner, data)
+    var inner_hash = sha512_final_with_len(inner, 48)
+
+    var outer = SHA512Context(SHA384_IV)
+    sha512_update(outer, Span[UInt8, ...](ptr=opad.ptr(), length=128))
+    sha512_update(outer, Span[UInt8, ...](inner_hash))
+    var result = sha512_final_with_len(outer, 48)
+
+    var kp = k.ptr()
+    var ip = ipad.ptr()
+    var op = opad.ptr()
+    for i in range(128):
+        kp.store[volatile=True](i, UInt8(0))
+        ip.store[volatile=True](i, UInt8(0))
+        op.store[volatile=True](i, UInt8(0))
+    var ihp = inner_hash.unsafe_ptr()
+    for i in range(48):
+        ihp.store[volatile=True](i, UInt8(0))
+    inner.wipe()
+    outer.wipe()
     return result^

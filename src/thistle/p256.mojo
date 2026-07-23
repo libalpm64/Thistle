@@ -4,9 +4,12 @@ NIST P-256 / secp256r1 implementation.
 
 from .p256_table import p256_base_table
 from .utils import u64_nonzero_choice, u64_zero_choice
+from .sha2 import sha256_hash
+from .pbkdf2 import hmac_sha256
 
 comptime P256_SIZE = 32
 comptime P256_POINT_SIZE = 65
+comptime P256_SIGNATURE_SIZE = 64
 comptime _MASK64 = UInt128(0xFFFFFFFFFFFFFFFF)
 
 
@@ -226,7 +229,9 @@ def _mont_mul(a: U256, b: U256) -> U256:
     comptime for i in range(1, 4):
         var t0 = acc0 << 32
         var t1 = acc0 >> 32
-        var brw = UInt64(1) if acc0 < t0 else UInt64(0)
+        var brw = UInt64(
+            (UInt128(acc0) - UInt128(t0)) >> UInt128(64)
+        ) & UInt64(1)
         var t2 = acc0 - t0
         var t3 = acc0 - t1 - brw
         s = UInt128(acc1) + UInt128(t0)
@@ -265,7 +270,9 @@ def _mont_mul(a: U256, b: U256) -> U256:
 
     var t0 = acc0 << 32
     var t1 = acc0 >> 32
-    var brw = UInt64(1) if acc0 < t0 else UInt64(0)
+    var brw = UInt64(
+        (UInt128(acc0) - UInt128(t0)) >> UInt128(64)
+    ) & UInt64(1)
     var t2 = acc0 - t0
     var t3 = acc0 - t1 - brw
     s = UInt128(acc1) + UInt128(t0)
@@ -288,7 +295,6 @@ def _mont_sqr(a: U256) -> U256:
     var a2 = a.limbs[2]
     var a3 = a.limbs[3]
 
-    # off-diagonal products
     var p10 = UInt128(a1) * UInt128(a0)
     var p20 = UInt128(a2) * UInt128(a0)
     var p30 = UInt128(a3) * UInt128(a0)
@@ -317,7 +323,6 @@ def _mont_sqr(a: U256) -> U256:
     var acc5 = UInt64(s & _MASK64)
     var acc6 = UInt64(p32 >> UInt128(64)) + UInt64(s >> UInt128(64))
 
-    # double
     var acc7 = acc6 >> 63
     acc6 = (acc6 << 1) | (acc5 >> 63)
     acc5 = (acc5 << 1) | (acc4 >> 63)
@@ -326,7 +331,6 @@ def _mont_sqr(a: U256) -> U256:
     acc2 = (acc2 << 1) | (acc1 >> 63)
     acc1 = acc1 << 1
 
-    # add diagonals
     var d0 = UInt128(a0) * UInt128(a0)
     var d1 = UInt128(a1) * UInt128(a1)
     var d2 = UInt128(a2) * UInt128(a2)
@@ -346,11 +350,12 @@ def _mont_sqr(a: U256) -> U256:
     acc6 = UInt64(s & _MASK64)
     acc7 = acc7 + UInt64(d3 >> UInt128(64)) + UInt64(s >> UInt128(64))
 
-    # four reduction folds on the lower half
     comptime for _ in range(4):
         var t0 = acc0 << 32
         var t1 = acc0 >> 32
-        var brw = UInt64(1) if acc0 < t0 else UInt64(0)
+        var brw = UInt64(
+            (UInt128(acc0) - UInt128(t0)) >> UInt128(64)
+        ) & UInt64(1)
         var t2 = acc0 - t0
         var t3 = acc0 - t1 - brw
         s = UInt128(acc1) + UInt128(t0)
@@ -361,7 +366,6 @@ def _mont_sqr(a: U256) -> U256:
         acc2 = UInt64(s & _MASK64)
         acc3 = t3 + UInt64(s >> UInt128(64))
 
-    # accumulate upper half
     s = UInt128(acc0) + UInt128(acc4)
     acc0 = UInt64(s & _MASK64)
     s = UInt128(acc1) + UInt128(acc5) + (s >> UInt128(64))
@@ -396,7 +400,6 @@ def _square_mod(a: U256, m: U256) -> U256:
 
 
 def _pow_mod(base_in: U256, exponent: U256) -> U256:
-    # runs in the Montgomery domain internally
     var result = _one_mont()
     var base = _to_mont(base_in)
     for i in range(256):
@@ -535,7 +538,6 @@ def _u256_zero_choice(x: U256) -> UInt64:
 
 @always_inline
 def _jacobian_infinity() -> P256JacobianPoint:
-    # infinity Z == 0.
     return P256JacobianPoint(U256(), _one_mont(), U256(), False)
 
 
@@ -607,9 +609,11 @@ def _jacobian_double_ct(p: P256JacobianPoint) -> P256JacobianPoint:
 
 
 @always_inline
-def _jacobian_add_affine_ct(
+def _jacobian_add_affine_non_equal_ct(
     p: P256JacobianPoint, q: P256Point
 ) -> P256JacobianPoint:
+    # Scalar multiplication only adds distinct, non-opposite multiples.
+    # The infinity input is still handled without branching on scalar bits.
     var z1z1 = _mont_sqr(p.z)
     var u2 = _mont_mul(q.x, z1z1)
     var s2 = _mont_mul(q.y, _mont_mul(p.z, z1z1))
@@ -633,22 +637,9 @@ def _jacobian_add_affine_ct(
     )
     var generic = P256JacobianPoint(x3, y3, z3, False)
 
-    var doubled = _jacobian_double_ct(p)
-    var inf = _jacobian_infinity()
     var q_as_jac = P256JacobianPoint(q.x, q.y, _one_mont(), False)
-
     var p_is_inf = _u256_zero_choice(p.z)
-    var h_is_zero = _u256_zero_choice(h)
-    var r_is_zero = _u256_zero_choice(r)
-
-    var use_double = h_is_zero & r_is_zero
-    var use_inf = h_is_zero & (r_is_zero ^ UInt64(1))
-
-    var out = generic
-    out = _select_jacobian_ct(out, doubled, use_double)
-    out = _select_jacobian_ct(out, inf, use_inf)
-    out = _select_jacobian_ct(out, q_as_jac, p_is_inf)
-    return out
+    return _select_jacobian_ct(generic, q_as_jac, p_is_inf)
 
 
 def _jacobian_to_affine(p: P256JacobianPoint) -> P256Point:
@@ -665,16 +656,15 @@ def _jacobian_to_affine(p: P256JacobianPoint) -> P256Point:
 
 
 def _scalar_mult(k: U256, p: P256Point) -> P256Point:
-    # fixed 4-bit window, table scanned in full and the add always computed
-    # so scalar bits only drive constant-time selects
+    # Fixed-window scan keeps scalar access constant-time.
     var pm = P256Point(_to_mont(p.x), _to_mont(p.y), False)
     var jac = InlineArray[P256JacobianPoint, 15](uninitialized=True)
     jac[0] = P256JacobianPoint(pm.x, pm.y, _one_mont(), False)
     jac[1] = _jacobian_double_ct(jac[0])
     for i in range(2, 15):
-        jac[i] = _jacobian_add_affine_ct(jac[i - 1], pm)
+        jac[i] = _jacobian_add_affine_non_equal_ct(jac[i - 1], pm)
 
-    # batch-normalize the table to affine with one inversion
+    # Normalize the table with one inversion.
     var prefix = InlineArray[U256, 15](uninitialized=True)
     prefix[0] = jac[0].z
     for i in range(1, 15):
@@ -709,7 +699,9 @@ def _scalar_mult(k: U256, p: P256Point) -> P256Point:
             qx = _select_u256(qx, tx[i], hit)
             qy = _select_u256(qy, ty[i], hit)
 
-        var added = _jacobian_add_affine_ct(acc, P256Point(qx, qy, False))
+        var added = _jacobian_add_affine_non_equal_ct(
+            acc, P256Point(qx, qy, False)
+        )
         acc = _select_jacobian_ct(acc, added, u64_nonzero_choice(d))
     return _jacobian_to_affine(acc)
 
@@ -731,7 +723,6 @@ def _base_table_entry(
 
 
 def _scalar_mult_base(k: U256) -> P256Point:
-    # d * 16^(2j) * G table
     var table = p256_base_table()
     var tptr = table.unsafe_ptr()
 
@@ -739,7 +730,7 @@ def _scalar_mult_base(k: U256) -> P256Point:
     for i in range(1, 64, 2):
         var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
         var q = _base_table_entry(tptr, i >> 1, d)
-        var added = _jacobian_add_affine_ct(acc, q)
+        var added = _jacobian_add_affine_non_equal_ct(acc, q)
         acc = _select_jacobian_ct(acc, added, u64_nonzero_choice(d))
 
     acc = _jacobian_double_ct(acc)
@@ -750,14 +741,13 @@ def _scalar_mult_base(k: U256) -> P256Point:
     for i in range(0, 64, 2):
         var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
         var q = _base_table_entry(tptr, i >> 1, d)
-        var added = _jacobian_add_affine_ct(acc, q)
+        var added = _jacobian_add_affine_non_equal_ct(acc, q)
         acc = _select_jacobian_ct(acc, added, u64_nonzero_choice(d))
 
     return _jacobian_to_affine(acc)
 
 
 def p256_decode_uncompressed(point: Span[UInt8, ...]) -> P256Point:
-    # 02/03||X, 04||X||Y.
     if len(point) == 33 and (point[0] == 0x02 or point[0] == 0x03):
         var x = _from_be(
             Span[UInt8, ...](ptr=point.unsafe_ptr() + 1, length=32)
@@ -790,7 +780,6 @@ def p256_decode_uncompressed(point: Span[UInt8, ...]) -> P256Point:
 def p256_encode_uncompressed(
     point: P256Point, output: UnsafePointer[UInt8, MutAnyOrigin]
 ) -> Bool:
-    # 04 || X || Y.
     if point.infinity or not _is_on_curve(point):
         return False
     output[0] = 0x04
@@ -803,14 +792,20 @@ def p256_encode_uncompressed(
 def p256_public_key(
     private_key: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]
 ) -> Bool:
-    # Q = dG - d in [1, n - 1].
     if len(private_key) != 32:
         return False
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
+        var dp = d.limbs.unsafe_ptr()
+        for i in range(4):
+            dp.store[volatile=True](i, UInt64(0))
         return False
     var q = _scalar_mult_base(d)
-    return p256_encode_uncompressed(q, output)
+    var ok = p256_encode_uncompressed(q, output)
+    var dp = d.limbs.unsafe_ptr()
+    for i in range(4):
+        dp.store[volatile=True](i, UInt64(0))
+    return ok
 
 
 @no_inline
@@ -823,12 +818,329 @@ def p256_ecdh(
         return False
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
+        var dp = d.limbs.unsafe_ptr()
+        for i in range(4):
+            dp.store[volatile=True](i, UInt64(0))
         return False
     var q = p256_decode_uncompressed(public_key)
     if q.infinity:
+        var dp = d.limbs.unsafe_ptr()
+        for i in range(4):
+            dp.store[volatile=True](i, UInt64(0))
         return False
     var shared = _scalar_mult(d, q)
+    var dp = d.limbs.unsafe_ptr()
+    for i in range(4):
+        dp.store[volatile=True](i, UInt64(0))
     if shared.infinity:
         return False
     _to_be(shared.x, output)
     return True
+
+
+def _n_rr() -> U256:
+    return U256(
+        0x83244C95BE79EEA2,
+        0x4699799C49BD6FA6,
+        0x2845B2392B6BEC59,
+        0x66E12D94F3D95620,
+    )
+
+
+def _n_one_mont() -> U256:
+    return U256(
+        0x0C46353D039CDAAF,
+        0x4319055258E8617B,
+        0x0000000000000000,
+        0x00000000FFFFFFFF,
+    )
+
+
+def _n_minus_2() -> U256:
+    return U256(
+        0xF3B9CAC2FC63254F,
+        0xBCE6FAADA7179E84,
+        0xFFFFFFFFFFFFFFFF,
+        0xFFFFFFFF00000000,
+    )
+
+
+@always_inline
+def _n_mont_mul(a: U256, b: U256) -> U256:
+    comptime n0 = UInt64(0xCCD1C8AAEE00BC4F)
+    var n = _n()
+    var t = U256()
+    var t_hi = UInt64(0)
+    comptime for i in range(4):
+        var ai = a.limbs[i]
+        var s = UInt128(ai) * UInt128(b.limbs[0]) + UInt128(t.limbs[0])
+        var m = s.cast[DType.uint64]() * n0
+        var q = UInt128(m) * UInt128(n.limbs[0]) + UInt128(s.cast[DType.uint64]())
+        var ca = s >> 64
+        var cb = q >> 64
+        comptime for j in range(1, 4):
+            var u = UInt128(ai) * UInt128(b.limbs[j]) + UInt128(t.limbs[j]) + ca
+            ca = u >> 64
+            var v = UInt128(m) * UInt128(n.limbs[j]) + UInt128(u.cast[DType.uint64]()) + cb
+            t.limbs[j - 1] = v.cast[DType.uint64]()
+            cb = v >> 64
+        var w = UInt128(t_hi) + ca + cb
+        t.limbs[3] = w.cast[DType.uint64]()
+        t_hi = (w >> 64).cast[DType.uint64]()
+    var reduced, borrow = _sub_raw(t, n)
+    var take = u64_nonzero_choice(t_hi) | (borrow ^ UInt64(1))
+    return _select_u256(t, reduced, take & UInt64(1))
+
+
+@always_inline
+def _n_to_mont(x: U256) -> U256:
+    return _n_mont_mul(x, _n_rr())
+
+
+@always_inline
+def _n_from_mont(x: U256) -> U256:
+    return _n_mont_mul(x, U256.one())
+
+
+@always_inline
+def _n_mul(a: U256, b: U256) -> U256:
+    return _n_mont_mul(_n_to_mont(a), b)
+
+
+def _n_inv(x: U256) -> U256:
+    var result = _n_one_mont()
+    var base = _n_to_mont(x)
+    var exponent = _n_minus_2()
+    for i in range(255, -1, -1):
+        result = _n_mont_mul(result, result)
+        var product = _n_mont_mul(result, base)
+        result = _select_u256(result, product, exponent.bit(i))
+    return _n_from_mont(result)
+
+
+@always_inline
+def _reduce_n(x: U256) -> U256:
+    var reduced, borrow = _sub_raw(x, _n())
+    return _select_u256(reduced, x, borrow)
+
+
+def _wipe_u256(mut x: U256):
+    var ptr = x.limbs.unsafe_ptr()
+    for i in range(4):
+        ptr.store[volatile=True](i, UInt64(0))
+
+
+def _wipe_list_u8(mut data: List[UInt8]):
+    var ptr = data.unsafe_ptr()
+    for i in range(len(data)):
+        ptr.store[volatile=True](i, UInt8(0))
+
+
+def _rfc6979_p256(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int) -> U256:
+    var h1 = _reduce_n(_from_be(digest))
+    var h1_bytes = InlineArray[UInt8, 32](uninitialized=True)
+    _to_be(h1, h1_bytes.unsafe_ptr())
+    var k = List[UInt8](length=32, fill=0)
+    var v = List[UInt8](length=32, fill=1)
+
+    var seed = List[UInt8](capacity=97)
+    for i in range(32):
+        seed.append(v[i])
+    seed.append(0)
+    for i in range(32):
+        seed.append(private_key[i])
+    for i in range(32):
+        seed.append(h1_bytes[i])
+    var next_k = hmac_sha256(Span[UInt8, ...](k), Span[UInt8, ...](seed))
+    _wipe_list_u8(k)
+    k = next_k^
+    var next_v = hmac_sha256(Span[UInt8, ...](k), Span[UInt8, ...](v))
+    _wipe_list_u8(v)
+    v = next_v^
+
+    _wipe_list_u8(seed)
+    seed.clear()
+    for i in range(32):
+        seed.append(v[i])
+    seed.append(1)
+    for i in range(32):
+        seed.append(private_key[i])
+    for i in range(32):
+        seed.append(h1_bytes[i])
+    next_k = hmac_sha256(Span[UInt8, ...](k), Span[UInt8, ...](seed))
+    _wipe_list_u8(k)
+    k = next_k^
+    next_v = hmac_sha256(Span[UInt8, ...](k), Span[UInt8, ...](v))
+    _wipe_list_u8(v)
+    v = next_v^
+
+    var accepted = 0
+    while True:
+        next_v = hmac_sha256(Span[UInt8, ...](k), Span[UInt8, ...](v))
+        _wipe_list_u8(v)
+        v = next_v^
+        var candidate = _from_be(Span[UInt8, ...](v))
+        if not candidate.is_zero() and _cmp(candidate, _n()) < 0:
+            if accepted == skip:
+                _wipe_list_u8(k)
+                _wipe_list_u8(v)
+                _wipe_list_u8(seed)
+                var hp = h1_bytes.unsafe_ptr()
+                for i in range(32):
+                    hp.store[volatile=True](i, UInt8(0))
+                _wipe_u256(h1)
+                return candidate
+            accepted += 1
+        _wipe_u256(candidate)
+        _wipe_list_u8(seed)
+        seed.clear()
+        for i in range(32):
+            seed.append(v[i])
+        seed.append(0)
+        next_k = hmac_sha256(Span[UInt8, ...](k), Span[UInt8, ...](seed))
+        _wipe_list_u8(k)
+        k = next_k^
+        next_v = hmac_sha256(Span[UInt8, ...](k), Span[UInt8, ...](v))
+        _wipe_list_u8(v)
+        v = next_v^
+
+
+def p256_ecdsa_sign_digest(
+    private_key: Span[UInt8, ...],
+    digest: Span[UInt8, ...],
+    signature: UnsafePointer[UInt8, MutAnyOrigin],
+) -> Bool:
+    if len(private_key) != 32 or len(digest) != 32:
+        return False
+    var d = _from_be(private_key)
+    if d.is_zero() or _cmp(d, _n()) >= 0:
+        _wipe_u256(d)
+        return False
+    var z = _reduce_n(_from_be(digest))
+    var retry = 0
+    while True:
+        var k = _rfc6979_p256(private_key, digest, retry)
+        var point = _scalar_mult_base(k)
+        var r = _reduce_n(point.x)
+        if r.is_zero():
+            _wipe_u256(k)
+            retry += 1
+            continue
+        var rd = _n_mul(r, d)
+        var total = _add_mod(z, rd, _n())
+        var kinv = _n_inv(k)
+        var s = _n_mul(kinv, total)
+        if s.is_zero():
+            _wipe_u256(k)
+            _wipe_u256(kinv)
+            _wipe_u256(rd)
+            _wipe_u256(total)
+            retry += 1
+            continue
+        _to_be(r, signature)
+        _to_be(s, signature + 32)
+        _wipe_u256(d)
+        _wipe_u256(z)
+        _wipe_u256(k)
+        _wipe_u256(kinv)
+        _wipe_u256(rd)
+        _wipe_u256(total)
+        return True
+
+
+def p256_ecdsa_sign(
+    private_key: Span[UInt8, ...],
+    message: Span[UInt8, ...],
+    signature: UnsafePointer[UInt8, MutAnyOrigin],
+) -> Bool:
+    var digest = sha256_hash(message)
+    var ok = p256_ecdsa_sign_digest(private_key, Span[UInt8, ...](digest), signature)
+    _wipe_list_u8(digest)
+    return ok
+
+
+def _p256_add_public(a: P256Point, b: P256Point) -> P256Point:
+    if a.infinity:
+        return b
+    if b.infinity:
+        return a
+    if _eq(a.x, b.x):
+        if not _eq(a.y, b.y) or a.y.is_zero():
+            return P256Point()
+        var am = P256JacobianPoint(_to_mont(a.x), _to_mont(a.y), _one_mont(), False)
+        return _jacobian_to_affine(_jacobian_double_ct(am))
+    var dx = _sub_mod(b.x, a.x, _p())
+    var dy = _sub_mod(b.y, a.y, _p())
+    var dx_inv = _from_mont(_inv_p(_to_mont(dx)))
+    var slope = _mul_mod(dy, dx_inv, _p())
+    var x3 = _sub_mod(_sub_mod(_square_mod(slope, _p()), a.x, _p()), b.x, _p())
+    var y3 = _sub_mod(_mul_mod(slope, _sub_mod(a.x, x3, _p()), _p()), a.y, _p())
+    return P256Point(x3, y3, False)
+
+
+def p256_ecdsa_verify_digest(
+    public_key: Span[UInt8, ...],
+    digest: Span[UInt8, ...],
+    signature: Span[UInt8, ...],
+) -> Bool:
+    if len(digest) != 32 or len(signature) != 64:
+        return False
+    var q = p256_decode_uncompressed(public_key)
+    if q.infinity:
+        return False
+    var r = _from_be(signature[0:32])
+    var s = _from_be(signature[32:64])
+    if r.is_zero() or s.is_zero() or _cmp(r, _n()) >= 0 or _cmp(s, _n()) >= 0:
+        return False
+    var z = _reduce_n(_from_be(digest))
+    var w = _n_inv(s)
+    var u1 = _n_mul(z, w)
+    var u2 = _n_mul(r, w)
+    var point = _p256_add_public(_scalar_mult_base(u1), _scalar_mult(u2, q))
+    if point.infinity:
+        return False
+    return _eq(_reduce_n(point.x), r)
+
+
+def p256_ecdsa_verify(
+    public_key: Span[UInt8, ...],
+    message: Span[UInt8, ...],
+    signature: Span[UInt8, ...],
+) -> Bool:
+    var digest = sha256_hash(message)
+    return p256_ecdsa_verify_digest(public_key, Span[UInt8, ...](digest), signature)
+
+
+def p256_ecdsa_sign_der(
+    private_key: Span[UInt8, ...], message: Span[UInt8, ...]
+) raises -> List[UInt8]:
+    from .ecdsa_der import ecdsa_der_encode
+    var raw = List[UInt8](unsafe_uninit_length=P256_SIGNATURE_SIZE)
+    if not p256_ecdsa_sign(private_key, message, raw.unsafe_ptr()):
+        raise Error("P-256 ECDSA signing failed")
+    return ecdsa_der_encode(Span[UInt8, ...](raw), P256_SIZE)
+
+
+def p256_ecdsa_verify_der(
+    public_key: Span[UInt8, ...], message: Span[UInt8, ...],
+    signature: Span[UInt8, ...],
+) -> Bool:
+    from .ecdsa_der import ecdsa_der_decode
+    var raw = ecdsa_der_decode(signature, P256_SIZE)
+    if len(raw) != P256_SIGNATURE_SIZE:
+        return False
+    return p256_ecdsa_verify(public_key, message, Span[UInt8, ...](raw))
+
+
+def p256_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
+    from .random import random_bytes
+    while True:
+        var private_key = random_bytes(32)
+        var d = _from_be(Span[UInt8, ...](private_key))
+        if not d.is_zero() and _cmp(d, _n()) < 0:
+            var public_key = List[UInt8](unsafe_uninit_length=65)
+            if p256_public_key(Span[UInt8, ...](private_key), public_key.unsafe_ptr()):
+                _wipe_u256(d)
+                return (private_key^, public_key^)
+        _wipe_u256(d)
+        _wipe_list_u8(private_key)

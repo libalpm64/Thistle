@@ -24,7 +24,9 @@ jobs:
           OMP_NUM_THREADS: 1
         run: |
           for i in 1 2 3; do
-            pixi run test && pixi run test-ml-kem && pixi run test-ml-dsa && break
+            pixi run test && pixi run test-ml-kem && pixi run test-ml-dsa &&
+              pixi run test-p256-ecdh && pixi run test-p384-ecdh &&
+              pixi run test-signing && break
             if [ $i -eq 3 ]; then exit 1; fi
             echo "Attempt $i failed, clearing JIT cache and retrying..."
             rm -rf ~/.mojo

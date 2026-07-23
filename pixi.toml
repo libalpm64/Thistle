@@ -10,6 +10,9 @@ test = "mojo run -I src/ tests/thistle_test_vectors.mojo"
 dudect = "mojo run -I src/ tests/dudect.mojo"
 test-ml-kem = "mojo run -I src/ tests/test_ml_kem.mojo"
 test-ml-dsa = "mojo run -I src/ tests/test_ml_dsa.mojo"
+test-p256-ecdh = "mojo run -I src/ tests/test_wycheproof_p256_ecdh.mojo"
+test-p384-ecdh = "mojo run -I src/ tests/test_wycheproof_p384_ecdh.mojo"
+test-signing = "mojo run -I src/ tests/test_signing.mojo"
 bench = "mojo run -I src/ tests/benchmark.mojo"
 
 [dependencies]
