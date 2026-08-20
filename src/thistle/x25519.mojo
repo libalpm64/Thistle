@@ -83,7 +83,7 @@ def x25519(
     res.to_bytes_into(output.unsafe_ptr())
     var scalar_ptr = scalar.unsafe_ptr()
     for i in range(32):
-        scalar_ptr.store[volatile=True](i, UInt8(0))
+        scalar_ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
 def x25519_public_key(

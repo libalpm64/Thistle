@@ -29,7 +29,7 @@ def _affine_niels_limbs(p: EdwardsPoint) -> InlineArray[UInt64, 15]:
         out[i] = y_plus_x.limbs[i]
         out[5 + i] = y_minus_x.limbs[i]
         out[10 + i] = xy2d.limbs[i]
-    return out
+    return out^
 
 
 def _print_chunk(name: String, points: InlineArray[EdwardsPoint, 8]):
@@ -81,11 +81,11 @@ def main() raises:
     print("    var t = InlineArray[UInt64, 4096](uninitialized=True)")
     print("    var p = t.unsafe_ptr()")
     for j in range(32):
-        print("    p.store[alignment=8](" + String(j * 128) + ", _ED25519_BT" + String(j) + ")")
+        print("    p.unsafe_store[alignment=8](" + String(j * 128) + ", _ED25519_BT" + String(j) + ")")
     print("    return t")
     print()
     print("@no_inline")
     print("def ed25519_b_odd_table() -> InlineArray[UInt64, 128]:")
     print("    var t = InlineArray[UInt64, 128](uninitialized=True)")
-    print("    t.unsafe_ptr().store[alignment=8](0, _ED25519_B_ODD)")
+    print("    t.unsafe_ptr().unsafe_store[alignment=8](0, _ED25519_B_ODD)")
     print("    return t")

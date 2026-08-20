@@ -4,6 +4,7 @@ from max.algorithm import parallelize
 from std.random import random_ui64, seed
 from std.math import ceildiv
 from std.sys import has_accelerator
+from std.memory import Layout, alloc
 
 from thistle.argon2 import Argon2id
 from thistle.blake2b import Blake2b
@@ -20,7 +21,6 @@ from thistle.ed25519 import ed25519_sign, ed25519_verify, ed25519_generate_publi
 from thistle.p256 import p256_ecdsa_sign
 from thistle.p384 import p384_public_key, p384_ecdsa_sign
 from thistle.utils import StackInlineArray
-from std.memory import alloc
 from std.utils import StaticTuple
 
 comptime TEST_KEY: StaticTuple[UInt8, 16] = StaticTuple[UInt8, 16](
@@ -54,7 +54,7 @@ def benchmark_x25519(duration_secs: Float64) raises -> String:
     var start = perf_counter()
     while perf_counter() - start < duration_secs:
         x25519(scalar_span, point_span, Span[mut=True, UInt8, ...](out))
-        scalar.unsafe_ptr().store[volatile=True](0, out[0] | 8)
+        scalar.unsafe_ptr().unsafe_store[volatile=True](0, out[0] | 8)
         count += 1
     var duration = perf_counter() - start
     var ops = Float64(count) / duration
@@ -257,9 +257,9 @@ def benchmark_camellia(data_size: Int, duration_secs: Float64) raises -> String:
     var cipher = CamelliaCipher(Span[UInt8, ...](key))
 
     var nb = 32
-    var blocks = alloc[UInt8](nb * 16)
+    var blocks = alloc(Layout[UInt8](count=nb * 16)).unsafe_leak()
     for i in range(nb * 16):
-        blocks.store(i, UInt8(i % 256))
+        blocks.unsafe_store(i, UInt8(i % 256))
 
     for _ in range(100):
         camellia_encrypt_blocks(cipher, blocks, nb)
@@ -272,7 +272,7 @@ def benchmark_camellia(data_size: Int, duration_secs: Float64) raises -> String:
     var end = perf_counter()
     var duration = end - start
 
-    blocks.free()
+    blocks.unsafe_free()
 
     var mbps = Float64(count * 16) / (1024 * 1024) / duration
     return "camellia | throughput: " + String(mbps) + " mb/s, blocks: " + String(count) + ", time: " + String(duration) + "s"
@@ -285,12 +285,12 @@ def benchmark_camellia_ctr(duration_secs: Float64) raises -> String:
     var cipher = CamelliaCipher(Span[UInt8, ...](key))
 
     var size = 64 * 1024
-    var buf = alloc[UInt8](size)
+    var buf = alloc(Layout[UInt8](count=size)).unsafe_leak()
     for i in range(size):
-        buf.store(i, UInt8(i % 256))
-    var nonce = alloc[UInt8](16)
+        buf.unsafe_store(i, UInt8(i % 256))
+    var nonce = alloc(Layout[UInt8](count=16)).unsafe_leak()
     for i in range(16):
-        nonce.store(i, UInt8(i * 3))
+        nonce.unsafe_store(i, UInt8(i * 3))
 
     camellia_ctr_kernel(buf, buf, cipher, size // 16, nonce)
 
@@ -302,8 +302,8 @@ def benchmark_camellia_ctr(duration_secs: Float64) raises -> String:
     var end = perf_counter()
     var duration = end - start
 
-    buf.free()
-    nonce.free()
+    buf.unsafe_free()
+    nonce.unsafe_free()
 
     var mbps = Float64(count * size) / (1024 * 1024) / duration
     return "camellia-ctr | throughput: " + String(mbps) + " mb/s, chunks: " + String(count) + ", time: " + String(duration) + "s"
@@ -313,14 +313,14 @@ def benchmark_chacha20(data_size: Int, duration_secs: Float64) raises -> String:
     var key = SIMD[DType.uint8, 32](0)
     for i in range(32):
         key[i] = UInt8(i)
-    var nonce = SIMD[DType.uint8, 16](0)
+    var nonce = InlineArray[UInt8, 12](fill=0)
     
     var data = List[UInt8](capacity=data_size)
     for i in range(data_size):
         data.append(UInt8(i % 256))
     var span = Span[mut=True, UInt8](data)
     
-    var cipher = ChaCha20(key, nonce)
+    var cipher = ChaCha20(key, Span[UInt8, ...](nonce))
     
     var checksum: UInt64 = 0
     var count = 0
@@ -382,9 +382,9 @@ def benchmark_aes_cpu(duration_secs: Float64) raises -> String:
     var key = AESKey(TEST_KEY)
     var round_keys = key.round_keys()
     var skey = cpu_aes_ct_skey(round_keys, ROUNDS_128)
-    var blocks = alloc[UInt8](256)
+    var blocks = alloc(Layout[UInt8](count=256)).unsafe_leak()
     for i in range(256):
-        blocks.store(i, TEST_PT[i % 16])
+        blocks.unsafe_store(i, TEST_PT[i % 16])
 
     for _ in range(100):
         cpu_aes_ct_encrypt16(blocks, skey, ROUNDS_128)
@@ -397,7 +397,7 @@ def benchmark_aes_cpu(duration_secs: Float64) raises -> String:
     var end = perf_counter()
     var duration = end - start
 
-    blocks.free()
+    blocks.unsafe_free()
 
     var mbps = Float64(count * 16) / (1024 * 1024) / duration
     return "aes-128-cpu | throughput: " + String(mbps) + " mb/s, blocks: " + String(count) + ", time: " + String(duration) + "s"
@@ -411,20 +411,20 @@ def benchmark_aes_gpu_ecb() raises -> String:
     from max.gpu.host import DeviceContext
     from thistle.aes_gpu import aes_gpu_kernel_ecb
     
-    var key_ptr = alloc[UInt8](16)
+    var key_ptr = alloc(Layout[UInt8](count=16)).unsafe_leak()
     for i in range(16):
-        key_ptr.store(i, TEST_KEY[i])
+        key_ptr.unsafe_store(i, TEST_KEY[i])
     var round_keys = expand_key_128(
         Span[UInt8, ...](unsafe_ptr=key_ptr, length=16)
     )
     var num_blocks = 131072
     var total_bytes = num_blocks * 16
 
-    var input_host = alloc[Scalar[DType.uint8]](total_bytes)
-    var output_host = alloc[Scalar[DType.uint8]](total_bytes)
+    var input_host = alloc(Layout[Scalar[DType.uint8]](count=total_bytes)).unsafe_leak()
+    var output_host = alloc(Layout[Scalar[DType.uint8]](count=total_bytes)).unsafe_leak()
 
     for i in range(total_bytes):
-        input_host[i] = TEST_PT[i % 16]
+        input_host[unsafe_offset=i] = TEST_PT[i % 16]
 
     with DeviceContext() as ctx:
         var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
@@ -469,9 +469,9 @@ def benchmark_aes_gpu_ecb() raises -> String:
         var total_gb = Float64(iterations * total_bytes) / 1024.0 / 1024.0 / 1024.0
         var gbps = total_gb / duration
         
-        input_host.free()
-        output_host.free()
-        key_ptr.free()
+        input_host.unsafe_free()
+        output_host.unsafe_free()
+        key_ptr.unsafe_free()
         
         return "aes-128-gpu-ecb | throughput: " + String(gbps) + " gb/s, iterations: " + String(iterations)
 
@@ -484,23 +484,23 @@ def benchmark_aes_gpu_ctr() raises -> String:
     from max.gpu.host import DeviceContext
     from thistle.aes_gpu import aes_gpu_kernel_ctr
     
-    var key_ptr = alloc[UInt8](16)
+    var key_ptr = alloc(Layout[UInt8](count=16)).unsafe_leak()
     for i in range(16):
-        key_ptr.store(i, TEST_KEY[i])
+        key_ptr.unsafe_store(i, TEST_KEY[i])
     var round_keys = expand_key_128(
         Span[UInt8, ...](unsafe_ptr=key_ptr, length=16)
     )
     var num_blocks = 131072
     var total_bytes = num_blocks * 16
 
-    var input_host = alloc[Scalar[DType.uint8]](total_bytes)
-    var output_host = alloc[Scalar[DType.uint8]](total_bytes)
-    var nonce_host = alloc[Scalar[DType.uint8]](16)
+    var input_host = alloc(Layout[Scalar[DType.uint8]](count=total_bytes)).unsafe_leak()
+    var output_host = alloc(Layout[Scalar[DType.uint8]](count=total_bytes)).unsafe_leak()
+    var nonce_host = alloc(Layout[Scalar[DType.uint8]](count=16)).unsafe_leak()
 
     for i in range(total_bytes):
-        input_host[i] = TEST_PT[i % 16]
+        input_host[unsafe_offset=i] = TEST_PT[i % 16]
     for i in range(16):
-        nonce_host[i] = 0
+        nonce_host[unsafe_offset=i] = 0
 
     with DeviceContext() as ctx:
         var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
@@ -549,10 +549,10 @@ def benchmark_aes_gpu_ctr() raises -> String:
         var total_gb = Float64(iterations * total_bytes) / 1024.0 / 1024.0 / 1024.0
         var gbps = total_gb / duration
         
-        input_host.free()
-        output_host.free()
-        nonce_host.free()
-        key_ptr.free()
+        input_host.unsafe_free()
+        output_host.unsafe_free()
+        nonce_host.unsafe_free()
+        key_ptr.unsafe_free()
         
         return "aes-128-gpu-ctr | throughput: " + String(gbps) + " gb/s, iterations: " + String(iterations)
 
@@ -568,24 +568,24 @@ def benchmark_aes_gpu_gcm() raises -> String:
     from max.gpu.host import DeviceContext
     from thistle.aes_gpu import aes_gpu_kernel_gcm_ctr
     
-    var key_ptr = alloc[UInt8](16)
+    var key_ptr = alloc(Layout[UInt8](count=16)).unsafe_leak()
     for i in range(16):
-        key_ptr.store(i, TEST_KEY[i])
+        key_ptr.unsafe_store(i, TEST_KEY[i])
     var round_keys = expand_key_128(
         Span[UInt8, ...](unsafe_ptr=key_ptr, length=16)
     )
     var num_blocks = 131072
     var total_bytes = num_blocks * 16
 
-    var input_host = alloc[Scalar[DType.uint8]](total_bytes)
-    var output_host = alloc[Scalar[DType.uint8]](total_bytes)
-    var nonce_host = alloc[Scalar[DType.uint8]](16)
+    var input_host = alloc(Layout[Scalar[DType.uint8]](count=total_bytes)).unsafe_leak()
+    var output_host = alloc(Layout[Scalar[DType.uint8]](count=total_bytes)).unsafe_leak()
+    var nonce_host = alloc(Layout[Scalar[DType.uint8]](count=16)).unsafe_leak()
 
     for i in range(total_bytes):
-        input_host[i] = TEST_PT[i % 16]
+        input_host[unsafe_offset=i] = TEST_PT[i % 16]
     for i in range(16):
-        nonce_host[i] = 0
-    nonce_host[15] = 1
+        nonce_host[unsafe_offset=i] = 0
+    nonce_host[unsafe_offset=15] = 1
 
     with DeviceContext() as ctx:
         var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
@@ -634,10 +634,10 @@ def benchmark_aes_gpu_gcm() raises -> String:
         var total_gb = Float64(iterations * total_bytes) / 1024.0 / 1024.0 / 1024.0
         var gbps = total_gb / duration
         
-        input_host.free()
-        output_host.free()
-        nonce_host.free()
-        key_ptr.free()
+        input_host.unsafe_free()
+        output_host.unsafe_free()
+        nonce_host.unsafe_free()
+        key_ptr.unsafe_free()
         
         return "aes-128-gpu-gcm | throughput: " + String(gbps) + " gb/s, iterations: " + String(iterations)
 

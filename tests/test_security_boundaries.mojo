@@ -6,8 +6,15 @@ from thistle.chacha20poly1305 import (
     chacha20_poly1305_encrypt,
     hchacha20,
 )
+from thistle.chacha20 import ChaCha20
 from thistle.p256 import p256_ecdsa_sign, p256_public_key
 from thistle.p384 import p384_ecdsa_sign, p384_public_key
+from thistle.pbkdf2 import (
+    PBKDF2_SHA256_MAX_DKLEN,
+    PBKDF2_SHA512_MAX_DKLEN,
+    pbkdf2_hmac_sha256,
+    pbkdf2_hmac_sha512,
+)
 from thistle.x25519 import x25519
 
 
@@ -64,6 +71,68 @@ def main() raises:
         rejected = True
     if not rejected:
         raise Error("HChaCha20 accepted an undersized destination")
+
+    var chacha_key = SIMD[DType.uint8, 32](0)
+    var oversized_nonce = List[UInt8](length=16, fill=0)
+    rejected = False
+    try:
+        var invalid_cipher = ChaCha20(
+            chacha_key, Span[UInt8, ...](oversized_nonce)
+        )
+        _ = invalid_cipher
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("ChaCha20 accepted a nonce longer than 12 bytes")
+
+    var nonce_a = List[UInt8](length=12, fill=0)
+    var nonce_b = List[UInt8](length=12, fill=0)
+    nonce_b[11] = 1
+    var zeros = List[UInt8](length=64, fill=0)
+    var stream_a = List[UInt8](length=64, fill=0)
+    var stream_b = List[UInt8](length=64, fill=0)
+    var cipher_a = ChaCha20(chacha_key, Span[UInt8, ...](nonce_a))
+    var cipher_b = ChaCha20(chacha_key, Span[UInt8, ...](nonce_b))
+    var stream_a_span = Span[mut=True, UInt8, ...](stream_a)
+    var stream_b_span = Span[mut=True, UInt8, ...](stream_b)
+    cipher_a.encrypt_into(
+        Span[UInt8, ...](zeros), stream_a_span
+    )
+    cipher_b.encrypt_into(
+        Span[UInt8, ...](zeros), stream_b_span
+    )
+    var nonce_affects_stream = False
+    for i in range(64):
+        nonce_affects_stream |= stream_a[i] != stream_b[i]
+    if not nonce_affects_stream:
+        raise Error("ChaCha20 ignored the final nonce byte")
+
+    var empty_salt = List[UInt8]()
+    rejected = False
+    try:
+        _ = pbkdf2_hmac_sha256(
+            Span[UInt8, ...](empty),
+            Span[UInt8, ...](empty_salt),
+            1,
+            PBKDF2_SHA256_MAX_DKLEN + 1,
+        )
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("PBKDF2-SHA256 accepted an oversized derived key")
+
+    rejected = False
+    try:
+        _ = pbkdf2_hmac_sha512(
+            Span[UInt8, ...](empty),
+            Span[UInt8, ...](empty_salt),
+            1,
+            PBKDF2_SHA512_MAX_DKLEN + 1,
+        )
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("PBKDF2-SHA512 accepted an oversized derived key")
 
     var nonce = List[UInt8](length=12, fill=0)
     var plaintext = List[UInt8](length=16, fill=0)

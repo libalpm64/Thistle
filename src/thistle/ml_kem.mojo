@@ -110,7 +110,7 @@ comptime ZETAS_TABLE: InlineArray[Int16, 128] = [
 def _zeta(i: Int) -> Int16:
     debug_assert(i >= 0 and i < 128, "ML-KEM zeta index out of bounds")
     ref zetas = global_constant[ZETAS_TABLE]()
-    return zetas.unsafe_ptr()[i]
+    return zetas.unsafe_ptr()[unsafe_offset=i]
 
 
 struct Poly(Copyable, Movable):
@@ -188,7 +188,7 @@ def barrett_reduce_simd[w: Int](a: SIMD[DType.int16, w]) -> SIMD[DType.int16, w]
 @always_inline
 def _u24_le(buf: Span[UInt8, ...], offset: Int) -> UInt32:
     if offset + 4 <= len(buf):
-        return (buf.unsafe_ptr() + offset).bitcast[UInt32]().load[alignment=1]().cast[DType.uint32]() & 0x00FFFFFF
+        return buf.unsafe_ptr().unsafe_offset(offset).unsafe_bitcast[UInt32]().unsafe_load[alignment=1]().cast[DType.uint32]() & 0x00FFFFFF
     return UInt32(buf[offset]) | (UInt32(buf[offset + 1]) << 8) | (UInt32(buf[offset + 2]) << 16)
 
 
@@ -199,7 +199,7 @@ def cbd3(mut r: Poly, buf: Span[UInt8, ...]) raises:
     var rp = r.coeffs.unsafe_ptr()
     for i in range(N // 4):
         var off = 3 * i
-        var t = UInt32(bp[off]) | (UInt32(bp[off + 1]) << 8) | (UInt32(bp[off + 2]) << 16)
+        var t = UInt32(bp[unsafe_offset=off]) | (UInt32(bp[unsafe_offset=off + 1]) << 8) | (UInt32(bp[unsafe_offset=off + 2]) << 16)
         var d = t & 0x00249249
         d += (t >> 1) & 0x00249249
         d += (t >> 2) & 0x00249249
@@ -212,10 +212,10 @@ def cbd3(mut r: Poly, buf: Span[UInt8, ...]) raises:
         var a3 = Int16((d >> 18) & 0x7)
         var b3 = Int16((d >> 21) & 0x7)
         var base = 4 * i
-        rp.store(base + 0, a0 - b0)
-        rp.store(base + 1, a1 - b1)
-        rp.store(base + 2, a2 - b2)
-        rp.store(base + 3, a3 - b3)
+        rp.unsafe_store(base + 0, a0 - b0)
+        rp.unsafe_store(base + 1, a1 - b1)
+        rp.unsafe_store(base + 2, a2 - b2)
+        rp.unsafe_store(base + 3, a3 - b3)
 
 
 def cbd2(mut r: Poly, buf: Span[UInt8, ...]) raises:
@@ -225,7 +225,7 @@ def cbd2(mut r: Poly, buf: Span[UInt8, ...]) raises:
     var rp = r.coeffs.unsafe_ptr()
     for i in range(N // 8):
         var off = 4 * i
-        var t = UInt32(bp[off]) | (UInt32(bp[off + 1]) << 8) | (UInt32(bp[off + 2]) << 16) | (UInt32(bp[off + 3]) << 24)
+        var t = UInt32(bp[unsafe_offset=off]) | (UInt32(bp[unsafe_offset=off + 1]) << 8) | (UInt32(bp[unsafe_offset=off + 2]) << 16) | (UInt32(bp[unsafe_offset=off + 3]) << 24)
         var d = t & 0x55555555
         d += (t >> 1) & 0x55555555
         var base = 8 * i
@@ -245,14 +245,14 @@ def cbd2(mut r: Poly, buf: Span[UInt8, ...]) raises:
         var b6 = Int16((d >> 26) & 0x3)
         var a7 = Int16((d >> 28) & 0x3)
         var b7 = Int16((d >> 30) & 0x3)
-        rp.store(base + 0, a0 - b0)
-        rp.store(base + 1, a1 - b1)
-        rp.store(base + 2, a2 - b2)
-        rp.store(base + 3, a3 - b3)
-        rp.store(base + 4, a4 - b4)
-        rp.store(base + 5, a5 - b5)
-        rp.store(base + 6, a6 - b6)
-        rp.store(base + 7, a7 - b7)
+        rp.unsafe_store(base + 0, a0 - b0)
+        rp.unsafe_store(base + 1, a1 - b1)
+        rp.unsafe_store(base + 2, a2 - b2)
+        rp.unsafe_store(base + 3, a3 - b3)
+        rp.unsafe_store(base + 4, a4 - b4)
+        rp.unsafe_store(base + 5, a5 - b5)
+        rp.unsafe_store(base + 6, a6 - b6)
+        rp.unsafe_store(base + 7, a7 - b7)
 
 
 def poly_cbd_eta1_512(mut r: Poly, buf: Span[UInt8, ...]) raises:
@@ -280,11 +280,11 @@ def ntt(mut r: InlineArray[Int16, N]):
             var zeta = _zeta(zeta_idx)
             comptime if l >= W:
                 def ntt_chunk[w: Int](off: Int) {ptr, zeta}:
-                    var lo = ptr.load[width=w](start + off)
-                    var hi = ptr.load[width=w](start + l + off)
+                    var lo = ptr.unsafe_load[width=w](start + off)
+                    var hi = ptr.unsafe_load[width=w](start + l + off)
                     var t = fqmul_simd(SIMD[DType.int16, w](zeta), hi)
-                    ptr.store[width=w](start + l + off, lo - t)
-                    ptr.store[width=w](start + off, lo + t)
+                    ptr.unsafe_store[width=w](start + l + off, lo - t)
+                    ptr.unsafe_store[width=w](start + off, lo + t)
 
                 vectorize[W, size=l](ntt_chunk)
             else:
@@ -309,10 +309,10 @@ def invntt(mut r: InlineArray[Int16, N]):
             var zeta = _zeta(zeta_idx)
             comptime if l >= W:
                 def invntt_chunk[w: Int](off: Int) {ptr, zeta}:
-                    var lo = ptr.load[width=w](start + off)
-                    var hi = ptr.load[width=w](start + l + off)
-                    ptr.store[width=w](start + off, barrett_reduce_simd(lo + hi))
-                    ptr.store[width=w](start + l + off, fqmul_simd(SIMD[DType.int16, w](zeta), hi - lo))
+                    var lo = ptr.unsafe_load[width=w](start + off)
+                    var hi = ptr.unsafe_load[width=w](start + l + off)
+                    ptr.unsafe_store[width=w](start + off, barrett_reduce_simd(lo + hi))
+                    ptr.unsafe_store[width=w](start + l + off, fqmul_simd(SIMD[DType.int16, w](zeta), hi - lo))
 
                 vectorize[W, size=l](invntt_chunk)
             else:
@@ -324,9 +324,9 @@ def invntt(mut r: InlineArray[Int16, N]):
                     r[j + l] = fqmul(zeta, r[j + l])
 
     def final_mul_chunk[w: Int](i: Int) {ptr}:
-        var a = ptr.load[width=w](i)
+        var a = ptr.unsafe_load[width=w](i)
         var f = SIMD[DType.int16, w](F)
-        ptr.store[width=w](i, fqmul_simd(a, f))
+        ptr.unsafe_store[width=w](i, fqmul_simd(a, f))
 
     vectorize[W, size=N](final_mul_chunk)
 
@@ -346,11 +346,11 @@ def poly_reduce(mut r: Poly):
     var ptr = r.coeffs.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
 
     def reduce_chunk[w: Int](i: Int) {ptr}:
-        var a = ptr.load[width=w](i)
+        var a = ptr.unsafe_load[width=w](i)
         var v = SIMD[DType.int16, w](Int16(((1 << 26) + Q // 2) // Q))
         var qv = SIMD[DType.int16, w](Int16(Q))
         var t = ((a.cast[DType.int32]() * v.cast[DType.int32]() + (1 << 25)) >> 26).cast[DType.int16]()
-        ptr.store[width=w](i, a - t * qv)
+        ptr.unsafe_store[width=w](i, a - t * qv)
 
     vectorize[W, size=N](reduce_chunk)
 
@@ -382,9 +382,9 @@ def poly_tomont(mut r: Poly):
     var ptr = r.coeffs.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
 
     def tomont_chunk[w: Int](i: Int) {ptr}:
-        var a = ptr.load[width=w](i)
+        var a = ptr.unsafe_load[width=w](i)
         var f = SIMD[DType.int16, w](F)
-        ptr.store[width=w](i, montgomery_reduce_simd(a.cast[DType.int32]() * f.cast[DType.int32]()))
+        ptr.unsafe_store[width=w](i, montgomery_reduce_simd(a.cast[DType.int32]() * f.cast[DType.int32]()))
 
     vectorize[W, size=N](tomont_chunk)
 
@@ -399,7 +399,7 @@ def poly_add_inplace(mut r: Poly, ref b: Poly):
     )
 
     def add_inplace_chunk[w: Int](i: Int) {rp, bp}:
-        rp.store[width=w](i, rp.load[width=w](i) + bp.load[width=w](i))
+        rp.unsafe_store[width=w](i, rp.unsafe_load[width=w](i) + bp.unsafe_load[width=w](i))
 
     vectorize[W, size=N](add_inplace_chunk)
 
@@ -414,7 +414,7 @@ def poly_sub_from(mut r: Poly, ref a: Poly):
     )
 
     def sub_from_chunk[w: Int](i: Int) {rp, ap}:
-        rp.store[width=w](i, ap.load[width=w](i) - rp.load[width=w](i))
+        rp.unsafe_store[width=w](i, ap.unsafe_load[width=w](i) - rp.unsafe_load[width=w](i))
 
     vectorize[W, size=N](sub_from_chunk)
 
@@ -1005,14 +1005,14 @@ struct DecapsulationKey(Copyable, Movable):
         self.ek = EncapsulationKey()
         self.z = InlineArray[UInt8, SYMBYTES](fill=0)
 
-    def __del__(deinit self):
+    def __deinit__(deinit self):
         for row in range(K_MAX):
             var ptr = self.pke_dk.pv.vec[row].coeffs.unsafe_ptr()
             for i in range(N):
-                ptr.store[volatile=True](i, Int16(0))
+                ptr.unsafe_store[volatile=True](i, Int16(0))
         var z_ptr = self.z.unsafe_ptr()
         for i in range(SYMBYTES):
-            z_ptr.store[volatile=True](i, UInt8(0))
+            z_ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
 def pack_pk_stack(mut out: StackBuffer[UInt8, ...], ref pk: Polyvec, seed: InlineArray[UInt8, SYMBYTES], k: Int) -> Bool:
@@ -1067,7 +1067,7 @@ def k_pke_keygen(mut ek: KPKEEncryptionKey, mut dk: KPKEDecapsulationKey, d: Spa
     var g = StackBuffer[UInt8, 2 * SYMBYTES]()
     hash_g_into(g, Span[UInt8, ...](unsafe_ptr=g_input.ptr(), length=g_input.len()))
     var rho = Span[UInt8, ...](unsafe_ptr=g.ptr(), length=SYMBYTES)
-    var sigma = Span[UInt8, ...](unsafe_ptr=g.ptr() + SYMBYTES, length=SYMBYTES)
+    var sigma = Span[UInt8, ...](unsafe_ptr=g.ptr().unsafe_offset(SYMBYTES), length=SYMBYTES)
 
     var a = InlineArray[Polyvec, K_MAX](fill=Polyvec())
     gen_matrix(a, Span[UInt8, ...](rho), False, k)
@@ -1118,7 +1118,7 @@ def k_pke_keygen_k[k: Int](mut ek: KPKEEncryptionKey, mut dk: KPKEDecapsulationK
     var g = StackBuffer[UInt8, 2 * SYMBYTES]()
     hash_g_into(g, Span[UInt8, ...](unsafe_ptr=g_input.ptr(), length=g_input.len()))
     var rho = Span[UInt8, ...](unsafe_ptr=g.ptr(), length=SYMBYTES)
-    var sigma = Span[UInt8, ...](unsafe_ptr=g.ptr() + SYMBYTES, length=SYMBYTES)
+    var sigma = Span[UInt8, ...](unsafe_ptr=g.ptr().unsafe_offset(SYMBYTES), length=SYMBYTES)
 
     var a = InlineArray[Polyvec, K_MAX](fill=Polyvec())
     gen_matrix_k_static[k, False](a, Span[UInt8, ...](rho))
@@ -1426,7 +1426,7 @@ def _ct_select_u8(a: UInt8, b: UInt8, choice: UInt8) -> UInt8:
 def _zero_list(mut data: List[UInt8]):
     var ptr = data.unsafe_ptr()
     for i in range(len(data)):
-        ptr.store[volatile=True](i, UInt8(0))
+        ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
 
@@ -1647,7 +1647,7 @@ def mlkem_encaps_seed_into(mut ciphertext_out: StackBuffer[UInt8, CIPHERTEXTBYTE
     zero_stack_u8(g_input)
     for i in range(SYMBYTES):
         shared_out.push_unchecked(g[i])
-    if not k_pke_encrypt_into(ciphertext_out, ek, m, Span[UInt8, ...](unsafe_ptr=g.ptr() + SYMBYTES, length=SYMBYTES)):
+    if not k_pke_encrypt_into(ciphertext_out, ek, m, Span[UInt8, ...](unsafe_ptr=g.ptr().unsafe_offset(SYMBYTES), length=SYMBYTES)):
         zero_stack_u8(g)
         zero_stack_u8(shared_out)
         zero_stack_u8(ciphertext_out)
@@ -1679,7 +1679,7 @@ def mlkem_encaps_seed_into_k[k: Int](mut ciphertext_out: StackBuffer[UInt8, CIPH
     zero_stack_u8(g_input)
     for i in range(SYMBYTES):
         shared_out.push_unchecked(g[i])
-    if not k_pke_encrypt_into_k[k](ciphertext_out, ek, m, Span[UInt8, ...](unsafe_ptr=g.ptr() + SYMBYTES, length=SYMBYTES)):
+    if not k_pke_encrypt_into_k[k](ciphertext_out, ek, m, Span[UInt8, ...](unsafe_ptr=g.ptr().unsafe_offset(SYMBYTES), length=SYMBYTES)):
         zero_stack_u8(g)
         zero_stack_u8(shared_out)
         zero_stack_u8(ciphertext_out)
@@ -1744,7 +1744,7 @@ def mlkem_decaps_into(mut shared_out: StackBuffer[UInt8, SYMBYTES], dk_bytes: Sp
     zero_stack_u8(g_input)
 
     var ct_check = StackBuffer[UInt8, CIPHERTEXTBYTES_MAX]()
-    if not k_pke_encrypt_into(ct_check, dk.ek.pke_ek, Span[UInt8, ...](unsafe_ptr=m.ptr(), length=m.len()), Span[UInt8, ...](unsafe_ptr=g.ptr() + SYMBYTES, length=SYMBYTES)):
+    if not k_pke_encrypt_into(ct_check, dk.ek.pke_ek, Span[UInt8, ...](unsafe_ptr=m.ptr(), length=m.len()), Span[UInt8, ...](unsafe_ptr=g.ptr().unsafe_offset(SYMBYTES), length=SYMBYTES)):
         zero_stack_u8(m)
         zero_stack_u8(g)
         zero_stack_u8(ct_check)
@@ -1788,7 +1788,7 @@ def mlkem_decaps_into_k[k: Int](mut shared_out: StackBuffer[UInt8, SYMBYTES], dk
     zero_stack_u8(g_input)
 
     var ct_check = StackBuffer[UInt8, CIPHERTEXTBYTES_MAX]()
-    if not k_pke_encrypt_into_k[k](ct_check, dk.ek.pke_ek, Span[UInt8, ...](unsafe_ptr=m.ptr(), length=m.len()), Span[UInt8, ...](unsafe_ptr=g.ptr() + SYMBYTES, length=SYMBYTES)):
+    if not k_pke_encrypt_into_k[k](ct_check, dk.ek.pke_ek, Span[UInt8, ...](unsafe_ptr=m.ptr(), length=m.len()), Span[UInt8, ...](unsafe_ptr=g.ptr().unsafe_offset(SYMBYTES), length=SYMBYTES)):
         zero_stack_u8(m)
         zero_stack_u8(g)
         zero_stack_u8(ct_check)

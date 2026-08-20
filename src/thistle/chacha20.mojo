@@ -1,7 +1,7 @@
 # ChaCha20 stream cipher per RFC 7539.
 
 from std.memory import bitcast
-from std.memory.unsafe_pointer import UnsafePointer
+from std.memory.unsafe_pointer import Pointer
 from std.bit import rotate_bits_left
 
 comptime CHACHA_CONSTANTS = SIMD[DType.uint32, 4](
@@ -63,7 +63,7 @@ def simd_quarter_round(
 
     aa = aa + bb
     dd = dd ^ aa
-    dd = _rotl[16, dd.size](dd)
+    dd = _rotl[16, dd.length](dd)
 
     cc = cc + dd
     bb = bb ^ cc
@@ -71,7 +71,7 @@ def simd_quarter_round(
 
     aa = aa + bb
     dd = dd ^ aa
-    dd = _rotl[8, dd.size](dd)
+    dd = _rotl[8, dd.length](dd)
 
     cc = cc + dd
     bb = bb ^ cc
@@ -528,26 +528,36 @@ def _chacha20_block_scalar(
     return result
 
 
+@always_inline
+def _chacha20_nonce_words(nonce: Span[UInt8, ...]) raises -> SIMD[DType.uint32, 4]:
+    if len(nonce) != 12:
+        raise Error("ChaCha20 nonce must be exactly 12 bytes")
+    var padded = SIMD[DType.uint8, 16](0)
+    for i in range(12):
+        padded[i] = nonce[i]
+    return bitcast[DType.uint32, 4](padded)
+
+
 def chacha20_block(
-    key: SIMD[DType.uint8, 32], counter: UInt32, nonce: SIMD[DType.uint8, 16]
-) -> SIMD[DType.uint8, 64]:
+    key: SIMD[DType.uint8, 32], counter: UInt32, nonce: Span[UInt8, ...]
+) raises -> SIMD[DType.uint8, 64]:
 
     var key_words = bitcast[DType.uint32, 8](key)
-    var nonce_words = bitcast[DType.uint32, 4](nonce)
+    var nonce_words = _chacha20_nonce_words(nonce)
     var state = chacha20_block_core(key_words, counter, nonce_words)
     return bitcast[DType.uint8, 64](state)
 
 
 @always_inline
 def _xor_block64(
-    src: UnsafePointer[mut=True, UInt8, _, address_space=_],
-    dst: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    src: Pointer[mut=True, UInt8, _, address_space=_],
+    dst: Pointer[mut=True, UInt8, _, address_space=_],
     keystream: SIMD[DType.uint32, 16],
     offset: Int,
 ):
     var ks = bitcast[DType.uint8, 64](keystream)
-    var v = (src + offset).load[width=64, alignment=1](0)
-    (dst + offset).store[alignment=1](0, v ^ ks)
+    var v = (src.unsafe_offset(offset)).unsafe_load[width=64, alignment=1](0)
+    (dst.unsafe_offset(offset)).unsafe_store[alignment=1](0, v ^ ks)
 
 
 struct ChaCha20:
@@ -558,11 +568,11 @@ struct ChaCha20:
     def __init__(
         out self,
         key_bytes: SIMD[DType.uint8, 32],
-        nonce_bytes: SIMD[DType.uint8, 16],
+        nonce_bytes: Span[UInt8, ...],
         counter: UInt32 = 1,
-    ):
+    ) raises:
         self.key = bitcast[DType.uint32, 8](key_bytes)
-        self.nonce = bitcast[DType.uint32, 4](nonce_bytes)
+        self.nonce = _chacha20_nonce_words(nonce_bytes)
         self.counter = counter
 
     def _check_counter_space(self, data_len: Int) raises:
@@ -574,8 +584,8 @@ struct ChaCha20:
     @always_inline
     def _stream_xor(
         mut self,
-        src: UnsafePointer[mut=True, UInt8, _, address_space=_],
-        dst: UnsafePointer[mut=True, UInt8, _, address_space=_],
+        src: Pointer[mut=True, UInt8, _, address_space=_],
+        dst: Pointer[mut=True, UInt8, _, address_space=_],
         length: Int,
     ) raises:
         self._check_counter_space(length)
@@ -626,7 +636,7 @@ struct ChaCha20:
             )
             var ks_u8 = bitcast[DType.uint8, 64](keystream)
             for i in range(length - offset):
-                (dst + offset + i).store(0, (src + offset + i).load(0) ^ ks_u8[i])
+                (dst.unsafe_offset(offset).unsafe_offset(i)).unsafe_store(0, (src.unsafe_offset(offset).unsafe_offset(i)).unsafe_load(0) ^ ks_u8[i])
             block_idx += 1
 
         self.counter += UInt32(block_idx)

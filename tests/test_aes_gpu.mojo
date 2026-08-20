@@ -5,9 +5,9 @@ from std.sys import has_accelerator
 from thistle.sha2 import bytes_to_hex
 from thistle.aes import cpu_aes_ct_skey, AESExpandedKey
 from thistle.aes_gpu import aes_gpu_kernel_ecb, aes_gpu_kernel_ctr, aes_gpu_kernel_gcm_ctr
-from std.memory import alloc
 from max.gpu.host import DeviceContext
-from std.memory.unsafe_pointer import UnsafePointer
+from std.memory.unsafe_pointer import Pointer
+from std.memory import Layout, alloc
 
 
 def byte_to_hex(b: UInt8) -> String:
@@ -81,7 +81,6 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
             var name = String(v["name"])
             var key_hex = String(v["key"])
             var pt_hex = String(v["plaintext"])
-            var expected_ct_hex = String(v["ciphertext"])
             
             var key_bytes = hex_to_bytes(key_hex)
             var pt_bytes_data = hex_to_bytes(pt_hex)
@@ -90,12 +89,12 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
             var rounds = 10 if key_len == 16 else (12 if key_len == 24 else 14)
             
             var total_bytes = 64
-            var input_host = alloc[Scalar[DType.uint8]](total_bytes)
-            var output_host = alloc[Scalar[DType.uint8]](total_bytes)
+            var input_host = alloc(Layout[Scalar[DType.uint8]](count=total_bytes)).unsafe_leak()
+            var output_host = alloc(Layout[Scalar[DType.uint8]](count=total_bytes)).unsafe_leak()
             
             for block in range(4):
                 for j in range(16):
-                    input_host[block * 16 + j] = pt_bytes_data[j]
+                    input_host[unsafe_offset=block * 16 + j] = pt_bytes_data[j]
             
             var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
             var output_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
@@ -125,14 +124,13 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
             ctx.enqueue_copy(output_host, output_buffer)
             ctx.synchronize()
             
-            var correct = True
             var expected = String(v["ciphertext"])
             var all_passed = True
             for block in range(4):
                 for j in range(16):
                     var expected_byte = hex_char_to_val(Int(expected.as_bytes()[j * 2])) << 4
                     expected_byte |= hex_char_to_val(Int(expected.as_bytes()[j * 2 + 1]))
-                    var actual_byte = output_host[block * 16 + j]
+                    var actual_byte = output_host[unsafe_offset=block * 16 + j]
                     if actual_byte != expected_byte:
                         all_passed = False
                         break
@@ -145,11 +143,11 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
                 failed += 1
                 var got_hex = String("")
                 for j in range(16):
-                    got_hex += byte_to_hex(output_host[j])
+                    got_hex += byte_to_hex(output_host[unsafe_offset=j])
                 failures.append("AES-GPU " + name + ": expected " + expected + ", got " + got_hex)
             
-            input_host.free()
-            output_host.free()
+            input_host.unsafe_free()
+            output_host.unsafe_free()
     
     return TestResult(passed, failed, failures^)
 
@@ -176,11 +174,11 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
         
         var total_bytes = len(pt_bytes)
         var n_blocks = total_bytes // 16
-        var pt_ptr = alloc[UInt8](total_bytes)
+        var pt_ptr = alloc(Layout[UInt8](count=total_bytes)).unsafe_leak()
         for j in range(total_bytes):
-            pt_ptr.store(j, pt_bytes[j])
+            pt_ptr.unsafe_store(j, pt_bytes[j])
         
-        var ct_ptr = alloc[UInt8](total_bytes)
+        var ct_ptr = alloc(Layout[UInt8](count=total_bytes)).unsafe_leak()
         
         var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
         var output_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
@@ -203,7 +201,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
         var skey_buffer = ctx.enqueue_create_buffer[DType.uint64]((rounds + 1) * 8)
         ctx.enqueue_copy(skey_buffer, skey_host.unsafe_ptr())
         
-        var nonce_ptr = alloc[UInt8](16)
+        var nonce_ptr = alloc(Layout[UInt8](count=16)).unsafe_leak()
         var nonce_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
         if "ECB" in mode:
             ctx.enqueue_function[aes_gpu_kernel_ecb](
@@ -219,11 +217,11 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
             var iv_hex = String(tv.get("iv", PythonObject()))
             if iv_hex.byte_length() == 0:
                 for j in range(16):
-                    nonce_ptr[j] = 0
+                    nonce_ptr[unsafe_offset=j] = 0
             else:
                 var iv_bytes = hex_to_bytes(iv_hex)
                 for j in range(16):
-                    nonce_ptr.store(j, iv_bytes[j])
+                    nonce_ptr.unsafe_store(j, iv_bytes[j])
 
             ctx.enqueue_copy(nonce_buffer, nonce_ptr)
             ctx.enqueue_function[aes_gpu_kernel_ctr](
@@ -240,15 +238,15 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
             var nonce_hex = String(tv.get("nonce", PythonObject()))
             if nonce_hex.byte_length() == 0:
                 for j in range(12):
-                    nonce_ptr[j] = 0
+                    nonce_ptr[unsafe_offset=j] = 0
             else:
                 var nonce_bytes = hex_to_bytes(nonce_hex)
                 for j in range(12):
-                    nonce_ptr.store(j, nonce_bytes[j])
-            nonce_ptr[12] = 0
-            nonce_ptr[13] = 0
-            nonce_ptr[14] = 0
-            nonce_ptr[15] = 1
+                    nonce_ptr.unsafe_store(j, nonce_bytes[j])
+            nonce_ptr[unsafe_offset=12] = 0
+            nonce_ptr[unsafe_offset=13] = 0
+            nonce_ptr[unsafe_offset=14] = 0
+            nonce_ptr[unsafe_offset=15] = 1
 
             ctx.enqueue_copy(nonce_buffer, nonce_ptr)
             ctx.enqueue_function[aes_gpu_kernel_gcm_ctr](
@@ -287,7 +285,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
             for j in range(total_bytes):
                 var expected_byte = hex_char_to_val(Int(expected_ct.as_bytes()[j * 2])) << 4
                 expected_byte = expected_byte | hex_char_to_val(Int(expected_ct.as_bytes()[j * 2 + 1]))
-                if ct_ptr.load(j) != expected_byte:
+                if ct_ptr.unsafe_load(j) != expected_byte:
                     correct = False
                     break
         
@@ -297,12 +295,12 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
             failed += 1
             var got_hex = String("")
             for j in range(total_bytes):
-                got_hex += byte_to_hex(ct_ptr.load(j))
+                got_hex += byte_to_hex(ct_ptr.unsafe_load(j))
             failures.append(mode + " " + String(i) + ": expected " + expected_ct + ", got " + got_hex)
         
-        pt_ptr.free()
-        ct_ptr.free()
-        nonce_ptr.free()
+        pt_ptr.unsafe_free()
+        ct_ptr.unsafe_free()
+        nonce_ptr.unsafe_free()
     
     return TestResult(passed, failed, failures^)
 

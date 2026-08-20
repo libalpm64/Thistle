@@ -1,5 +1,5 @@
 """
-Wycheproof X25519 test suite
+Wycheproof X25519 test suite.
 """
 from std.collections import List
 from std.python import Python

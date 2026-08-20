@@ -4,7 +4,7 @@ BLAKE3 cryptographic hash function
 
 from max.algorithm import parallelize
 from std.collections import List
-from std.memory import UnsafePointer, bitcast
+from std.memory import Pointer, bitcast
 from std.bit import count_trailing_zeros
 from std.utils import IndexList
 from thistle.utils import StackInlineArray
@@ -112,7 +112,7 @@ def compress_internal[
     counter: UInt64,
     blen: UInt8,
     flags: UInt8,
-    out_ptr: UnsafePointer[mut=True, SIMD[DType.uint32, w], _, address_space=_],
+    out_ptr: Pointer[mut=True, SIMD[DType.uint32, w], _, address_space=_],
 ):
     """BLAKE3 compression: 7 rounds of G with message permutation."""
     # fmt: off
@@ -153,8 +153,8 @@ def compress_internal[
         transform()
         round()
 
-    out_ptr.bitcast[UInt32]().store(
-        v.unsafe_ptr().bitcast[UInt32]().load[width=w * 16]()
+    out_ptr.unsafe_bitcast[UInt32]().unsafe_store(
+        v.unsafe_ptr().unsafe_bitcast[UInt32]().unsafe_load[width=w * 16]()
     )
 
 @always_inline
@@ -191,7 +191,7 @@ def compress_internal_16way(
     base_counter: UInt64,
     blen: UInt8,
     flags: UInt8,
-    out_ptr: UnsafePointer[mut=True, SIMD[DType.uint32, 16], _, address_space=_],
+    out_ptr: Pointer[mut=True, SIMD[DType.uint32, 16], _, address_space=_],
 ):
     """16-way SIMD compression with per-lane sequential counters."""
     var counters_low = SIMD[DType.uint32, 16](
@@ -236,14 +236,14 @@ def compress_internal_16way(
         transform()
         round()
 
-    out_ptr[0] = v[0] ^ v[8]
-    out_ptr[1] = v[1] ^ v[9]
-    out_ptr[2] = v[2] ^ v[10]
-    out_ptr[3] = v[3] ^ v[11]
-    out_ptr[4] = v[4] ^ v[12]
-    out_ptr[5] = v[5] ^ v[13]
-    out_ptr[6] = v[6] ^ v[14]
-    out_ptr[7] = v[7] ^ v[15]
+    out_ptr[unsafe_offset=0] = v[0] ^ v[8]
+    out_ptr[unsafe_offset=1] = v[1] ^ v[9]
+    out_ptr[unsafe_offset=2] = v[2] ^ v[10]
+    out_ptr[unsafe_offset=3] = v[3] ^ v[11]
+    out_ptr[unsafe_offset=4] = v[4] ^ v[12]
+    out_ptr[unsafe_offset=5] = v[5] ^ v[13]
+    out_ptr[unsafe_offset=6] = v[6] ^ v[14]
+    out_ptr[unsafe_offset=7] = v[7] ^ v[15]
 
 struct Hasher:
     var key: SIMD[DType.uint32, 8]
@@ -273,7 +273,7 @@ struct Hasher:
         while len(d) > 0:
             if self.buf_len == 64:
                 var blk = (
-                    self.buf.unsafe_ptr().bitcast[UInt32]().load[width=16, alignment=1]()
+                    self.buf.unsafe_ptr().unsafe_bitcast[UInt32]().unsafe_load[width=16, alignment=1]()
                 )
 
                 if self.blocks_compressed == 15:
@@ -363,7 +363,7 @@ struct Hasher:
         for i in range(self.buf_len):
             temp_buf.unsafe_set(i, self.buf[i])
 
-        var blk = temp_buf.unsafe_ptr().bitcast[UInt32]().load[width=16, alignment=1]()
+        var blk = temp_buf.unsafe_ptr().unsafe_bitcast[UInt32]().unsafe_load[width=16, alignment=1]()
 
         var flags = (
             CHUNK_START if self.blocks_compressed == 0 else UInt8(0)
@@ -408,7 +408,7 @@ struct Hasher:
             var to_copy = min(64, out_len - bytes_written)
 
             if to_copy == 64:
-                (out_buf.unsafe_ptr() + bytes_written).store(b)
+                (out_buf.unsafe_ptr().unsafe_offset(bytes_written)).unsafe_store(b)
             else:
                 for i in range(to_copy):
                     out_buf.unsafe_set(bytes_written + i, b[i])
@@ -439,7 +439,7 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
     @parameter
     def process_batch(tid: Int):
         var task_base = tid * BSIZE
-        var base_ptr = d.unsafe_ptr().bitcast[UInt32]()
+        var base_ptr = d.unsafe_ptr().unsafe_bitcast[UInt32]()
         var local_cvs = StackInlineArray[SIMD[DType.uint32, 8], 64](
             uninitialized=True
         )
@@ -469,7 +469,7 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
                     @parameter
                     @always_inline
                     def _load_idx(v: Int) -> SIMD[DType.uint32, 4]:
-                        return base_ptr.load[width=4, alignment=1](
+                        return base_ptr.unsafe_load[width=4, alignment=1](
                             (base + v) * 256 + b * 16 + joff
                         )
 
@@ -567,7 +567,7 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
                     IV, left.join(right), 0, 64, PARENT
                 )
                 local_cvs.unsafe_set(i, combined.slice[8]())
-        batch_roots_ptr[tid] = local_cvs[0]
+        batch_roots_ptr[unsafe_offset=tid] = local_cvs[0]
 
     parallelize[process_batch](num_full_batches)
 

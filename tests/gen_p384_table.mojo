@@ -39,5 +39,5 @@ def main() raises:
     print("    var t = InlineArray[UInt64, 8704](uninitialized=True)")
     print("    var p = t.unsafe_ptr()")
     for c in range(68):
-        print("    p.store[alignment=8](" + String(c * 128) + ", _P384_BT" + String(c) + ")")
+        print("    p.unsafe_store[alignment=8](" + String(c * 128) + ", _P384_BT" + String(c) + ")")
     print("    return t^")

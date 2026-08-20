@@ -557,7 +557,7 @@ struct KCipher2:
     ](mut self, mut data: Span[mut=True, UInt8, origin]):
         var len_data = len(data)
         var data_ptr = data.unsafe_ptr()
-        var data_u64 = data_ptr.bitcast[UInt64]()
+        var data_u64 = data_ptr.unsafe_bitcast[UInt64]()
         var num_u64 = len_data // 8
         var i = 0
 
@@ -570,25 +570,25 @@ struct KCipher2:
             self._next_normal()
             var ks3 = self.stream()
             self._next_normal()
-            (data_u64 + i).store[alignment=1](
-                (data_u64 + i).load[width=1, alignment=1]() ^ ks0
+            (data_u64.unsafe_offset(i)).unsafe_store[alignment=1](
+                (data_u64.unsafe_offset(i)).unsafe_load[width=1, alignment=1]() ^ ks0
             )
-            (data_u64 + i + 1).store[alignment=1](
-                (data_u64 + i + 1).load[width=1, alignment=1]() ^ ks1
+            (data_u64.unsafe_offset(i).unsafe_offset(1)).unsafe_store[alignment=1](
+                (data_u64.unsafe_offset(i).unsafe_offset(1)).unsafe_load[width=1, alignment=1]() ^ ks1
             )
-            (data_u64 + i + 2).store[alignment=1](
-                (data_u64 + i + 2).load[width=1, alignment=1]() ^ ks2
+            (data_u64.unsafe_offset(i).unsafe_offset(2)).unsafe_store[alignment=1](
+                (data_u64.unsafe_offset(i).unsafe_offset(2)).unsafe_load[width=1, alignment=1]() ^ ks2
             )
-            (data_u64 + i + 3).store[alignment=1](
-                (data_u64 + i + 3).load[width=1, alignment=1]() ^ ks3
+            (data_u64.unsafe_offset(i).unsafe_offset(3)).unsafe_store[alignment=1](
+                (data_u64.unsafe_offset(i).unsafe_offset(3)).unsafe_load[width=1, alignment=1]() ^ ks3
             )
             i += 4
 
         while i < num_u64:
             var ks = self.stream()
             self._next_normal()
-            (data_u64 + i).store[alignment=1](
-                (data_u64 + i).load[width=1, alignment=1]() ^ ks
+            (data_u64.unsafe_offset(i)).unsafe_store[alignment=1](
+                (data_u64.unsafe_offset(i)).unsafe_load[width=1, alignment=1]() ^ ks
             )
             i += 1
 

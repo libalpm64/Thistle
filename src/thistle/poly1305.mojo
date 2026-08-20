@@ -2,7 +2,7 @@
 Poly1305 per RFC 8439
 """
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.collections import InlineArray
 
 comptime _M44: UInt64 = 0xFFFFFFFFFFF
@@ -10,8 +10,8 @@ comptime _M42: UInt64 = 0x3FFFFFFFFFF
 
 
 @always_inline
-def _le64(ptr: UnsafePointer[mut=False, UInt8, _, address_space=_], offset: Int) -> UInt64:
-    return (ptr + offset).bitcast[UInt64]().load[width=1, alignment=1]()
+def _le64(ptr: Pointer[mut=False, UInt8, _, address_space=_], offset: Int) -> UInt64:
+    return (ptr.unsafe_offset(offset)).unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]()
 
 
 struct _RPower(Movable, Copyable, ImplicitlyCopyable):
@@ -67,7 +67,7 @@ def _reduce(mut h0: UInt64, mut h1: UInt64, mut h2: UInt64, d0: UInt128, d1: UIn
 
 
 @always_inline
-def _limbs_at(ptr: UnsafePointer[mut=False, UInt8, _, address_space=_], offset: Int, hibit: UInt64) -> SIMD[DType.uint64, 4]:
+def _limbs_at(ptr: Pointer[mut=False, UInt8, _, address_space=_], offset: Int, hibit: UInt64) -> SIMD[DType.uint64, 4]:
     var t0 = _le64(ptr, offset)
     var t1 = _le64(ptr, offset + 8)
     return SIMD[DType.uint64, 4](
@@ -175,7 +175,7 @@ struct Poly1305:
         _reduce(self.h0, self.h1, self.h2, d0, d1, d2)
 
     @no_inline
-    def _blocks8(mut self, ptr: UnsafePointer[mut=False, UInt8, _, address_space=_], count8: Int):
+    def _blocks8(mut self, ptr: Pointer[mut=False, UInt8, _, address_space=_], count8: Int):
         var h0 = self.h0
         var h1 = self.h1
         var h2 = self.h2
@@ -207,7 +207,7 @@ struct Poly1305:
         self.h2 = h2
 
     @no_inline
-    def _blocks4(mut self, ptr: UnsafePointer[mut=False, UInt8, _, address_space=_], count4: Int):
+    def _blocks4(mut self, ptr: Pointer[mut=False, UInt8, _, address_space=_], count4: Int):
         var h0 = self.h0
         var h1 = self.h1
         var h2 = self.h2
@@ -239,7 +239,7 @@ struct Poly1305:
 
         if self.buf_len > 0:
             while self.buf_len < 16 and i < n:
-                self.buf[self.buf_len] = ptr[i]
+                self.buf[self.buf_len] = ptr[unsafe_offset=i]
                 self.buf_len += 1
                 i += 1
             if self.buf_len == 16:
@@ -251,14 +251,14 @@ struct Poly1305:
         if octs > 0:
             if not self.powers8_ready:
                 self._make_powers8()
-            self._blocks8(ptr + i, octs)
+            self._blocks8(ptr.unsafe_offset(i), octs)
             i += octs << 7
 
         var quads = (n - i) >> 6
         if quads > 0 and (self.powers4_ready or quads > 1):
             if not self.powers4_ready:
                 self._make_powers4()
-            self._blocks4(ptr + i, quads)
+            self._blocks4(ptr.unsafe_offset(i), quads)
             i += quads << 6
 
         while i + 16 <= n:
@@ -266,11 +266,11 @@ struct Poly1305:
             i += 16
 
         while i < n:
-            self.buf[self.buf_len] = ptr[i]
+            self.buf[self.buf_len] = ptr[unsafe_offset=i]
             self.buf_len += 1
             i += 1
 
-    def finalize_into(mut self, output: UnsafePointer[mut=True, UInt8, _, address_space=_]):
+    def finalize_into(mut self, output: Pointer[mut=True, UInt8, _, address_space=_]):
         if self.buf_len > 0:
             self.buf[self.buf_len] = 1
             for j in range(self.buf_len + 1, 16):
@@ -324,17 +324,17 @@ struct Poly1305:
 
         var o0 = h0 | (h1 << 44)
         var o1 = (h1 >> 20) | (h2 << 24)
-        output.bitcast[UInt64]().store[alignment=1](0, o0)
-        (output + 8).bitcast[UInt64]().store[alignment=1](0, o1)
+        output.unsafe_bitcast[UInt64]().unsafe_store[alignment=1](0, o0)
+        (output.unsafe_offset(8)).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](0, o1)
         self.wipe()
 
     def wipe(mut self):
-        var p = UnsafePointer(to=self.h0)
-        p.store[volatile=True](0, UInt64(0))
-        UnsafePointer(to=self.h1).store[volatile=True](0, UInt64(0))
-        UnsafePointer(to=self.h2).store[volatile=True](0, UInt64(0))
-        UnsafePointer(to=self.pad0).store[volatile=True](0, UInt64(0))
-        UnsafePointer(to=self.pad1).store[volatile=True](0, UInt64(0))
+        var p = Pointer(to=self.h0)
+        p.unsafe_store[volatile=True](0, UInt64(0))
+        Pointer(to=self.h1).unsafe_store[volatile=True](0, UInt64(0))
+        Pointer(to=self.h2).unsafe_store[volatile=True](0, UInt64(0))
+        Pointer(to=self.pad0).unsafe_store[volatile=True](0, UInt64(0))
+        Pointer(to=self.pad1).unsafe_store[volatile=True](0, UInt64(0))
 
 
 def poly1305_mac(

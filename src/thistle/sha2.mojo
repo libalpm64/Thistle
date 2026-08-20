@@ -4,7 +4,7 @@ RFC 6234 / FIPS 180-4 / CAVP validated
 """
 
 from std.collections import List
-from std.memory import UnsafePointer, memcpy, memset_zero
+from std.memory import Pointer, unsafe_memcpy, unsafe_memset_zero
 from std.bit import rotate_bits_right, byte_swap
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
@@ -170,31 +170,31 @@ struct SHA256Context(Movable):
         self.buffer = InlineArray[UInt8, 64](fill=0)
         self.buffer_len = 0
 
-    def __init__(out self, *, deinit take: Self):
-        self.state = take.state
-        self.count = take.count
-        self.buffer = take.buffer^
-        self.buffer_len = take.buffer_len
+    def __init__(out self, *, deinit move: Self):
+        self.state = move.state
+        self.count = move.count
+        self.buffer = move.buffer^
+        self.buffer_len = move.buffer_len
 
-    def __del__(deinit self):
-        memset_zero(self.buffer.unsafe_ptr(), 64)
+    def __deinit__(deinit self):
+        unsafe_memset_zero(self.buffer.unsafe_ptr(), 64)
 
     def reset(mut self):
         self.state = SHA256_IV
         self.count = 0
-        memset_zero(self.buffer.unsafe_ptr(), 64)
+        unsafe_memset_zero(self.buffer.unsafe_ptr(), 64)
         self.buffer_len = 0
 
     def reset(mut self, iv: SIMD[DType.uint32, 8]):
         self.state = iv
         self.count = 0
-        memset_zero(self.buffer.unsafe_ptr(), 64)
+        unsafe_memset_zero(self.buffer.unsafe_ptr(), 64)
         self.buffer_len = 0
 
 @always_inline
 def sha256_transform_blocks(
     mut state: SIMD[DType.uint32, 8],
-    data: UnsafePointer[mut=False, UInt8, _, address_space=_],
+    data: Pointer[mut=False, UInt8, _, address_space=_],
     nblocks: Int,
 ):
     comptime if (CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86()) or (CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]()):
@@ -211,7 +211,7 @@ def sha256_transform_blocks(
     var h0 = state[7]
 
     for blk in range(nblocks):
-        var block = data + blk * 64
+        var block = data.unsafe_offset(blk * 64)
         var w = InlineArray[UInt32, 16](uninitialized=True)
 
         var a = a0
@@ -286,7 +286,7 @@ def sha256_update(mut ctx: SHA256Context, data: Span[UInt8, ...]):
         var available = 64 - ctx.buffer_len
         if total_len >= available:
             for j in range(available):
-                buf_ptr[ctx.buffer_len + j] = data[j]
+                buf_ptr[unsafe_offset=ctx.buffer_len + j] = data[j]
             ctx.state = sha256_transform(
                 ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=64)
             )
@@ -295,20 +295,20 @@ def sha256_update(mut ctx: SHA256Context, data: Span[UInt8, ...]):
             ctx.buffer_len = 0
         else:
             for j in range(total_len):
-                buf_ptr[ctx.buffer_len + j] = data[j]
+                buf_ptr[unsafe_offset=ctx.buffer_len + j] = data[j]
             ctx.buffer_len += total_len
             return
 
     var nblocks = (total_len - i) // 64
     if nblocks > 0:
-        sha256_transform_blocks(ctx.state, data.unsafe_ptr() + i, nblocks)
+        sha256_transform_blocks(ctx.state, data.unsafe_ptr().unsafe_offset(i), nblocks)
         ctx.count += UInt64(nblocks) * 512
         i += nblocks * 64
 
     if i < total_len:
         var remaining = total_len - i
         for j in range(remaining):
-            buf_ptr[ctx.buffer_len + j] = data[i + j]
+            buf_ptr[unsafe_offset=ctx.buffer_len + j] = data[i + j]
         ctx.buffer_len += remaining
 
 
@@ -325,7 +325,7 @@ def sha256_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     return sha256_final(ctx)
 
 
-def sha256_final_to_buffer(mut ctx: SHA256Context, output: UnsafePointer[mut=True, UInt8, _, address_space=_]):
+def sha256_final_to_buffer(mut ctx: SHA256Context, output: Pointer[mut=True, UInt8, _, address_space=_]):
     var buf_ptr = ctx.buffer.unsafe_ptr()
     var bit_count = ctx.count + UInt64(ctx.buffer_len) * 8
 
@@ -333,13 +333,13 @@ def sha256_final_to_buffer(mut ctx: SHA256Context, output: UnsafePointer[mut=Tru
     ctx.buffer_len += 1
 
     if ctx.buffer_len > 56:
-        memset_zero(buf_ptr + ctx.buffer_len, 64 - ctx.buffer_len)
+        unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 64 - ctx.buffer_len)
         ctx.state = sha256_transform(
             ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=64)
         )
         ctx.buffer_len = 0
 
-    memset_zero(buf_ptr + ctx.buffer_len, 56 - ctx.buffer_len)
+    unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 56 - ctx.buffer_len)
     ctx.buffer_len = 56
 
     for i in range(8):
@@ -350,7 +350,7 @@ def sha256_final_to_buffer(mut ctx: SHA256Context, output: UnsafePointer[mut=Tru
     )
 
     for i in range(8):
-        (output + i * 4).bitcast[UInt32]().store[alignment=1](byte_swap(ctx.state[i]))
+        (output.unsafe_offset(i * 4)).unsafe_bitcast[UInt32]().unsafe_store[alignment=1](byte_swap(ctx.state[i]))
 
 struct SHA512Context(Movable):
     var state: SIMD[DType.uint64, 8]
@@ -374,23 +374,23 @@ struct SHA512Context(Movable):
         self.buffer = InlineArray[UInt8, 128](fill=0)
         self.buffer_len = 0
 
-    def __init__(out self, *, deinit take: Self):
-        self.state = take.state
-        self.count_high = take.count_high
-        self.count_low = take.count_low
-        self.buffer = take.buffer^
-        self.buffer_len = take.buffer_len
+    def __init__(out self, *, deinit move: Self):
+        self.state = move.state
+        self.count_high = move.count_high
+        self.count_low = move.count_low
+        self.buffer = move.buffer^
+        self.buffer_len = move.buffer_len
 
-    def __del__(deinit self):
-        memset_zero(self.buffer.unsafe_ptr(), 128)
+    def __deinit__(deinit self):
+        unsafe_memset_zero(self.buffer.unsafe_ptr(), 128)
 
     def wipe(mut self):
-        UnsafePointer(to=self.state).bitcast[UInt64]().store[volatile=True](
+        Pointer(to=self.state).unsafe_bitcast[UInt64]().unsafe_store[volatile=True](
             0, SIMD[DType.uint64, 8](0)
         )
         var buf_ptr = self.buffer.unsafe_ptr()
         for i in range(128):
-            buf_ptr.store[volatile=True](i, UInt8(0))
+            buf_ptr.unsafe_store[volatile=True](i, UInt8(0))
         self.count_high = 0
         self.count_low = 0
         self.buffer_len = 0
@@ -400,21 +400,21 @@ struct SHA512Context(Movable):
         self.state = iv
         self.count_high = 0
         self.count_low = 0
-        memset_zero(self.buffer.unsafe_ptr(), 128)
+        unsafe_memset_zero(self.buffer.unsafe_ptr(), 128)
         self.buffer_len = 0
 
     def reset(mut self, iv: SIMD[DType.uint64, 8]):
         self.state = iv
         self.count_high = 0
         self.count_low = 0
-        memset_zero(self.buffer.unsafe_ptr(), 128)
+        unsafe_memset_zero(self.buffer.unsafe_ptr(), 128)
         self.buffer_len = 0
 
 
 @always_inline
 def sha512_transform_blocks(
     mut state: SIMD[DType.uint64, 8],
-    data: UnsafePointer[mut=False, UInt8, _, address_space=_],
+    data: Pointer[mut=False, UInt8, _, address_space=_],
     nblocks: Int,
 ):
     comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["sha3"]() and not CompilationTarget.is_x86():
@@ -431,7 +431,7 @@ def sha512_transform_blocks(
     var h0 = state[7]
 
     for blk in range(nblocks):
-        var block = data + blk * 128
+        var block = data.unsafe_offset(blk * 128)
         var w = InlineArray[UInt64, 16](uninitialized=True)
 
         var a = a0
@@ -506,7 +506,7 @@ def sha512_update(mut ctx: SHA512Context, data: Span[UInt8, ...]):
         var available = 128 - ctx.buffer_len
         if total_len >= available:
             for j in range(available):
-                buf_ptr[ctx.buffer_len + j] = data[j]
+                buf_ptr[unsafe_offset=ctx.buffer_len + j] = data[j]
             ctx.state = sha512_transform(
                 ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=128)
             )
@@ -520,13 +520,13 @@ def sha512_update(mut ctx: SHA512Context, data: Span[UInt8, ...]):
             ctx.buffer_len = 0
         else:
             for j in range(total_len):
-                buf_ptr[ctx.buffer_len + j] = data[j]
+                buf_ptr[unsafe_offset=ctx.buffer_len + j] = data[j]
             ctx.buffer_len += total_len
             return
 
     var nblocks = (total_len - i) // 128
     if nblocks > 0:
-        sha512_transform_blocks(ctx.state, data.unsafe_ptr() + i, nblocks)
+        sha512_transform_blocks(ctx.state, data.unsafe_ptr().unsafe_offset(i), nblocks)
 
         var old_low = ctx.count_low
         ctx.count_low += UInt64(nblocks) * 1024
@@ -538,7 +538,7 @@ def sha512_update(mut ctx: SHA512Context, data: Span[UInt8, ...]):
     if i < total_len:
         var remaining = total_len - i
         for j in range(remaining):
-            buf_ptr[ctx.buffer_len + j] = data[i + j]
+            buf_ptr[unsafe_offset=ctx.buffer_len + j] = data[i + j]
         ctx.buffer_len += remaining
 
 
@@ -555,7 +555,7 @@ def sha512_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     return sha512_final(ctx)
 
 
-def sha512_final_to_buffer(mut ctx: SHA512Context, output: UnsafePointer[mut=True, UInt8, _, address_space=_]):
+def sha512_final_to_buffer(mut ctx: SHA512Context, output: Pointer[mut=True, UInt8, _, address_space=_]):
     var buf_ptr = ctx.buffer.unsafe_ptr()
     var final_low = ctx.count_low + UInt64(ctx.buffer_len) * 8
     var final_high = ctx.count_high
@@ -566,13 +566,13 @@ def sha512_final_to_buffer(mut ctx: SHA512Context, output: UnsafePointer[mut=Tru
     ctx.buffer_len += 1
 
     if ctx.buffer_len > 112:
-        memset_zero(buf_ptr + ctx.buffer_len, 128 - ctx.buffer_len)
+        unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 128 - ctx.buffer_len)
         ctx.state = sha512_transform(
             ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=128)
         )
         ctx.buffer_len = 0
 
-    memset_zero(buf_ptr + ctx.buffer_len, 112 - ctx.buffer_len)
+    unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 112 - ctx.buffer_len)
     ctx.buffer_len = 112
 
     for i in range(8):
@@ -585,7 +585,7 @@ def sha512_final_to_buffer(mut ctx: SHA512Context, output: UnsafePointer[mut=Tru
     )
 
     for i in range(8):
-        (output + i * 8).bitcast[UInt64]().store[alignment=1](byte_swap(ctx.state[i]))
+        (output.unsafe_offset(i * 8)).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](byte_swap(ctx.state[i]))
 
 def sha256_final_with_len(mut ctx: SHA256Context, output_len: Int) -> List[UInt8]:
     var buf_ptr = ctx.buffer.unsafe_ptr()
@@ -595,13 +595,13 @@ def sha256_final_with_len(mut ctx: SHA256Context, output_len: Int) -> List[UInt8
     ctx.buffer_len += 1
 
     if ctx.buffer_len > 56:
-        memset_zero(buf_ptr + ctx.buffer_len, 64 - ctx.buffer_len)
+        unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 64 - ctx.buffer_len)
         ctx.state = sha256_transform(
             ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=64)
         )
         ctx.buffer_len = 0
 
-    memset_zero(buf_ptr + ctx.buffer_len, 56 - ctx.buffer_len)
+    unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 56 - ctx.buffer_len)
     ctx.buffer_len = 56
 
     for i in range(8):
@@ -650,13 +650,13 @@ def sha256_final_partial(
     ctx.buffer_len += 1
 
     if ctx.buffer_len > 56:
-        memset_zero(buf_ptr + ctx.buffer_len, 64 - ctx.buffer_len)
+        unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 64 - ctx.buffer_len)
         ctx.state = sha256_transform(
             ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=64)
         )
         ctx.buffer_len = 0
 
-    memset_zero(buf_ptr + ctx.buffer_len, 56 - ctx.buffer_len)
+    unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 56 - ctx.buffer_len)
     ctx.buffer_len = 56
 
     for i in range(8):
@@ -711,13 +711,13 @@ def sha512_final_with_len(mut ctx: SHA512Context, output_len: Int) -> List[UInt8
     ctx.buffer_len += 1
 
     if ctx.buffer_len > 112:
-        memset_zero(buf_ptr + ctx.buffer_len, 128 - ctx.buffer_len)
+        unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 128 - ctx.buffer_len)
         ctx.state = sha512_transform(
             ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=128)
         )
         ctx.buffer_len = 0
 
-    memset_zero(buf_ptr + ctx.buffer_len, 112 - ctx.buffer_len)
+    unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 112 - ctx.buffer_len)
     ctx.buffer_len = 112
 
     for i in range(8):
@@ -759,13 +759,13 @@ def sha512_final_partial(
     ctx.buffer_len += 1
 
     if ctx.buffer_len > 112:
-        memset_zero(buf_ptr + ctx.buffer_len, 128 - ctx.buffer_len)
+        unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 128 - ctx.buffer_len)
         ctx.state = sha512_transform(
             ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=128)
         )
         ctx.buffer_len = 0
 
-    memset_zero(buf_ptr + ctx.buffer_len, 112 - ctx.buffer_len)
+    unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 112 - ctx.buffer_len)
     ctx.buffer_len = 112
 
     for i in range(8):

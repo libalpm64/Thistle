@@ -87,7 +87,7 @@ def _encoded_y_lt_p(y: Span[UInt8, ...]) -> Bool:
             gt = 1
     return lt == 1
 
-def _pack_limbs_into(limbs: SIMD[DType.uint64, 8], output: UnsafePointer[mut=True, UInt8, _, address_space=_]):
+def _pack_limbs_into(limbs: SIMD[DType.uint64, 8], output: Pointer[mut=True, UInt8, _, address_space=_]):
     var words = SIMD[DType.uint64, 4](0, 0, 0, 0)
     words[0] = limbs[0] | (limbs[1] << 52)
     words[1] = (limbs[1] >> 12) | (limbs[2] << 40)
@@ -95,11 +95,11 @@ def _pack_limbs_into(limbs: SIMD[DType.uint64, 8], output: UnsafePointer[mut=Tru
     words[3] = (limbs[3] >> 36) | (limbs[4] << 16)
     var bytes = bitcast[DType.uint8, 32](words)
     for i in range(32):
-        output[i] = bytes[i]
+        output[unsafe_offset=i] = bytes[i]
 
 def _unpack_limbs(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 8]:
     # Input may be byte-aligned; use alignment=1 for the UInt64 wide load.
-    var words = bytes.unsafe_ptr().bitcast[UInt64]().load[width=4, alignment=1]()
+    var words = bytes.unsafe_ptr().unsafe_bitcast[UInt64]().unsafe_load[width=4, alignment=1]()
     comptime MASK = (UInt64(1) << 52) - 1
     comptime TOP_MASK = (UInt64(1) << 48) - 1
     var s = SIMD[DType.uint64, 8](0)
@@ -114,7 +114,7 @@ def _from_512_raw(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 8]:
     # RFC 8032 5.1.6: reduce 64-byte SHA-512 output modulo L.
     var ptr = bytes.unsafe_ptr()
     var lo_span = Span[UInt8, ...](unsafe_ptr=ptr, length=32)
-    var hi_span = Span[UInt8, ...](unsafe_ptr=ptr + 32, length=32)
+    var hi_span = Span[UInt8, ...](unsafe_ptr=ptr.unsafe_offset(32), length=32)
     var lo = Scalar.from_bytes(lo_span)
     var hi = Scalar.from_bytes(hi_span)
     var pow2_256 = Scalar(POW2_256_LIMBS)
@@ -167,7 +167,7 @@ struct Scalar(Movable, Copyable, ImplicitlyCopyable):
         var raw = _unpack_limbs(bytes)
         return Scalar(raw)._montgomery_mul(Scalar(RR_LIMBS))
 
-    def to_bytes_into(self, output: UnsafePointer[mut=True, UInt8, _, address_space=_]):
+    def to_bytes_into(self, output: Pointer[mut=True, UInt8, _, address_space=_]):
         var raw = self._montgomery_mul(
             Scalar(SIMD[DType.uint64, 8](1, 0, 0, 0, 0, 0, 0, 0))
         )
@@ -239,7 +239,7 @@ struct Scalar(Movable, Copyable, ImplicitlyCopyable):
         return Scalar(r)._sub(Scalar(L_LIMBS))
 
     def wipe(mut self):
-        UnsafePointer(to=self.limbs).bitcast[UInt64]().store[volatile=True](
+        Pointer(to=self.limbs).unsafe_bitcast[UInt64]().unsafe_store[volatile=True](
             0, SIMD[DType.uint64, 8](0)
         )
 
@@ -352,34 +352,34 @@ def _edwards_double_standalone(p: EdwardsPoint) -> EdwardsPoint:
 @no_inline
 def fe_from_bytes(bytes: Span[UInt8, ...]) -> FieldElement51:
     # Decode 255-bit little-endian field element; caller clears x-parity bit.
-    def load8(ptr: UnsafePointer[mut=False, UInt8, _, address_space=_]) -> UInt64:
+    def load8(ptr: Pointer[mut=False, UInt8, _, address_space=_]) -> UInt64:
         var v: UInt64 = 0
         for j in range(8):
-            v |= UInt64(ptr[j]) << UInt64(j * 8)
+            v |= UInt64(ptr[unsafe_offset=j]) << UInt64(j * 8)
         return v
     var ptr = bytes.unsafe_ptr()
     var MASK = UInt64(0x7FFFFFFFFFFFF)
     var l0 = load8(ptr) & MASK
-    var l1 = (load8(ptr + 6) >> UInt64(3)) & MASK
-    var l2 = (load8(ptr + 12) >> UInt64(6)) & MASK
-    var l3 = (load8(ptr + 19) >> UInt64(1)) & MASK
-    var l4 = (load8(ptr + 24) >> UInt64(12)) & MASK
+    var l1 = (load8(ptr.unsafe_offset(6)) >> UInt64(3)) & MASK
+    var l2 = (load8(ptr.unsafe_offset(12)) >> UInt64(6)) & MASK
+    var l3 = (load8(ptr.unsafe_offset(19)) >> UInt64(1)) & MASK
+    var l4 = (load8(ptr.unsafe_offset(24)) >> UInt64(12)) & MASK
     return FieldElement51(l0, l1, l2, l3, l4)
 
 @no_inline
-def edwards_encode_into(p: EdwardsPoint, output: UnsafePointer[mut=True, UInt8, _, address_space=_]):
+def edwards_encode_into(p: EdwardsPoint, output: Pointer[mut=True, UInt8, _, address_space=_]):
     # RFC 8032 5.1.2: encode y and store x parity in bit 255.
     _edwards_encode_with_zinv(p, p.Z.invert(), output)
 
 @no_inline
-def _edwards_encode_with_zinv(p: EdwardsPoint, z_inv: FieldElement51, output: UnsafePointer[mut=True, UInt8, _, address_space=_]):
+def _edwards_encode_with_zinv(p: EdwardsPoint, z_inv: FieldElement51, output: Pointer[mut=True, UInt8, _, address_space=_]):
     var x = p.X * z_inv
     var y = p.Y * z_inv
     y.to_bytes_into(output)
     var x_bytes = InlineArray[UInt8, 32](uninitialized=True)
     x.to_bytes_into(x_bytes.unsafe_ptr())
     var x_parity = x_bytes[0] & 1
-    output[31] = output[31] | (x_parity << 7)
+    output[unsafe_offset=31] = output[unsafe_offset=31] | (x_parity << 7)
 
 @no_inline
 def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
@@ -605,16 +605,16 @@ def _radix16_digits(scalar: Span[UInt8, ...]) -> InlineArray[Int, 64]:
     return digits^
 
 @always_inline
-def _base_table_lookup(ptr: UnsafePointer[UInt64, _], j: Int, digit: Int) -> AffineNielsPoint:
+def _base_table_lookup(ptr: Pointer[UInt64, _], j: Int, digit: Int) -> AffineNielsPoint:
     var d = Int64(digit)
     var sign = d >> 63
     var absv = ((d ^ sign) - sign).cast[DType.uint64]()
     var acc = SIMD[DType.uint64, 16](0)
     acc[0] = 1
     acc[5] = 1
-    var base = ptr + j * 128
+    var base = ptr.unsafe_offset(j * 128)
     for k in range(1, 9):
-        var cand = (base + (k - 1) * 16).load[width=16, alignment=8]()
+        var cand = (base.unsafe_offset((k - 1) * 16)).unsafe_load[width=16, alignment=8]()
         var diff = absv ^ UInt64(k)
         var m = UInt64(0) - ((diff - 1) >> 63)
         acc = acc ^ ((acc ^ cand) & SIMD[DType.uint64, 16](m))
@@ -643,9 +643,9 @@ def _mul_base_ct(scalar: Span[UInt8, ...]) -> EdwardsPoint:
     P = _edwards_double_standalone(P)
     for i in range(0, 64, 2):
         P = _add_affine_niels(P, _base_table_lookup(tptr, i >> 1, digits[i]))
-    var dptr = digits.unsafe_ptr().bitcast[UInt64]()
+    var dptr = digits.unsafe_ptr().unsafe_bitcast[UInt64]()
     for i in range(64):
-        dptr.store[volatile=True](i, UInt64(0))
+        dptr.unsafe_store[volatile=True](i, UInt64(0))
     return P
 
 def _naf5(scalar: Span[UInt8, ...]) -> InlineArray[Int, 256]:
@@ -654,7 +654,7 @@ def _naf5(scalar: Span[UInt8, ...]) -> InlineArray[Int, 256]:
     words[4] = 0
     var ptr = scalar.unsafe_ptr()
     for w in range(4):
-        words[w] = (ptr + 8 * w).bitcast[UInt64]().load[width=1, alignment=1]()
+        words[w] = (ptr.unsafe_offset(8 * w)).unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]()
     var pos = 0
     var carry: UInt64 = 0
     while pos < 256:
@@ -677,12 +677,12 @@ def _naf5(scalar: Span[UInt8, ...]) -> InlineArray[Int, 256]:
     return naf^
 
 @always_inline
-def _b_odd_entry(ptr: UnsafePointer[UInt64, _], k: Int) -> AffineNielsPoint:
-    var base = ptr + k * 16
+def _b_odd_entry(ptr: Pointer[UInt64, _], k: Int) -> AffineNielsPoint:
+    var base = ptr.unsafe_offset(k * 16)
     return AffineNielsPoint(
-        FieldElement51(base[0], base[1], base[2], base[3], base[4]),
-        FieldElement51(base[5], base[6], base[7], base[8], base[9]),
-        FieldElement51(base[10], base[11], base[12], base[13], base[14]),
+        FieldElement51(base[unsafe_offset=0], base[unsafe_offset=1], base[unsafe_offset=2], base[unsafe_offset=3], base[unsafe_offset=4]),
+        FieldElement51(base[unsafe_offset=5], base[unsafe_offset=6], base[unsafe_offset=7], base[unsafe_offset=8], base[unsafe_offset=9]),
+        FieldElement51(base[unsafe_offset=10], base[unsafe_offset=11], base[unsafe_offset=12], base[unsafe_offset=13], base[unsafe_offset=14]),
     )
 
 @no_inline
@@ -718,7 +718,7 @@ def _double_scalar_mult_vartime(a: Span[UInt8, ...], A: EdwardsPoint, b: Span[UI
     return Q
 
 @no_inline
-def ed25519_generate_public_key(private_key: Span[UInt8, ...], output: UnsafePointer[mut=True, UInt8, _, address_space=_]) raises:
+def ed25519_generate_public_key(private_key: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]) raises:
     # RFC 8032 5.1.5: public key A = [pruned SHA512(secret)]B.
     if len(private_key) != 32:
         raise Error("Ed25519 private key must be 32 bytes")
@@ -736,12 +736,12 @@ def ed25519_generate_public_key(private_key: Span[UInt8, ...], output: UnsafePoi
     var hash_ptr = hash.unsafe_ptr()
     var s_ptr = s_bytes.unsafe_ptr()
     for i in range(64):
-        hash_ptr.store[volatile=True](i, UInt8(0))
+        hash_ptr.unsafe_store[volatile=True](i, UInt8(0))
     for i in range(32):
-        s_ptr.store[volatile=True](i, UInt8(0))
+        s_ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 @no_inline
-def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...], output: UnsafePointer[mut=True, UInt8, _, address_space=_]) raises:
+def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]) raises:
     # RFC 8032 5.1.6 pure Ed25519:
     # r = SHA512(prefix || M), R = [r]B,
     # k = SHA512(R || A || M), S = r + k*s mod L.
@@ -759,7 +759,7 @@ def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...], outpu
 
     var r_hash = InlineArray[UInt8, 64](uninitialized=True)
     var r_ctx = SHA512Context()
-    sha512_update(r_ctx, Span[UInt8, ...](unsafe_ptr=hash.unsafe_ptr() + 32, length=32))
+    sha512_update(r_ctx, Span[UInt8, ...](unsafe_ptr=hash.unsafe_ptr().unsafe_offset(32), length=32))
     sha512_update(r_ctx, message)
     sha512_final_to_buffer(r_ctx, r_hash.unsafe_ptr())
 
@@ -786,8 +786,8 @@ def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...], outpu
     var S_bytes = InlineArray[UInt8, 32](uninitialized=True)
     S_scalar.to_bytes_into(S_bytes.unsafe_ptr())
 
-    for i in range(32): output[i] = R_enc[i]
-    for i in range(32): output[32 + i] = S_bytes[i]
+    for i in range(32): output[unsafe_offset=i] = R_enc[i]
+    for i in range(32): output[unsafe_offset=32 + i] = S_bytes[i]
     ctx.wipe()
     r_ctx.wipe()
     s_scalar.wipe()
@@ -799,13 +799,13 @@ def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...], outpu
     var k_ptr = k_hash.unsafe_ptr()
     var S_ptr = S_bytes.unsafe_ptr()
     for i in range(64):
-        hash_ptr.store[volatile=True](i, UInt8(0))
-        r_ptr.store[volatile=True](i, UInt8(0))
-        k_ptr.store[volatile=True](i, UInt8(0))
+        hash_ptr.unsafe_store[volatile=True](i, UInt8(0))
+        r_ptr.unsafe_store[volatile=True](i, UInt8(0))
+        k_ptr.unsafe_store[volatile=True](i, UInt8(0))
     for i in range(32):
-        s_ptr.store[volatile=True](i, UInt8(0))
-        r_bytes_ptr.store[volatile=True](i, UInt8(0))
-        S_ptr.store[volatile=True](i, UInt8(0))
+        s_ptr.unsafe_store[volatile=True](i, UInt8(0))
+        r_bytes_ptr.unsafe_store[volatile=True](i, UInt8(0))
+        S_ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 struct Ed25519SigningKey(Copyable, Movable):
     var _s: Scalar
@@ -835,22 +835,22 @@ struct Ed25519SigningKey(Copyable, Movable):
         var hash_ptr = hash.unsafe_ptr()
         var s_ptr = s_bytes.unsafe_ptr()
         for i in range(64):
-            hash_ptr.store[volatile=True](i, UInt8(0))
+            hash_ptr.unsafe_store[volatile=True](i, UInt8(0))
         for i in range(32):
-            s_ptr.store[volatile=True](i, UInt8(0))
+            s_ptr.unsafe_store[volatile=True](i, UInt8(0))
 
-    def __del__(deinit self):
+    def __deinit__(deinit self):
         self._s.wipe()
         var p = self._prefix.unsafe_ptr()
         for i in range(32):
-            p.store[volatile=True](i, UInt8(0))
+            p.unsafe_store[volatile=True](i, UInt8(0))
 
-    def public_key_into(self, output: UnsafePointer[mut=True, UInt8, _, address_space=_]):
+    def public_key_into(self, output: Pointer[mut=True, UInt8, _, address_space=_]):
         for i in range(32):
             output[i] = self._a_enc[i]
 
     @no_inline
-    def sign(self, message: Span[UInt8, ...], output: UnsafePointer[mut=True, UInt8, _, address_space=_]) raises:
+    def sign(self, message: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]) raises:
         var r_hash = InlineArray[UInt8, 64](uninitialized=True)
         var r_ctx = SHA512Context()
         sha512_update(r_ctx, Span[UInt8, ...](unsafe_ptr=self._prefix.unsafe_ptr(), length=32))
@@ -889,11 +889,11 @@ struct Ed25519SigningKey(Copyable, Movable):
         var r_bytes_ptr = r_bytes.unsafe_ptr()
         var S_ptr = S_bytes.unsafe_ptr()
         for i in range(64):
-            r_ptr.store[volatile=True](i, UInt8(0))
-            k_ptr.store[volatile=True](i, UInt8(0))
+            r_ptr.unsafe_store[volatile=True](i, UInt8(0))
+            k_ptr.unsafe_store[volatile=True](i, UInt8(0))
         for i in range(32):
-            r_bytes_ptr.store[volatile=True](i, UInt8(0))
-            S_ptr.store[volatile=True](i, UInt8(0))
+            r_bytes_ptr.unsafe_store[volatile=True](i, UInt8(0))
+            S_ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
 @no_inline

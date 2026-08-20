@@ -3,7 +3,7 @@ Dudect test (Reparaz/Balasch/Verbauwhede).
 """
 
 from std.time import perf_counter_ns
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from thistle.camellia import CamelliaCipher, camellia_encrypt_block
 from thistle.kcipher2 import KCipher2
@@ -259,7 +259,7 @@ def run_aes_sw(mut rng: Rng) raises -> Bool:
 def run_chacha20(mut rng: Rng) raises -> Bool:
     var cls = _classes(N_FAST, rng)
     var inp = _fast_inputs(cls, 32, rng)
-    var nonce = SIMD[DType.uint8, 16](0)
+    var nonce = InlineArray[UInt8, 12](fill=0)
     var times = List[Float64](capacity=N_FAST)
     var sink: UInt8 = 0
     var data = List[UInt8]()
@@ -271,7 +271,7 @@ def run_chacha20(mut rng: Rng) raises -> Bool:
             key[j] = inp[i * 32 + j]
         var t0 = perf_counter_ns()
         for _ in range(BATCH):
-            var c = ChaCha20(key, nonce)
+            var c = ChaCha20(key, Span[UInt8, ...](nonce))
             var span = Span[mut=True, UInt8](data)
             c.encrypt_inplace(span)
             sink ^= data[0]

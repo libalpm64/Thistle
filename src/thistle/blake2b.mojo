@@ -4,7 +4,7 @@ RFC 7693
 """
 
 from std.collections import List
-from std.memory import UnsafePointer, memcpy, memset_zero
+from std.memory import Pointer, unsafe_memcpy, unsafe_memset_zero
 from .utils import bytes_to_hex, string_to_bytes
 
 comptime BLAKE2B_IV = SIMD[DType.uint64, 8](
@@ -53,8 +53,8 @@ def g(a: UInt64, b: UInt64, c: UInt64, d: UInt64, x: UInt64, y: UInt64) -> Tuple
 
 
 @always_inline
-def _mload(m: UnsafePointer[mut=False, UInt8, _, address_space=_], i: Int) -> UInt64:
-    return (m + i * 8).bitcast[UInt64]().load[width=1, alignment=1]()
+def _mload(m: Pointer[mut=False, UInt8, _, address_space=_], i: Int) -> UInt64:
+    return (m.unsafe_offset(i * 8)).unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]()
 
 
 @always_inline
@@ -63,7 +63,7 @@ def round_fn[r: Int](
     mut v4: UInt64, mut v5: UInt64, mut v6: UInt64, mut v7: UInt64,
     mut v8: UInt64, mut v9: UInt64, mut v10: UInt64, mut v11: UInt64,
     mut v12: UInt64, mut v13: UInt64, mut v14: UInt64, mut v15: UInt64,
-    m: UnsafePointer[mut=False, UInt8, _, address_space=_],
+    m: Pointer[mut=False, UInt8, _, address_space=_],
 ) -> Tuple[UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64]:
     comptime s = SIGMA[r]
 
@@ -90,8 +90,8 @@ struct Blake2b(Movable):
     var key_len: Int
 
     @always_inline
-    def _buf_ptr(mut self) -> UnsafePointer[UInt8, MutAnyOrigin]:
-        return self.buffer.unsafe_ptr().bitcast[UInt8]().unsafe_origin_cast[MutAnyOrigin]()
+    def _buf_ptr(mut self) -> Pointer[UInt8, MutAnyOrigin]:
+        return self.buffer.unsafe_ptr().unsafe_bitcast[UInt8]().unsafe_origin_cast[MutAnyOrigin]()
 
     def __init__(out self, out_len: Int = 64) raises:
         if out_len < 1 or out_len > 64:
@@ -133,23 +133,23 @@ struct Blake2b(Movable):
             self.update(key)
             var buf = self._buf_ptr()
             while self.buffer_len < 128:
-                buf[self.buffer_len] = 0
+                buf[unsafe_offset=self.buffer_len] = 0
                 self.buffer_len += 1
 
-    def __init__(out self, *, deinit take: Self):
-        self.h = take.h
-        self.t_low = take.t_low
-        self.t_high = take.t_high
-        self.buffer = take.buffer^
-        self.buffer_len = take.buffer_len
-        self.out_len = take.out_len
-        self.key_len = take.key_len
+    def __init__(out self, *, deinit move: Self):
+        self.h = move.h
+        self.t_low = move.t_low
+        self.t_high = move.t_high
+        self.buffer = move.buffer^
+        self.buffer_len = move.buffer_len
+        self.out_len = move.out_len
+        self.key_len = move.key_len
 
-    def __del__(deinit self):
-        UnsafePointer(to=self.h).bitcast[UInt64]().store[volatile=True](
+    def __deinit__(deinit self):
+        Pointer(to=self.h).unsafe_bitcast[UInt64]().unsafe_store[volatile=True](
             0, SIMD[DType.uint64, 8](0)
         )
-        memset_zero(self.buffer.unsafe_ptr(), 16)
+        unsafe_memset_zero(self.buffer.unsafe_ptr(), 16)
 
     @always_inline
     def _inc_counter(mut self):
@@ -157,7 +157,7 @@ struct Blake2b(Movable):
         if self.t_low < 128:
             self.t_high += 1
 
-    def compress(mut self, m: UnsafePointer[mut=False, UInt8, _, address_space=_], is_last: Bool):
+    def compress(mut self, m: Pointer[mut=False, UInt8, _, address_space=_], is_last: Bool):
         var v0 = self.h[0]
         var v1 = self.h[1]
         var v2 = self.h[2]
@@ -215,7 +215,7 @@ struct Blake2b(Movable):
                 if total < to_copy:
                     to_copy = total
                 for j in range(to_copy):
-                    self._buf_ptr()[self.buffer_len + j] = data[j]
+                    self._buf_ptr()[unsafe_offset=self.buffer_len + j] = data[j]
                 self.buffer_len += to_copy
                 i += to_copy
             if i == total:
@@ -226,29 +226,29 @@ struct Blake2b(Movable):
 
         while total - i > 128:
             self._inc_counter()
-            self.compress(data.unsafe_ptr() + i, False)
+            self.compress(data.unsafe_ptr().unsafe_offset(i), False)
             i += 128
 
         for j in range(total - i):
-            self._buf_ptr()[j] = data[i + j]
+            self._buf_ptr()[unsafe_offset=j] = data[i + j]
         self.buffer_len = total - i
 
-    def finalize_into(mut self, output: UnsafePointer[mut=True, UInt8, _, address_space=_]):
+    def finalize_into(mut self, output: Pointer[mut=True, UInt8, _, address_space=_]):
         var old_low = self.t_low
         self.t_low += UInt64(self.buffer_len)
         if self.t_low < old_low:
             self.t_high += 1
 
         if self.buffer_len < 128:
-            memset_zero(self._buf_ptr() + self.buffer_len, 128 - self.buffer_len)
+            unsafe_memset_zero(self._buf_ptr().unsafe_offset(self.buffer_len), 128 - self.buffer_len)
             self.buffer_len = 128
 
         self.compress(self._buf_ptr(), True)
 
         var h_copy = self.h
-        var h_bytes = UnsafePointer(to=h_copy).bitcast[UInt8]()
+        var h_bytes = Pointer(to=h_copy).unsafe_bitcast[UInt8]()
         for i in range(self.out_len):
-            output[i] = h_bytes[i]
+            output[unsafe_offset=i] = h_bytes[unsafe_offset=i]
 
     def finalize(mut self) -> List[UInt8]:
         var output = List[UInt8](capacity=self.out_len)

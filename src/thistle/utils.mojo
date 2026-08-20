@@ -39,17 +39,17 @@ struct StackInlineArray[ElementType: Copyable & Deinitable, size: Int](Copyable)
         var ptr = self.unsafe_ptr()
 
         comptime for i in range(Self.size):
-            ptr.init_pointee_move_from(
-                UnsafePointer(to=storage[i]).unsafe_mut_cast[True]()
+            ptr.unsafe_write_move_from(
+                Pointer(to=storage[i]).unsafe_mut_cast[True]()
             )
-            ptr += 1
+            ptr = ptr.unsafe_offset(1)
 
         storage^._annihilate()
 
     @always_inline
     def unsafe_ptr[
         origin: Origin, address_space: AddressSpace, //
-    ](ref[origin, address_space] self) -> UnsafePointer[
+    ](ref[origin, address_space] self) -> Pointer[
         Self.ElementType,
         origin,
         address_space=address_space
@@ -58,7 +58,7 @@ struct StackInlineArray[ElementType: Copyable & Deinitable, size: Int](Copyable)
             self._data.unsafe_ptr()
             .unsafe_mut_cast[origin.mut]()
             .unsafe_origin_cast[origin]()
-            .address_space_cast[address_space]()
+            .unsafe_address_space_cast[address_space]()
         )
 
     @always_inline
@@ -103,8 +103,8 @@ struct StackInlineArray[ElementType: Copyable & Deinitable, size: Int](Copyable)
             0 <= idx < Self.size,
             "The index provided must be within the range [0, len(List) -1] when using List.unsafe_set()",
         )
-        (self._data.unsafe_ptr() + idx).destroy_pointee()
-        (self._data.unsafe_ptr() + idx).init_pointee_move(value^)
+        (self._data.unsafe_ptr().unsafe_offset(idx)).unsafe_deinit_pointee()
+        (self._data.unsafe_ptr().unsafe_offset(idx)).unsafe_write(value^)
 
 
 struct StackBuffer[T: Copyable & Deinitable, N: Int](Movable):
@@ -123,9 +123,9 @@ struct StackBuffer[T: Copyable & Deinitable, N: Int](Movable):
         self._len = 0
 
     @always_inline
-    def __init__(out self, *, deinit take: Self):
-        self._data = take._data^
-        self._len = take._len
+    def __init__(out self, *, deinit move: Self):
+        self._data = move._data^
+        self._len = move._len
 
     @always_inline
     def len(self) -> Int:
@@ -200,31 +200,31 @@ struct StackBuffer[T: Copyable & Deinitable, N: Int](Movable):
     @always_inline
     def ptr[
         origin: Origin, address_space: AddressSpace, //
-    ](ref[origin, address_space] self) -> UnsafePointer[
+    ](ref[origin, address_space] self) -> Pointer[
         Self.T, origin, address_space=address_space
     ]:
         return (
             self._data.unsafe_ptr()
             .unsafe_mut_cast[origin.mut]()
             .unsafe_origin_cast[origin]()
-            .address_space_cast[address_space]()
+            .unsafe_address_space_cast[address_space]()
         )
 
 
 @always_inline
-def load_32be(ptr: UnsafePointer[mut=False, UInt8, _, address_space=_], offset: Int) -> UInt32:
-    return byte_swap((ptr + offset).bitcast[UInt32]().load[width=1, alignment=1]())
+def load_32be(ptr: Pointer[mut=False, UInt8, _, address_space=_], offset: Int) -> UInt32:
+    return byte_swap((ptr.unsafe_offset(offset)).unsafe_bitcast[UInt32]().unsafe_load[width=1, alignment=1]())
 
 
 @always_inline
-def load_64be(ptr: UnsafePointer[mut=False, UInt8, _, address_space=_], offset: Int) -> UInt64:
-    return byte_swap((ptr + offset).bitcast[UInt64]().load[width=1, alignment=1]())
+def load_64be(ptr: Pointer[mut=False, UInt8, _, address_space=_], offset: Int) -> UInt64:
+    return byte_swap((ptr.unsafe_offset(offset)).unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]())
 
 
 @always_inline
-def store_64be(p: UnsafePointer[mut=True, UInt8, _, address_space=_], off: Int, v: UInt64):
+def store_64be(p: Pointer[mut=True, UInt8, _, address_space=_], off: Int, v: UInt64):
     for i in range(8):
-        p[off + i] = UInt8((v >> UInt64(56 - 8 * i)) & 0xFF)
+        p[unsafe_offset=off + i] = UInt8((v >> UInt64(56 - 8 * i)) & 0xFF)
 
 
 @always_inline
@@ -254,7 +254,7 @@ def u64_zero_choice(x: UInt64) -> UInt64:
 def zero_stack_u8(mut data: StackBuffer[UInt8, ...]):
     var ptr = data.ptr()
     for i in range(data.len()):
-        ptr.store[volatile=True](i, UInt8(0))
+        ptr.unsafe_store[volatile=True](i, UInt8(0))
     data.clear()
 
 
@@ -268,14 +268,14 @@ def nibble_to_hex_char(nibble: UInt8) -> UInt8:
 
 
 @always_inline
-def bytes_to_hex_simd(data: UnsafePointer[mut=False, UInt8, _, address_space=_], len: Int) -> String:
+def bytes_to_hex_simd(data: Pointer[mut=False, UInt8, _, address_space=_], len: Int) -> String:
     debug_assert[assert_mode="safe"](
         0 <= len <= Int.MAX // 2,
         "Hex input length cannot be negative or overflow the output size",
     )
     var result = String(capacity=len * 2)
     for i in range(len):
-        var b = data[i]
+        var b = data[unsafe_offset=i]
         result += chr(Int(nibble_to_hex_char((b >> 4) & 0x0F)))
         result += chr(Int(nibble_to_hex_char(b & 0x0F)))
     return result

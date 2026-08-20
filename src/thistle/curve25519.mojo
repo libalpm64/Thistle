@@ -289,21 +289,21 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         if len(bytes) < 32:
             raise Error("FieldElement51 input must be at least 32 bytes")
         @always_inline
-        def load8(ptr: UnsafePointer[mut=False, UInt8, _, address_space=_]) -> UInt64:
-            return ptr.bitcast[UInt64]().load[width=1, alignment=1]()
+        def load8(ptr: Pointer[mut=False, UInt8, _, address_space=_]) -> UInt64:
+            return ptr.unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]()
 
         var ptr = bytes.unsafe_ptr()
         var MASK = UInt64(0x7FFFFFFFFFFFF)
         
         var l0 = load8(ptr) & MASK
-        var l1 = (load8(ptr + 6) >> 3) & MASK
-        var l2 = (load8(ptr + 12) >> 6) & MASK
-        var l3 = (load8(ptr + 19) >> 1) & MASK
-        var l4 = (load8(ptr + 24) >> 12) & MASK
+        var l1 = (load8(ptr.unsafe_offset(6)) >> 3) & MASK
+        var l2 = (load8(ptr.unsafe_offset(12)) >> 6) & MASK
+        var l3 = (load8(ptr.unsafe_offset(19)) >> 1) & MASK
+        var l4 = (load8(ptr.unsafe_offset(24)) >> 12) & MASK
         
         return FieldElement51(l0, l1, l2, l3, l4)
 
-    def to_bytes_into(self, output: UnsafePointer[mut=True, UInt8, _, address_space=_]):
+    def to_bytes_into(self, output: Pointer[mut=True, UInt8, _, address_space=_]):
         var res = self._reduce(self.limbs)
         var limbs = res.limbs
 
@@ -327,7 +327,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         var w2 = (limbs[2] >> 26) | (limbs[3] << 25)
         var w3 = (limbs[3] >> 39) | (limbs[4] << 12)
 
-        (output + 0).bitcast[UInt64]().store[alignment=1](w0)
-        (output + 8).bitcast[UInt64]().store[alignment=1](w1)
-        (output + 16).bitcast[UInt64]().store[alignment=1](w2)
-        (output + 24).bitcast[UInt64]().store[alignment=1](w3)
+        (output.unsafe_offset(0)).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](w0)
+        (output.unsafe_offset(8)).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](w1)
+        (output.unsafe_offset(16)).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](w2)
+        (output.unsafe_offset(24)).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](w3)
