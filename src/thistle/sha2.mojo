@@ -212,7 +212,7 @@ def sha256_transform_blocks(
 
     for blk in range(nblocks):
         var block = data.unsafe_offset(blk * 64)
-        var w = InlineArray[UInt32, 16](uninitialized=True)
+        var w = InlineArray[UInt32, 16](fill=0)
 
         var a = a0
         var b = b0
@@ -432,7 +432,7 @@ def sha512_transform_blocks(
 
     for blk in range(nblocks):
         var block = data.unsafe_offset(blk * 128)
-        var w = InlineArray[UInt64, 16](uninitialized=True)
+        var w = InlineArray[UInt64, 16](fill=0)
 
         var a = a0
         var b = b0

@@ -233,7 +233,9 @@ struct Blake2b(Movable):
             self._buf_ptr()[unsafe_offset=j] = data[i + j]
         self.buffer_len = total - i
 
-    def finalize_into(mut self, output: Pointer[mut=True, UInt8, _, address_space=_]):
+    def _finalize_into_unchecked(
+        mut self, output: Pointer[mut=True, UInt8, _, address_space=_]
+    ):
         var old_low = self.t_low
         self.t_low += UInt64(self.buffer_len)
         if self.t_low < old_low:
@@ -250,11 +252,18 @@ struct Blake2b(Movable):
         for i in range(self.out_len):
             output[unsafe_offset=i] = h_bytes[unsafe_offset=i]
 
+    def finalize_into(
+        mut self, output: Span[mut=True, UInt8, ...]
+    ) raises:
+        if len(output) < self.out_len:
+            raise Error("BLAKE2b output buffer is too small")
+        self._finalize_into_unchecked(output.unsafe_ptr())
+
     def finalize(mut self) -> List[UInt8]:
         var output = List[UInt8](capacity=self.out_len)
         for _ in range(self.out_len):
             output.append(0)
-        self.finalize_into(output.unsafe_ptr())
+        self._finalize_into_unchecked(output.unsafe_ptr())
         return output^
 
 

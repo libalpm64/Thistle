@@ -229,6 +229,18 @@ def test_rsa_pss_signing() raises:
     )
     var msg = hex_bytes("74686973746c65")
     var salt = List[UInt8](length=32, fill=0xA5)
+    var raw_key = RsaPrivateKey(
+        Span[UInt8, ...](n), Span[UInt8, ...](e), Span[UInt8, ...](d)
+    )
+    var short_rsa_signature = List[UInt8](length=255, fill=0)
+    if raw_key.pss_sign_with_salt(
+        Span[UInt8, ...](msg),
+        Span[UInt8, ...](salt),
+        SHA256,
+        SHA256,
+        Span[mut=True, UInt8, ...](short_rsa_signature),
+    ):
+        raise Error("RSA-PSS accepted an undersized signature destination")
     var sig = rsa_pss_sign_with_salt(
         Span[UInt8, ...](n),
         Span[UInt8, ...](e),
@@ -272,13 +284,21 @@ def test_rsa_pss_signing() raises:
         Span[UInt8, ...](dq),
         Span[UInt8, ...](qi),
     )
+    if crt.pss_sign_with_salt(
+        Span[UInt8, ...](msg),
+        Span[UInt8, ...](salt),
+        SHA256,
+        SHA256,
+        Span[mut=True, UInt8, ...](short_rsa_signature),
+    ):
+        raise Error("RSA-PSS CRT accepted an undersized signature destination")
     var sig2 = List[UInt8](unsafe_uninit_length=256)
     if not crt.pss_sign_with_salt(
         Span[UInt8, ...](msg),
         Span[UInt8, ...](salt),
         SHA256,
         SHA256,
-        sig2.unsafe_ptr(),
+        Span[mut=True, UInt8, ...](sig2),
     ):
         raise Error("crt sign")
     if not rsa_pss_verify(

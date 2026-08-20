@@ -367,7 +367,7 @@ comptime _ED25519_B_ODD = SIMD[DType.uint64, 128](
 
 @no_inline
 def ed25519_base_table() -> InlineArray[UInt64, 4096]:
-    var t = InlineArray[UInt64, 4096](uninitialized=True)
+    var t = InlineArray[UInt64, 4096](fill=0)
     var p = t.unsafe_ptr()
     p.unsafe_store[alignment=8](0, _ED25519_BT0)
     p.unsafe_store[alignment=8](128, _ED25519_BT1)
@@ -405,6 +405,6 @@ def ed25519_base_table() -> InlineArray[UInt64, 4096]:
 
 @no_inline
 def ed25519_b_odd_table() -> InlineArray[UInt64, 128]:
-    var t = InlineArray[UInt64, 128](uninitialized=True)
+    var t = InlineArray[UInt64, 128](fill=0)
     t.unsafe_ptr().unsafe_store[alignment=8](0, _ED25519_B_ODD)
     return t^

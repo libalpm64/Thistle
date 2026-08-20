@@ -5,6 +5,7 @@ FIPS 202
 
 from std.collections import List
 from std.memory import Pointer, unsafe_memcpy, unsafe_memset_zero
+from std.os import abort
 from .utils import StackBuffer, bytes_to_hex, string_to_bytes
 from std.bit import rotate_bits_left
 from std.builtin.simd import SIMD
@@ -342,10 +343,10 @@ struct SHA3Context(Movable):
     var buffer_len: Int
 
     def __init__(out self, rate_bits: Int):
-        debug_assert[assert_mode="safe"](
-            0 < rate_bits <= 1344 and rate_bits % 8 == 0,
-            "SHA-3 rate must be a positive multiple of 8 no larger than 1344 bits",
-        )
+        if not (0 < rate_bits <= 1344 and rate_bits % 8 == 0):
+            abort(
+                "SHA-3 rate must be a positive multiple of 8 no larger than 1344 bits"
+            )
         self.state = StackBuffer[UInt64, 25](fill=0)
         self.rate_bytes = rate_bits // 8
         self.buffer = StackBuffer[UInt8, 168](fill=0)
@@ -404,9 +405,8 @@ def sha3_update(mut ctx: SHA3Context, data: Span[UInt8, ...]):
 
 
 def sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
-    debug_assert[assert_mode="safe"](
-        output_len_bytes >= 0, "SHA-3 output length cannot be negative"
-    )
+    if output_len_bytes < 0:
+        abort("SHA-3 output length cannot be negative")
     ctx.buffer[ctx.buffer_len] = 0x06
     ctx.buffer_len += 1
 
@@ -443,10 +443,8 @@ def sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
 
 @always_inline
 def sha3_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], output_len_bytes: Int):
-    debug_assert[assert_mode="safe"](
-        0 <= output_len_bytes <= output.capacity(),
-        "SHA-3 output length exceeds destination capacity",
-    )
+    if output_len_bytes < 0 or output_len_bytes > output.capacity():
+        abort("SHA-3 output length exceeds destination capacity")
     output.clear()
     ctx.buffer[ctx.buffer_len] = 0x06
     ctx.buffer_len += 1
@@ -559,10 +557,8 @@ def shake_finalize(mut ctx: SHA3Context):
 
 @always_inline
 def shake_squeeze_prefix_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], output_len: Int):
-    debug_assert[assert_mode="safe"](
-        0 <= output_len <= output.capacity(),
-        "SHAKE output length exceeds destination capacity",
-    )
+    if output_len < 0 or output_len > output.capacity():
+        abort("SHAKE output length exceeds destination capacity")
     output.clear()
     output.set_len_unchecked(output_len)
 
@@ -591,9 +587,8 @@ def shake_advance(mut ctx: SHA3Context):
 
 @always_inline
 def shake_final(mut ctx: SHA3Context, output_len: Int) -> List[UInt8]:
-    debug_assert[assert_mode="safe"](
-        output_len >= 0, "SHAKE output length cannot be negative"
-    )
+    if output_len < 0:
+        abort("SHAKE output length cannot be negative")
     shake_finalize(ctx)
 
     var output = List[UInt8](capacity=output_len)
@@ -621,10 +616,8 @@ def shake_final(mut ctx: SHA3Context, output_len: Int) -> List[UInt8]:
 
 @always_inline
 def shake_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], output_len: Int):
-    debug_assert[assert_mode="safe"](
-        0 <= output_len <= output.capacity(),
-        "SHAKE output length exceeds destination capacity",
-    )
+    if output_len < 0 or output_len > output.capacity():
+        abort("SHAKE output length exceeds destination capacity")
     output.clear()
     shake_finalize(ctx)
 

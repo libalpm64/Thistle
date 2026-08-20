@@ -175,7 +175,9 @@ def compress_core(
     ]
     # fmt: on
 
-    var res = StackInlineArray[SIMD[DType.uint32, 1], 16](uninitialized=True)
+    var res = StackInlineArray[SIMD[DType.uint32, 1], 16](
+        fill=SIMD[DType.uint32, 1](0)
+    )
     compress_internal[1](cv, m^, counter, blen, flags, res.unsafe_ptr())
     var final = SIMD[DType.uint32, 16]()
 
@@ -258,11 +260,11 @@ struct Hasher:
     def __init__(out self):
         self.key = IV
         self.original_key = IV
-        self.cv_stack = {uninitialized=True}
+        self.cv_stack = {fill=SIMD[DType.uint32, 8](0)}
 
         self.stack_len = 0
 
-        self.buf = {uninitialized=True}
+        self.buf = {fill=0}
 
         self.buf_len = 0
         self.chunk_counter = 0
@@ -356,7 +358,7 @@ struct Hasher:
         if out_len < 0:
             raise Error("BLAKE3 output length must be non-negative")
         out_buf = {unsafe_uninit_length=out_len}
-        var temp_buf = StackInlineArray[UInt8, 64](uninitialized=True)
+        var temp_buf = StackInlineArray[UInt8, 64](fill=0)
 
         for i in range(64):
             temp_buf.unsafe_set(i, 0)
@@ -441,7 +443,7 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
         var task_base = tid * BSIZE
         var base_ptr = d.unsafe_ptr().unsafe_bitcast[UInt32]()
         var local_cvs = StackInlineArray[SIMD[DType.uint32, 8], 64](
-            uninitialized=True
+            fill=SIMD[DType.uint32, 8](0)
         )
         for i in range(0, BSIZE, 16):
             var base = task_base + i
@@ -457,10 +459,10 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
                     CHUNK_END if b == 15 else UInt8(0)
                 )
                 var ma = StackInlineArray[SIMD[DType.uint32, 8], 16](
-                    uninitialized=True
+                    fill=SIMD[DType.uint32, 8](0)
                 )
                 var mb = StackInlineArray[SIMD[DType.uint32, 8], 16](
-                    uninitialized=True
+                    fill=SIMD[DType.uint32, 8](0)
                 )
 
                 for j in range(4):
@@ -531,7 +533,7 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
                 ]
 
                 var res = StackInlineArray[SIMD[DType.uint32, 16], 8](
-                    uninitialized=True
+                    fill=SIMD[DType.uint32, 16](0)
                 )
                 compress_internal_16way(
                     c,

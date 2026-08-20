@@ -1,20 +1,18 @@
 from std.bit import byte_swap
+from std.os import abort
 
 
 struct StackInlineArray[ElementType: Copyable & Deinitable, size: Int](Copyable):
     var _data: InlineArray[Self.ElementType, Self.size]
 
     @always_inline
-    def __init__(out self, *, uninitialized: Bool):
-        self._data = InlineArray[Self.ElementType, Self.size](
-            uninitialized=True
-        )
+    def __init__(out self, *, var fill: Self.ElementType):
+        self._data = InlineArray[Self.ElementType, Self.size](fill=fill^)
 
     @always_inline
     def __init__(out self, var *elems: Self.ElementType, __list_literal__: NoneType):
-        debug_assert(
-            len(elems) == Self.size, "No. of elems must match array size"
-        )
+        if len(elems) != Self.size:
+            abort("StackInlineArray literal length must match its size")
         self = Self(storage=elems^)
 
     @always_inline
@@ -27,14 +25,13 @@ struct StackInlineArray[ElementType: Copyable & Deinitable, size: Int](Copyable)
             elt_is_mutable=True, origin=origin, Self.ElementType, is_owned=True
         ],
     ):
-        debug_assert(
-            len(storage) == Self.size,
-            "Expected variadic list of length ",
-            Self.size,
-            ", received ",
-            len(storage),
+        if len(storage) != Self.size:
+            abort("StackInlineArray storage length must match its size")
+        # Each owned variadic element below move-initializes exactly one slot.
+        # No slot is read, assigned, or deinitialized before that initialization.
+        self._data = InlineArray[Self.ElementType, Self.size](
+            uninitialized=True
         )
-        self = {uninitialized=True}
 
         var ptr = self.unsafe_ptr()
 
@@ -64,13 +61,8 @@ struct StackInlineArray[ElementType: Copyable & Deinitable, size: Int](Copyable)
     @always_inline
     def unsafe_get[I: Indexer](ref self, idx: I) -> ref[self._data] Self.ElementType:
         var i = index(idx)
-        debug_assert(
-            0 <= i < Self.size,
-            " InlineArray.unsafe_get() index out of bounds: ",
-            i,
-            " should be greater than or equal to 0 and less than ",
-            Self.size,
-        )
+        if i < 0 or i >= Self.size:
+            abort("StackInlineArray index out of bounds")
         return self._data.unsafe_get(i)
 
     @always_inline
@@ -91,36 +83,29 @@ struct StackInlineArray[ElementType: Copyable & Deinitable, size: Int](Copyable)
 
     @always_inline
     def __getitem__(ref self, idx: Int) -> ref[self._data] Self.ElementType:
-        debug_assert(
-            0 <= idx < Self.size,
-            "Index out of bounds: ", idx, " should be in [0, ", Self.size, ")",
-        )
         return self.unsafe_get(idx)
 
     @always_inline
     def unsafe_set(mut self, idx: Int, var value: Self.ElementType):
-        debug_assert(
-            0 <= idx < Self.size,
-            "The index provided must be within the range [0, len(List) -1] when using List.unsafe_set()",
-        )
-        (self._data.unsafe_ptr().unsafe_offset(idx)).unsafe_deinit_pointee()
-        (self._data.unsafe_ptr().unsafe_offset(idx)).unsafe_write(value^)
+        if idx < 0 or idx >= Self.size:
+            abort("StackInlineArray index out of bounds")
+        self._data[idx] = value^
 
 
-struct StackBuffer[T: Copyable & Deinitable, N: Int](Movable):
+struct StackBuffer[T: Copyable & Deinitable & Defaultable, N: Int](Movable):
     var _data: InlineArray[Self.T, Self.N]
     var _len: Int
 
     @always_inline
     def __init__(out self):
         comptime assert Self.T.__del__is_trivial, "StackBuffer requires trivially destructible types (UInt8, UInt32, UInt64, etc)"
-        self._data = InlineArray[Self.T, Self.N](uninitialized=True)
+        self._data = InlineArray[Self.T, Self.N](fill=Self.T())
         self._len = 0
 
     @always_inline
     def __init__(out self, *, var fill: Self.T):
         self._data = InlineArray[Self.T, Self.N](fill=fill^)
-        self._len = 0
+        self._len = Self.N
 
     @always_inline
     def __init__(out self, *, deinit move: Self):
@@ -141,9 +126,8 @@ struct StackBuffer[T: Copyable & Deinitable, N: Int](Movable):
 
     @always_inline
     def push(mut self, var val: Self.T):
-        debug_assert[assert_mode="safe"](
-            self._len < Self.N, "StackBuffer overflow"
-        )
+        if self._len >= Self.N:
+            abort("StackBuffer overflow")
         self._data[self._len] = val^
         self._len += 1
 
@@ -154,17 +138,15 @@ struct StackBuffer[T: Copyable & Deinitable, N: Int](Movable):
 
     @always_inline
     def pop(mut self) -> Self.T:
-        debug_assert[assert_mode="safe"](
-            self._len > 0, "StackBuffer underflow"
-        )
+        if self._len <= 0:
+            abort("StackBuffer underflow")
         self._len -= 1
         return self._data[self._len].copy()
 
     @always_inline
     def top(ref self) -> ref[self._data] Self.T:
-        debug_assert[assert_mode="safe"](
-            self._len > 0, "StackBuffer empty"
-        )
+        if self._len <= 0:
+            abort("StackBuffer is empty")
         return self._data[self._len - 1]
 
     @always_inline
@@ -173,10 +155,8 @@ struct StackBuffer[T: Copyable & Deinitable, N: Int](Movable):
 
     @always_inline
     def set_len_unchecked(mut self, new_len: Int):
-        debug_assert[assert_mode="safe"](
-            0 <= new_len <= Self.N,
-            "StackBuffer set_len_unchecked out of bounds",
-        )
+        if new_len < 0 or new_len > Self.N:
+            abort("StackBuffer length out of bounds")
         self._len = new_len
 
     @always_inline
@@ -185,16 +165,14 @@ struct StackBuffer[T: Copyable & Deinitable, N: Int](Movable):
 
     @always_inline
     def __getitem__(ref self, i: Int) -> ref[self._data] Self.T:
-        debug_assert[assert_mode="safe"](
-            0 <= i < Self.N, "StackBuffer index out of bounds"
-        )
+        if i < 0 or i >= self._len:
+            abort("StackBuffer index out of bounds")
         return self._data[i]
 
     @always_inline
     def __setitem__(mut self, i: Int, var val: Self.T):
-        debug_assert[assert_mode="safe"](
-            0 <= i < Self.N, "StackBuffer index out of bounds"
-        )
+        if i < 0 or i >= self._len:
+            abort("StackBuffer index out of bounds")
         self._data[i] = val^
 
     @always_inline

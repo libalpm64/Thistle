@@ -2,11 +2,17 @@ from std.collections import List
 
 from thistle.aes import AESExpandedKey
 from thistle.argon2 import variable_length_hash_into
+from thistle.blake2b import Blake2b
 from thistle.chacha20poly1305 import (
     chacha20_poly1305_encrypt,
     hchacha20,
 )
 from thistle.chacha20 import ChaCha20
+from thistle.ed25519 import (
+    Ed25519SigningKey,
+    ed25519_generate_public_key,
+    ed25519_sign,
+)
 from thistle.p256 import p256_ecdsa_sign, p256_public_key
 from thistle.p384 import p384_ecdsa_sign, p384_public_key
 from thistle.pbkdf2 import (
@@ -15,6 +21,7 @@ from thistle.pbkdf2 import (
     pbkdf2_hmac_sha256,
     pbkdf2_hmac_sha512,
 )
+from thistle.poly1305 import Poly1305
 from thistle.x25519 import x25519
 
 
@@ -42,6 +49,28 @@ def main() raises:
         rejected = True
     if not rejected:
         raise Error("Argon2 accepted an undersized destination")
+
+    var blake_output = List[UInt8](length=31, fill=0)
+    var blake = Blake2b(32)
+    blake.update(Span[UInt8, ...](empty))
+    rejected = False
+    try:
+        blake.finalize_into(Span[mut=True, UInt8, ...](blake_output))
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("BLAKE2b accepted an undersized destination")
+
+    var poly_key = List[UInt8](length=32, fill=0)
+    var poly_output = List[UInt8](length=15, fill=0)
+    var poly = Poly1305(Span[UInt8, ...](poly_key))
+    rejected = False
+    try:
+        poly.finalize_into(Span[mut=True, UInt8, ...](poly_output))
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("Poly1305 accepted an undersized destination")
 
     var key32 = List[UInt8](length=32, fill=1)
     var point32 = List[UInt8](length=32, fill=0)
@@ -106,6 +135,48 @@ def main() raises:
         nonce_affects_stream |= stream_a[i] != stream_b[i]
     if not nonce_affects_stream:
         raise Error("ChaCha20 ignored the final nonce byte")
+
+    var ed_private = List[UInt8](length=32, fill=1)
+    var ed_public_short = List[UInt8](length=31, fill=0)
+    rejected = False
+    try:
+        ed25519_generate_public_key(
+            Span[UInt8, ...](ed_private),
+            Span[mut=True, UInt8, ...](ed_public_short),
+        )
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("Ed25519 accepted an undersized public-key destination")
+
+    var ed_signature_short = List[UInt8](length=63, fill=0)
+    rejected = False
+    try:
+        ed25519_sign(
+            Span[UInt8, ...](ed_private),
+            Span[UInt8, ...](empty),
+            Span[mut=True, UInt8, ...](ed_signature_short),
+        )
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("Ed25519 accepted an undersized signature destination")
+
+    var ed_key = Ed25519SigningKey(Span[UInt8, ...](ed_private))
+    if ed_key.public_key_into(
+        Span[mut=True, UInt8, ...](ed_public_short)
+    ):
+        raise Error("Ed25519 key object accepted an undersized public-key destination")
+    rejected = False
+    try:
+        ed_key.sign(
+            Span[UInt8, ...](empty),
+            Span[mut=True, UInt8, ...](ed_signature_short),
+        )
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("Ed25519 key object accepted an undersized signature destination")
 
     var empty_salt = List[UInt8]()
     rejected = False

@@ -1296,7 +1296,7 @@ comptime _P384_BT67 = SIMD[DType.uint64, 128](
 )
 
 def p384_base_table() -> InlineArray[UInt64, 8704]:
-    var t = InlineArray[UInt64, 8704](uninitialized=True)
+    var t = InlineArray[UInt64, 8704](fill=0)
     var p = t.unsafe_ptr()
     p.unsafe_store[alignment=8](0, _P384_BT0)
     p.unsafe_store[alignment=8](128, _P384_BT1)

@@ -140,7 +140,7 @@ def _sha256ni_transform_arm(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...
     var old_st0 = st0
     var old_st1 = st1
 
-    var w = InlineArray[SIMD128, 4](uninitialized=True)
+    var w = InlineArray[SIMD128, 4](fill=SIMD128(0))
     w[0] = Load(ptr)
     w[1] = Load(ptr.unsafe_offset(16))
     w[2] = Load(ptr.unsafe_offset(32))
@@ -182,7 +182,7 @@ def _sha256ni_transform_x86(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...
     var w2 = Load(ptr.unsafe_offset(32))
     var w3 = Load(ptr.unsafe_offset(48))
     
-    var w = InlineArray[SIMD128, 16](uninitialized=True)
+    var w = InlineArray[SIMD128, 16](fill=SIMD128(0))
     w[0] = w0
     w[1] = w1
     w[2] = w2
@@ -286,7 +286,7 @@ def sha256ni_transform_blocks(
             var old_st0 = st0
             var old_st1 = st1
 
-            var w = InlineArray[SIMD128, 4](uninitialized=True)
+            var w = InlineArray[SIMD128, 4](fill=SIMD128(0))
             w[0] = Load(ptr)
             w[1] = Load(ptr.unsafe_offset(16))
             w[2] = Load(ptr.unsafe_offset(32))
@@ -408,11 +408,11 @@ def sha512ni_transform_blocks(
         if blk + 1 < nblocks:
             prefetch_next_block512(block)
 
-        var w = InlineArray[SIMD64x2, 8](uninitialized=True)
+        var w = InlineArray[SIMD64x2, 8](fill=SIMD64x2(0))
         comptime for i in range(8):
             w[i] = Load512(block.unsafe_offset(i * 16))
 
-        var v = InlineArray[SIMD64x2, 4](uninitialized=True)
+        var v = InlineArray[SIMD64x2, 4](fill=SIMD64x2(0))
         v[0] = ab
         v[1] = cd
         v[2] = ef

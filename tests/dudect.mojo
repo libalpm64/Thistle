@@ -433,7 +433,8 @@ def run_ed25519(mut rng: Rng) raises -> Bool:
             sk[0] = 0x33
         var t0 = perf_counter_ns()
         ed25519_sign(
-            Span[UInt8, ...](sk), Span[UInt8, ...](msg), sig.unsafe_ptr()
+            Span[UInt8, ...](sk), Span[UInt8, ...](msg),
+            Span[mut=True, UInt8, ...](sig),
         )
         times.append(Float64(perf_counter_ns() - t0))
         sink ^= sig[0]

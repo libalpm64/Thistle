@@ -12,7 +12,7 @@ from thistle.curve25519 import FieldElement51
 
 
 def _canonical(fe: FieldElement51) -> FieldElement51:
-    var bytes = InlineArray[UInt8, 32](uninitialized=True)
+    var bytes = InlineArray[UInt8, 32](fill=0)
     fe.to_bytes_into(bytes.unsafe_ptr())
     return fe_from_bytes(Span[UInt8, ...](unsafe_ptr=bytes.unsafe_ptr(), length=32))
 
@@ -24,7 +24,7 @@ def _affine_niels_limbs(p: EdwardsPoint) -> InlineArray[UInt64, 15]:
     var y_plus_x = _canonical(y + x)
     var y_minus_x = _canonical(y - x)
     var xy2d = _canonical(x * y * ed25519_d2())
-    var out = InlineArray[UInt64, 15](uninitialized=True)
+    var out = InlineArray[UInt64, 15](fill=0)
     for i in range(5):
         out[i] = y_plus_x.limbs[i]
         out[5 + i] = y_minus_x.limbs[i]
@@ -59,7 +59,7 @@ def main() raises:
 
     var P = B
     for j in range(32):
-        var row = InlineArray[EdwardsPoint, 8](uninitialized=True)
+        var row = InlineArray[EdwardsPoint, 8](fill=EdwardsPoint())
         row[0] = P
         for k in range(1, 8):
             row[k] = edwards_add(row[k - 1], P)
@@ -69,7 +69,7 @@ def main() raises:
             P = edwards_double(P)
 
     var B2 = edwards_double(B)
-    var odd = InlineArray[EdwardsPoint, 8](uninitialized=True)
+    var odd = InlineArray[EdwardsPoint, 8](fill=EdwardsPoint())
     odd[0] = B
     for k in range(1, 8):
         odd[k] = edwards_add(odd[k - 1], B2)
@@ -78,7 +78,7 @@ def main() raises:
 
     print("@no_inline")
     print("def ed25519_base_table() -> InlineArray[UInt64, 4096]:")
-    print("    var t = InlineArray[UInt64, 4096](uninitialized=True)")
+    print("    var t = InlineArray[UInt64, 4096](fill=0)")
     print("    var p = t.unsafe_ptr()")
     for j in range(32):
         print("    p.unsafe_store[alignment=8](" + String(j * 128) + ", _ED25519_BT" + String(j) + ")")
@@ -86,6 +86,6 @@ def main() raises:
     print()
     print("@no_inline")
     print("def ed25519_b_odd_table() -> InlineArray[UInt64, 128]:")
-    print("    var t = InlineArray[UInt64, 128](uninitialized=True)")
+    print("    var t = InlineArray[UInt64, 128](fill=0)")
     print("    t.unsafe_ptr().unsafe_store[alignment=8](0, _ED25519_B_ODD)")
     print("    return t")

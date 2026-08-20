@@ -121,7 +121,7 @@ def run_case(
         # test-harness-only; the production p384_ecdh API accepts raw SEC 1.
         public_key = extract_trailing_sec1_p384_public_key(public_der)
     var expected = hex_to_bytes(shared_hex)
-    var actual = StackInlineArray[UInt8, 48](uninitialized=True)
+    var actual = StackInlineArray[UInt8, 48](fill=0)
     var got = p384_ecdh(
         Span[UInt8, ...](private_key),
         Span[UInt8, ...](public_key),

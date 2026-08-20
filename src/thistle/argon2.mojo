@@ -212,7 +212,7 @@ def variable_length_hash_into(
             store_le32(le_buf, 0, t_len)
             ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
             ctx.update(input)
-            ctx.finalize_into(out_ptr)
+            ctx.finalize_into(output)
         finally:
             zero_and_free(le_buf, 4)
         return
@@ -225,7 +225,9 @@ def variable_length_hash_into(
         store_le32(le_buf, 0, t_len)
         ctx1.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
         ctx1.update(input)
-        ctx1.finalize_into(v_buf)
+        ctx1.finalize_into(
+            Span[mut=True, UInt8, ...](unsafe_ptr=v_buf, length=64)
+        )
 
         var out_offset = 0
         for _ in range(r - 1):
@@ -235,7 +237,9 @@ def variable_length_hash_into(
 
             var ctx = Blake2b(64)
             ctx.update(Span[UInt8, ...](unsafe_ptr=v_buf, length=64))
-            ctx.finalize_into(v_buf)
+            ctx.finalize_into(
+                Span[mut=True, UInt8, ...](unsafe_ptr=v_buf, length=64)
+            )
 
         for j in range(32):
             out_ptr[unsafe_offset=out_offset + j] = v_buf[unsafe_offset=j]
@@ -244,7 +248,11 @@ def variable_length_hash_into(
         var last_len = t_len - 32 * r
         var ctx_last = Blake2b(last_len)
         ctx_last.update(Span[UInt8, ...](unsafe_ptr=v_buf, length=64))
-        ctx_last.finalize_into(out_ptr.unsafe_offset(out_offset))
+        ctx_last.finalize_into(
+            Span[mut=True, UInt8, ...](
+                unsafe_ptr=out_ptr.unsafe_offset(out_offset), length=last_len
+            )
+        )
     finally:
         zero_and_free(v_buf, 64)
         zero_and_free(le_buf, 4)
@@ -494,7 +502,9 @@ struct Argon2id:
         zero_and_free(le_buf, 4)
 
         var h0_buf = alloc(Layout[UInt8](count=64)).unsafe_leak()
-        h0_ctx.finalize_into(h0_buf)
+        h0_ctx.finalize_into(
+            Span[mut=True, UInt8, ...](unsafe_ptr=h0_buf, length=64)
+        )
 
         var m_blocks = self.memory_size_kb
         var m_prime_blocks = (

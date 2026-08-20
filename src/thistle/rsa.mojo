@@ -48,7 +48,7 @@ def _sha1(data: Span[UInt8, ...]) -> InlineArray[UInt8, 20]:
     for i in range(7, -1, -1):
         padded.append(UInt8((bits >> UInt64(8 * i)) & 0xFF))
 
-    var w = InlineArray[UInt32, 80](uninitialized=True)
+    var w = InlineArray[UInt32, 80](fill=0)
     var off = 0
     while off < len(padded):
         for t in range(16):
@@ -92,8 +92,8 @@ def _sha1(data: Span[UInt8, ...]) -> InlineArray[UInt8, 20]:
         h4 += e
         off += 64
 
-    var out = InlineArray[UInt8, 20](uninitialized=True)
-    var hs = InlineArray[UInt32, 5](uninitialized=True)
+    var out = InlineArray[UInt8, 20](fill=0)
+    var hs = InlineArray[UInt32, 5](fill=0)
     hs[0] = h0
     hs[1] = h1
     hs[2] = h2
@@ -200,14 +200,14 @@ def _emsa_pss_encode(
     if em_len < h_len + 2 or len(salt) > em_len - h_len - 2:
         return False
 
-    var m_hash = InlineArray[UInt8, 64](uninitialized=True)
+    var m_hash = InlineArray[UInt8, 64](fill=0)
     _ = _hash_into(sha, message, m_hash.unsafe_ptr())
     var mprime = InlineArray[UInt8, 534](fill=0)
     for i in range(h_len):
         mprime[8 + i] = m_hash[i]
     for i in range(len(salt)):
         mprime[8 + h_len + i] = salt[i]
-    var h = InlineArray[UInt8, 64](uninitialized=True)
+    var h = InlineArray[UInt8, 64](fill=0)
     _ = _hash_into(
         sha,
         Span[UInt8, ...](unsafe_ptr=mprime.unsafe_ptr(), length=8 + h_len + len(salt)),
@@ -220,7 +220,7 @@ def _emsa_pss_encode(
     db[ps_len] = 1
     for i in range(len(salt)):
         db[ps_len + 1 + i] = salt[i]
-    var mask = InlineArray[UInt8, 528](uninitialized=True)
+    var mask = InlineArray[UInt8, 528](fill=0)
     _mgf1(mgf_sha, h.unsafe_ptr(), h_len, db_len, mask.unsafe_ptr())
     for i in range(db_len):
         output[unsafe_offset=i] = db[i] ^ mask[i]
@@ -447,7 +447,7 @@ def _mont_sqr_k[K: Int](
     n: StaticTuple[UInt64, _NL],
     n0: UInt64,
 ) -> StaticTuple[UInt64, _NL]:
-    var t = InlineArray[UInt64, 2 * _NL + 2](uninitialized=True)
+    var t = InlineArray[UInt64, 2 * _NL + 2](fill=0)
     comptime for z in range(2 * K + 1):
         t[z] = 0
 
@@ -678,7 +678,7 @@ struct RsaPublicKey:
         if em_len < h_len + 2 or salt_len > em_len - h_len - 2:
             return False
 
-        var em = InlineArray[UInt8, 528](uninitialized=True)
+        var em = InlineArray[UInt8, 528](fill=0)
         if not self._public_op(signature, em.unsafe_ptr()):
             return False
         for i in range(nb - em_len):
@@ -696,9 +696,9 @@ struct RsaPublicKey:
         if (ep[unsafe_offset=0] & ~top_mask) != 0:
             return False
 
-        var db_mask = InlineArray[UInt8, 528](uninitialized=True)
+        var db_mask = InlineArray[UInt8, 528](fill=0)
         _mgf1(mgf_sha, h_ptr, h_len, db_len, db_mask.unsafe_ptr())
-        var db = InlineArray[UInt8, 528](uninitialized=True)
+        var db = InlineArray[UInt8, 528](fill=0)
         for i in range(db_len):
             db[i] = ep[unsafe_offset=i] ^ db_mask[i]
         db[0] &= top_mask
@@ -710,17 +710,17 @@ struct RsaPublicKey:
         if db[ps_len] != 0x01:
             return False
 
-        var m_hash = InlineArray[UInt8, 64](uninitialized=True)
+        var m_hash = InlineArray[UInt8, 64](fill=0)
         _ = _hash_into(sha, message, m_hash.unsafe_ptr())
 
-        var mprime = InlineArray[UInt8, 534](uninitialized=True)
+        var mprime = InlineArray[UInt8, 534](fill=0)
         for i in range(8):
             mprime[i] = 0
         for i in range(h_len):
             mprime[8 + i] = m_hash[i]
         for i in range(salt_len):
             mprime[8 + h_len + i] = db[ps_len + 1 + i]
-        var h2 = InlineArray[UInt8, 64](uninitialized=True)
+        var h2 = InlineArray[UInt8, 64](fill=0)
         _ = _hash_into(
             sha,
             Span[UInt8, ...](unsafe_ptr=mprime.unsafe_ptr(), length=8 + h_len + salt_len),
@@ -821,7 +821,7 @@ struct RsaPrivateKey:
             var limb = result[(nb - 1 - i) >> 3]
             signature[unsafe_offset=i] = UInt8((limb >> UInt64(8 * ((nb - 1 - i) & 7))) & 0xFF)
 
-        var recovered = InlineArray[UInt8, 528](uninitialized=True)
+        var recovered = InlineArray[UInt8, 528](fill=0)
         var sig_span = Span[UInt8, ...](unsafe_ptr=signature, length=nb)
         var valid = self.public._public_op(sig_span, recovered.unsafe_ptr())
         var diff = UInt8(0)
@@ -846,8 +846,10 @@ struct RsaPrivateKey:
         salt: Span[UInt8, ...],
         sha: Int,
         mgf_sha: Int,
-        signature: Pointer[mut=True, UInt8, _, address_space=_],
+        signature: Span[mut=True, UInt8, ...],
     ) raises -> Bool:
+        if len(signature) < self.public.nb:
+            return False
         var em_bits = self.public.mod_bits - 1
         var em_len = (em_bits + 7) // 8
         var encoded = InlineArray[UInt8, 528](fill=0)
@@ -858,7 +860,7 @@ struct RsaPrivateKey:
             return False
         var ok = self._private_op(
             Span[UInt8, ...](unsafe_ptr=encoded.unsafe_ptr(), length=self.public.nb),
-            signature,
+            signature.unsafe_ptr(),
         )
         var ep = encoded.unsafe_ptr()
         for i in range(self.public.nb):
@@ -882,7 +884,8 @@ struct RsaPrivateKey:
         var salt = random_bytes(salt_len)
         var signature = List[UInt8](unsafe_uninit_length=self.public.nb)
         var ok = self.pss_sign_with_salt(
-            message, Span[UInt8, ...](salt), sha, mgf_sha, signature.unsafe_ptr()
+            message, Span[UInt8, ...](salt), sha, mgf_sha,
+            Span[mut=True, UInt8, ...](signature),
         )
         var salt_ptr = salt.unsafe_ptr()
         for i in range(len(salt)):
@@ -1125,7 +1128,7 @@ struct RsaCrtPrivateKey:
             var limb = result[(self.public.nb - 1 - i) >> 3]
             signature[unsafe_offset=i] = UInt8((limb >> UInt64(8 * ((self.public.nb - 1 - i) & 7))) & 0xFF)
 
-        var recovered = InlineArray[UInt8, 528](uninitialized=True)
+        var recovered = InlineArray[UInt8, 528](fill=0)
         var valid = self.public._public_op(
             Span[UInt8, ...](unsafe_ptr=signature, length=self.public.nb), recovered.unsafe_ptr()
         )
@@ -1153,8 +1156,10 @@ struct RsaCrtPrivateKey:
     def pss_sign_with_salt(
         self, message: Span[UInt8, ...], salt: Span[UInt8, ...],
         sha: Int, mgf_sha: Int,
-        signature: Pointer[mut=True, UInt8, _, address_space=_],
+        signature: Span[mut=True, UInt8, ...],
     ) raises -> Bool:
+        if len(signature) < self.public.nb:
+            return False
         var em_bits = self.public.mod_bits - 1
         var em_len = (em_bits + 7) // 8
         var encoded = InlineArray[UInt8, 528](fill=0)
@@ -1164,7 +1169,8 @@ struct RsaCrtPrivateKey:
         ):
             return False
         var ok = self._private_op(
-            Span[UInt8, ...](unsafe_ptr=encoded.unsafe_ptr(), length=self.public.nb), signature
+            Span[UInt8, ...](unsafe_ptr=encoded.unsafe_ptr(), length=self.public.nb),
+            signature.unsafe_ptr(),
         )
         var ep = encoded.unsafe_ptr()
         for i in range(self.public.nb):
@@ -1188,7 +1194,8 @@ struct RsaCrtPrivateKey:
         var salt = random_bytes(salt_len)
         var signature = List[UInt8](unsafe_uninit_length=self.public.nb)
         var ok = self.pss_sign_with_salt(
-            message, Span[UInt8, ...](salt), sha, mgf_sha, signature.unsafe_ptr()
+            message, Span[UInt8, ...](salt), sha, mgf_sha,
+            Span[mut=True, UInt8, ...](signature),
         )
         var salt_ptr = salt.unsafe_ptr()
         for i in range(len(salt)):
@@ -1209,7 +1216,7 @@ def _pkcs1_v15_verify(
     if key.nb < t_len + 11:
         return False
 
-    var em = InlineArray[UInt8, 528](uninitialized=True)
+    var em = InlineArray[UInt8, 528](fill=0)
     if not key._public_op(signature, em.unsafe_ptr()):
         return False
 
@@ -1224,7 +1231,7 @@ def _pkcs1_v15_verify(
     for i in range(prefix_len):
         diff |= em[3 + ps_len + i] ^ prefix[i]
 
-    var digest = InlineArray[UInt8, 64](uninitialized=True)
+    var digest = InlineArray[UInt8, 64](fill=0)
     _ = _hash_into(sha, message, digest.unsafe_ptr())
     for i in range(h_len):
         diff |= em[3 + ps_len + prefix_len + i] ^ digest[i]
@@ -1260,7 +1267,7 @@ def rsa_pss_sign_with_salt(
     var key = RsaPrivateKey(modulus, exponent, private_exponent)
     var signature = List[UInt8](unsafe_uninit_length=key.public.nb)
     if not key.pss_sign_with_salt(
-        message, salt, sha, mgf_sha, signature.unsafe_ptr()
+        message, salt, sha, mgf_sha, Span[mut=True, UInt8, ...](signature)
     ):
         raise Error("RSA-PSS signing failed")
     return signature^
@@ -1291,7 +1298,7 @@ def rsa_pss_crt_sign_with_salt(
     )
     var signature = List[UInt8](unsafe_uninit_length=key.public.nb)
     if not key.pss_sign_with_salt(
-        message, salt, sha, mgf_sha, signature.unsafe_ptr()
+        message, salt, sha, mgf_sha, Span[mut=True, UInt8, ...](signature)
     ):
         raise Error("RSA-PSS signing failed")
     return signature^

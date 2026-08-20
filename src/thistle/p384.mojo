@@ -604,20 +604,20 @@ def _jacobian_to_affine(p: P384JacobianPoint) -> P384Point:
 
 def _scalar_mult(k: U384, p: P384Point) -> P384Point:
     var pm = P384Point(_to_mont(p.x), _to_mont(p.y), False)
-    var jac = InlineArray[P384JacobianPoint, 15](uninitialized=True)
+    var jac = InlineArray[P384JacobianPoint, 15](fill=P384JacobianPoint())
     jac[0] = P384JacobianPoint(pm.x, pm.y, _one_mont(), False)
     jac[1] = _jacobian_double_ct(jac[0])
     for i in range(2, 15):
         jac[i] = _jacobian_add_affine_non_equal_ct(jac[i - 1], pm)
 
-    var prefix = InlineArray[U384, 15](uninitialized=True)
+    var prefix = InlineArray[U384, 15](fill=U384())
     prefix[0] = jac[0].z
     for i in range(1, 15):
         prefix[i] = _mont_mul(prefix[i - 1], jac[i].z)
     var inv_acc = _inv_p(prefix[14])
 
-    var tx = InlineArray[U384, 15](uninitialized=True)
-    var ty = InlineArray[U384, 15](uninitialized=True)
+    var tx = InlineArray[U384, 15](fill=U384())
+    var ty = InlineArray[U384, 15](fill=U384())
     for jj in range(15):
         var j = 14 - jj
         var zinv = inv_acc
@@ -892,7 +892,7 @@ def _wipe_list_u8(mut data: List[UInt8]):
 
 def _rfc6979_p384(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int) -> U384:
     var h1 = _reduce_n(_from_be(digest))
-    var h1_bytes = InlineArray[UInt8, 48](uninitialized=True)
+    var h1_bytes = InlineArray[UInt8, 48](fill=0)
     _to_be(h1, h1_bytes.unsafe_ptr())
     var k = List[UInt8](length=48, fill=0)
     var v = List[UInt8](length=48, fill=1)

@@ -612,7 +612,7 @@ comptime _P256_BT31 = SIMD[DType.uint64, 128](
 )
 
 def p256_base_table() -> InlineArray[UInt64, 4096]:
-    var t = InlineArray[UInt64, 4096](uninitialized=True)
+    var t = InlineArray[UInt64, 4096](fill=0)
     var p = t.unsafe_ptr()
     p.unsafe_store[alignment=8](0, _P256_BT0)
     p.unsafe_store[alignment=8](128, _P256_BT1)

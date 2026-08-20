@@ -41,9 +41,9 @@ def generate_data(length: Int) -> List[UInt8]:
 
 
 def benchmark_x25519(duration_secs: Float64) raises -> String:
-    var scalar = InlineArray[UInt8, 32](uninitialized=True)
-    var point = InlineArray[UInt8, 32](uninitialized=True)
-    var out = InlineArray[UInt8, 32](uninitialized=True)
+    var scalar = InlineArray[UInt8, 32](fill=0)
+    var point = InlineArray[UInt8, 32](fill=0)
+    var out = InlineArray[UInt8, 32](fill=0)
     for i in range(32):
         scalar[i] = UInt8(i + 1)
         point[i] = UInt8(9) if i == 0 else UInt8(0)
@@ -81,8 +81,8 @@ def benchmark_ecdsa(duration_secs: Float64) -> String:
     var p256_key = InlineArray[UInt8, 32](fill=1)
     var p384_key = InlineArray[UInt8, 48](fill=1)
     var message = InlineArray[UInt8, 64](fill=7)
-    var p256_sig = InlineArray[UInt8, 64](uninitialized=True)
-    var p384_sig = InlineArray[UInt8, 96](uninitialized=True)
+    var p256_sig = InlineArray[UInt8, 64](fill=0)
+    var p384_sig = InlineArray[UInt8, 96](fill=0)
     var msg = Span[UInt8, ...](message)
 
     var p256_count = 0
@@ -116,10 +116,10 @@ def benchmark_ecdsa(duration_secs: Float64) -> String:
 
 
 def benchmark_ed25519(duration_secs: Float64) raises -> String:
-    var sk = InlineArray[UInt8, 32](uninitialized=True)
-    var pk = InlineArray[UInt8, 32](uninitialized=True)
-    var msg = InlineArray[UInt8, 64](uninitialized=True)
-    var sig = InlineArray[UInt8, 64](uninitialized=True)
+    var sk = InlineArray[UInt8, 32](fill=0)
+    var pk = InlineArray[UInt8, 32](fill=0)
+    var msg = InlineArray[UInt8, 64](fill=0)
+    var sig = InlineArray[UInt8, 64](fill=0)
     for i in range(32):
         sk[i] = UInt8(i * 7 + 1)
     for i in range(64):
@@ -127,19 +127,25 @@ def benchmark_ed25519(duration_secs: Float64) raises -> String:
     var sk_span = Span[UInt8, ...](unsafe_ptr=sk.unsafe_ptr(), length=32)
     var msg_span = Span[UInt8, ...](unsafe_ptr=msg.unsafe_ptr(), length=64)
     var sig_span = Span[UInt8, ...](unsafe_ptr=sig.unsafe_ptr(), length=64)
+    var sig_out = Span[mut=True, UInt8, ...](
+        unsafe_ptr=sig.unsafe_ptr(), length=64
+    )
     var pk_span = Span[UInt8, ...](unsafe_ptr=pk.unsafe_ptr(), length=32)
-    ed25519_generate_public_key(sk_span, pk.unsafe_ptr())
-    ed25519_sign(sk_span, msg_span, sig.unsafe_ptr())
+    var pk_out = Span[mut=True, UInt8, ...](
+        unsafe_ptr=pk.unsafe_ptr(), length=32
+    )
+    ed25519_generate_public_key(sk_span, pk_out)
+    ed25519_sign(sk_span, msg_span, sig_out)
 
     var sign_count = 0
     var start = perf_counter()
     while perf_counter() - start < duration_secs:
-        ed25519_sign(sk_span, msg_span, sig.unsafe_ptr())
+        ed25519_sign(sk_span, msg_span, sig_out)
         sign_count += 1
     var sign_duration = perf_counter() - start
     var sign_ops = Float64(sign_count) / sign_duration
 
-    ed25519_sign(sk_span, msg_span, sig.unsafe_ptr())
+    ed25519_sign(sk_span, msg_span, sig_out)
     var verify_count = 0
     var verify_failures = 0
     start = perf_counter()

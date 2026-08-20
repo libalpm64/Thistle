@@ -38,7 +38,7 @@ def x25519(
         raise Error("X25519 point must be 32 bytes")
     if len(output) < 32:
         raise Error("X25519 output needs at least 32 writable bytes")
-    var scalar = StackInlineArray[UInt8, 32](uninitialized=True)
+    var scalar = StackInlineArray[UInt8, 32](fill=0)
     for i in range(32):
         scalar[i] = scalar_in[i]
     scalar[0] &= 248
@@ -91,7 +91,7 @@ def x25519_public_key(
 ) raises:
     if len(private_key) != 32:
         raise Error("X25519 private key must be 32 bytes")
-    var base = StackInlineArray[UInt8, 32](uninitialized=True)
+    var base = StackInlineArray[UInt8, 32](fill=0)
     for i in range(32):
         base[i] = 0
     base[0] = 9

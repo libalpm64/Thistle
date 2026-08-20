@@ -270,7 +270,9 @@ struct Poly1305:
             self.buf_len += 1
             i += 1
 
-    def finalize_into(mut self, output: Pointer[mut=True, UInt8, _, address_space=_]):
+    def _finalize_into_unchecked(
+        mut self, output: Pointer[mut=True, UInt8, _, address_space=_]
+    ):
         if self.buf_len > 0:
             self.buf[self.buf_len] = 1
             for j in range(self.buf_len + 1, 16):
@@ -328,6 +330,13 @@ struct Poly1305:
         (output.unsafe_offset(8)).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](0, o1)
         self.wipe()
 
+    def finalize_into(
+        mut self, output: Span[mut=True, UInt8, ...]
+    ) raises:
+        if len(output) < 16:
+            raise Error("Poly1305 output needs at least 16 writable bytes")
+        self._finalize_into_unchecked(output.unsafe_ptr())
+
     def wipe(mut self):
         var p = Pointer(to=self.h0)
         p.unsafe_store[volatile=True](0, UInt64(0))
@@ -346,4 +355,4 @@ def poly1305_mac(
         raise Error("Poly1305 output needs at least 16 writable bytes")
     var p = Poly1305(key)
     p.update(message)
-    p.finalize_into(output.unsafe_ptr())
+    p.finalize_into(output)

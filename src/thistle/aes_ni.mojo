@@ -5,6 +5,7 @@ AES-NI implementation
 from std.collections import List, InlineArray
 from std.sys import llvm_intrinsic, CompilationTarget
 from std.memory import bitcast, unsafe_memset_zero, unsafe_memcpy, Pointer
+from std.os import abort
 from std.utils import StaticTuple
 from .aes import cpu_aes_encrypt, cpu_aes_ct_encrypt, cpu_aes_ct_encrypt16, cpu_aes_ct_skey, expand_key_128_into, expand_key_192_into, expand_key_256_into
 from .utils import StackBuffer, load_64be, store_64be
@@ -174,7 +175,7 @@ def x86_aes_encrypt_256_direct(
 def _arm_load_keys[N: Int](
     round_keys: Pointer[mut=True, UInt32, _, address_space=_]
 ) -> InlineArray[SIMD16, N]:
-    var keys = InlineArray[SIMD16, N](uninitialized=True)
+    var keys = InlineArray[SIMD16, N](fill=SIMD16(0))
     comptime for i in range(N):
         var raw = (round_keys.unsafe_offset(i * 4)).unsafe_bitcast[UInt8]().unsafe_load[
             width=16, alignment=1
@@ -451,6 +452,8 @@ def aes_encrypt(
     Uses X86 AES-NI or ARM Crypto Extensions on supported hardware, falls back to
     software implementation otherwise.
     """
+    if rounds != 10 and rounds != 12 and rounds != 14:
+        abort("AES round count must be 10, 12, or 14")
     comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
         if rounds == 10:
             x86_aes_encrypt_128(pt, round_keys)
@@ -478,6 +481,10 @@ def aes_gcm_ctr_kernel(
     j0_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
+    if rounds != 10 and rounds != 12 and rounds != 14:
+        abort("AES round count must be 10, 12, or 14")
+    if num_blocks < 0:
+        abort("AES-GCM block count cannot be negative")
     comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
         _hw_gcm_ctr_kernel(input_ptr, output_ptr, round_keys, num_blocks, j0_ptr, rounds)
     else:
@@ -591,7 +598,7 @@ def _arm_gcm_fused_loop[NR: Int](
 
     var i = 0
     while i + 8 <= num_blocks:
-        var b = InlineArray[SIMD16, 8](uninitialized=True)
+        var b = InlineArray[SIMD16, 8](fill=SIMD16(0))
         comptime for k in range(8):
             var cv = j0u32
             cv[3] = llvm_intrinsic["llvm.bswap.i32", UInt32, has_side_effect=False](
@@ -606,7 +613,7 @@ def _arm_gcm_fused_loop[NR: Int](
 
         var p = input_ptr.unsafe_offset(i * 16)
         var q = output_ptr.unsafe_offset(i * 16)
-        var g = InlineArray[SIMD16, 8](uninitialized=True)
+        var g = InlineArray[SIMD16, 8](fill=SIMD16(0))
         comptime for k in range(8):
             var pt = p.unsafe_load[width=16, alignment=1](k * 16)
             var ct = pt ^ b[k]
@@ -627,7 +634,7 @@ def _arm_gcm_fused_loop[NR: Int](
         i += 8
 
     if i + 4 <= num_blocks:
-        var b = InlineArray[SIMD16, 4](uninitialized=True)
+        var b = InlineArray[SIMD16, 4](fill=SIMD16(0))
         comptime for k in range(4):
             var cv = j0u32
             cv[3] = llvm_intrinsic["llvm.bswap.i32", UInt32, has_side_effect=False](
@@ -642,7 +649,7 @@ def _arm_gcm_fused_loop[NR: Int](
 
         var p = input_ptr.unsafe_offset(i * 16)
         var q = output_ptr.unsafe_offset(i * 16)
-        var g = InlineArray[SIMD16, 4](uninitialized=True)
+        var g = InlineArray[SIMD16, 4](fill=SIMD16(0))
         comptime for k in range(4):
             var pt = p.unsafe_load[width=16, alignment=1](k * 16)
             var ct = pt ^ b[k]

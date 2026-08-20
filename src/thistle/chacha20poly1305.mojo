@@ -49,11 +49,13 @@ def _aead_tag(
     p.update(ciphertext)
     if len(ciphertext) % 16 != 0:
         p.update(Span[UInt8, ...](unsafe_ptr=zp, length=16 - len(ciphertext) % 16))
-    var lens = InlineArray[UInt8, 16](uninitialized=True)
+    var lens = InlineArray[UInt8, 16](fill=0)
     lens.unsafe_ptr().unsafe_bitcast[UInt64]().unsafe_store[alignment=1](0, UInt64(len(aad)))
     (lens.unsafe_ptr().unsafe_offset(8)).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](0, UInt64(len(ciphertext)))
     p.update(Span[UInt8, ...](unsafe_ptr=lens.unsafe_ptr(), length=16))
-    p.finalize_into(output)
+    p.finalize_into(
+        Span[mut=True, UInt8, ...](unsafe_ptr=output, length=16)
+    )
 
 
 def _aead_core[encrypt: Bool](
@@ -73,7 +75,7 @@ def _aead_core[encrypt: Bool](
     var nonce_span = Span[UInt8, ...](nonce_bytes)
     var nw = _chacha20_nonce_words(nonce_span)
     var block0 = chacha20_block_core(kw, 0, nw)
-    var poly_key = InlineArray[UInt8, 32](uninitialized=True)
+    var poly_key = InlineArray[UInt8, 32](fill=0)
     poly_key.unsafe_ptr().unsafe_store[alignment=1](
         0, bitcast[DType.uint8, 64](block0).slice[32]()
     )
@@ -141,12 +143,12 @@ def chacha20_poly1305_decrypt(
     var nonce_span = Span[UInt8, ...](nonce_bytes)
     var nw = _chacha20_nonce_words(nonce_span)
     var block0 = chacha20_block_core(kw, 0, nw)
-    var poly_key = InlineArray[UInt8, 32](uninitialized=True)
+    var poly_key = InlineArray[UInt8, 32](fill=0)
     poly_key.unsafe_ptr().unsafe_store[alignment=1](
         0, bitcast[DType.uint8, 64](block0).slice[32]()
     )
 
-    var expected = InlineArray[UInt8, 16](uninitialized=True)
+    var expected = InlineArray[UInt8, 16](fill=0)
     _aead_tag(
         Span[UInt8, ...](unsafe_ptr=poly_key.unsafe_ptr(), length=32),
         aad, ciphertext, expected.unsafe_ptr(),

@@ -36,7 +36,7 @@ def main() raises:
         print(")")
         print("")
     print("def p256_base_table() -> InlineArray[UInt64, 4096]:")
-    print("    var t = InlineArray[UInt64, 4096](uninitialized=True)")
+    print("    var t = InlineArray[UInt64, 4096](fill=0)")
     print("    var p = t.unsafe_ptr()")
     for c in range(32):
         print("    p.unsafe_store[alignment=8](" + String(c * 128) + ", _P256_BT" + String(c) + ")")

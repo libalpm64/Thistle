@@ -181,7 +181,7 @@ struct Scalar(Movable, Copyable, ImplicitlyCopyable):
     @staticmethod
     def from_bytes_clamped(bytes: Span[UInt8, ...]) -> Scalar:
         # RFC 8032 5.1.5: prune SHA512(secret)[0..31] into the secret scalar.
-        var s = InlineArray[UInt8, 32](uninitialized=True)
+        var s = InlineArray[UInt8, 32](fill=0)
         for i in range(32):
             s[i] = bytes[i]
         s[0] &= 0xF8
@@ -209,13 +209,13 @@ struct Scalar(Movable, Copyable, ImplicitlyCopyable):
 
     @staticmethod
     def _montgomery_mul_raw(a: SIMD[DType.uint64, 8], b: SIMD[DType.uint64, 8]) -> SIMD[DType.uint64, 8]:
-        var z = InlineArray[UInt128, 9](uninitialized=True)
+        var z = InlineArray[UInt128, 9](fill=0)
         for i in range(9): z[i] = 0
         for i in range(5):
             for j in range(5):
                 z[i + j] += UInt128(a[i]) * UInt128(b[j])
         var carry: UInt128 = 0
-        var n = InlineArray[UInt64, 5](uninitialized=True)
+        var n = InlineArray[UInt64, 5](fill=0)
         for i in range(5):
             var sum = carry + z[i]
             for j in range(i):
@@ -376,7 +376,7 @@ def _edwards_encode_with_zinv(p: EdwardsPoint, z_inv: FieldElement51, output: Po
     var x = p.X * z_inv
     var y = p.Y * z_inv
     y.to_bytes_into(output)
-    var x_bytes = InlineArray[UInt8, 32](uninitialized=True)
+    var x_bytes = InlineArray[UInt8, 32](fill=0)
     x.to_bytes_into(x_bytes.unsafe_ptr())
     var x_parity = x_bytes[0] & 1
     output[unsafe_offset=31] = output[unsafe_offset=31] | (x_parity << 7)
@@ -385,7 +385,7 @@ def _edwards_encode_with_zinv(p: EdwardsPoint, z_inv: FieldElement51, output: Po
 def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
     # RFC 8032 5.1.3: strict point decoding.
     # Reject y >= p, invalid square roots, and x == 0 with sign bit set.
-    var y_bytes = InlineArray[UInt8, 32](uninitialized=True)
+    var y_bytes = InlineArray[UInt8, 32](fill=0)
     for i in range(32):
         y_bytes[i] = data[i]
     var sign = (y_bytes[31] >> 7) & 1
@@ -404,7 +404,7 @@ def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
     var x = x_opt.unsafe_value()
 
     # x = 0 has no odd/negative alternate root.
-    var x_zero_bytes = InlineArray[UInt8, 32](uninitialized=True)
+    var x_zero_bytes = InlineArray[UInt8, 32](fill=0)
     x.to_bytes_into(x_zero_bytes.unsafe_ptr())
     var x_is_zero = True
     for i in range(32):
@@ -414,14 +414,14 @@ def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
         return DecodeResult(False, EdwardsPoint())
 
     var x_try = x
-    var x_try_bytes = InlineArray[UInt8, 32](uninitialized=True)
+    var x_try_bytes = InlineArray[UInt8, 32](fill=0)
     x_try.to_bytes_into(x_try_bytes.unsafe_ptr())
     if (x_try_bytes[0] & 1) != sign:
         # Choose the root matching the encoded x parity.
         x_try = FieldElement51.ZERO() - x_try
 
     var chk = x_try.square() * v - u
-    var chk_bytes = InlineArray[UInt8, 32](uninitialized=True)
+    var chk_bytes = InlineArray[UInt8, 32](fill=0)
     chk.to_bytes_into(chk_bytes.unsafe_ptr())
     var ok = True
     for i in range(32):
@@ -442,8 +442,8 @@ def _is_small_order(p: EdwardsPoint) -> Bool:
     var q = _edwards_double_standalone(p)
     q = _edwards_double_standalone(q)
     q = _edwards_double_standalone(q)
-    var x = InlineArray[UInt8, 32](uninitialized=True)
-    var yz = InlineArray[UInt8, 32](uninitialized=True)
+    var x = InlineArray[UInt8, 32](fill=0)
+    var yz = InlineArray[UInt8, 32](fill=0)
     q.X.to_bytes_into(x.unsafe_ptr())
     (q.Y - q.Z).to_bytes_into(yz.unsafe_ptr())
     var diff = UInt8(0)
@@ -466,8 +466,8 @@ def sqrt_ratio_checked(u: FieldElement51, v: FieldElement51) -> Optional[FieldEl
     var vx2 = x.square() * v
     var diff = vx2 - u
     var diff2 = vx2 + u
-    var diff_bytes = InlineArray[UInt8, 32](uninitialized=True)
-    var diff2_bytes = InlineArray[UInt8, 32](uninitialized=True)
+    var diff_bytes = InlineArray[UInt8, 32](fill=0)
+    var diff2_bytes = InlineArray[UInt8, 32](fill=0)
     diff.to_bytes_into(diff_bytes.unsafe_ptr())
     diff2.to_bytes_into(diff2_bytes.unsafe_ptr())
     var is_zero = True
@@ -515,6 +515,13 @@ struct ProjectiveNielsPoint(Movable, Copyable, ImplicitlyCopyable):
     var Y_minus_X: FieldElement51
     var Z: FieldElement51
     var T2d: FieldElement51
+
+    @always_inline
+    def __init__(out self):
+        self.Y_plus_X = FieldElement51()
+        self.Y_minus_X = FieldElement51()
+        self.Z = FieldElement51()
+        self.T2d = FieldElement51()
 
     @always_inline
     def __init__(out self, Y_plus_X: FieldElement51, Y_minus_X: FieldElement51, Z: FieldElement51, T2d: FieldElement51):
@@ -594,7 +601,7 @@ def _sub_projective_niels(p: EdwardsPoint, n: ProjectiveNielsPoint) -> EdwardsPo
 
 @always_inline
 def _radix16_digits(scalar: Span[UInt8, ...]) -> InlineArray[Int, 64]:
-    var digits = InlineArray[Int, 64](uninitialized=True)
+    var digits = InlineArray[Int, 64](fill=0)
     for i in range(32):
         digits[2 * i] = Int(scalar[i] & 15)
         digits[2 * i + 1] = Int((scalar[i] >> 4) & 15)
@@ -650,7 +657,7 @@ def _mul_base_ct(scalar: Span[UInt8, ...]) -> EdwardsPoint:
 
 def _naf5(scalar: Span[UInt8, ...]) -> InlineArray[Int, 256]:
     var naf = InlineArray[Int, 256](fill=0)
-    var words = InlineArray[UInt64, 5](uninitialized=True)
+    var words = InlineArray[UInt64, 5](fill=0)
     words[4] = 0
     var ptr = scalar.unsafe_ptr()
     for w in range(4):
@@ -691,7 +698,7 @@ def _double_scalar_mult_vartime(a: Span[UInt8, ...], A: EdwardsPoint, b: Span[UI
     var naf_b = _naf5(b)
     var d2 = ed25519_d2()
     var A2n = _to_projective_niels(_edwards_double_standalone(A), d2)
-    var Ai = InlineArray[ProjectiveNielsPoint, 8](uninitialized=True)
+    var Ai = InlineArray[ProjectiveNielsPoint, 8](fill=ProjectiveNielsPoint())
     var cur = A
     Ai[0] = _to_projective_niels(A, d2)
     for k in range(1, 8):
@@ -718,19 +725,24 @@ def _double_scalar_mult_vartime(a: Span[UInt8, ...], A: EdwardsPoint, b: Span[UI
     return Q
 
 @no_inline
-def ed25519_generate_public_key(private_key: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]) raises:
+def ed25519_generate_public_key(
+    private_key: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
+) raises:
     # RFC 8032 5.1.5: public key A = [pruned SHA512(secret)]B.
     if len(private_key) != 32:
         raise Error("Ed25519 private key must be 32 bytes")
-    var hash = InlineArray[UInt8, 64](uninitialized=True)
+    if len(output) < 32:
+        raise Error("Ed25519 public-key output must be at least 32 bytes")
+    var output_ptr = output.unsafe_ptr()
+    var hash = InlineArray[UInt8, 64](fill=0)
     var ctx = SHA512Context()
     sha512_update(ctx, private_key)
     sha512_final_to_buffer(ctx, hash.unsafe_ptr())
     var s = Scalar.from_bytes_clamped(Span[UInt8, ...](unsafe_ptr=hash.unsafe_ptr(), length=32))
-    var s_bytes = InlineArray[UInt8, 32](uninitialized=True)
+    var s_bytes = InlineArray[UInt8, 32](fill=0)
     s.to_bytes_into(s_bytes.unsafe_ptr())
     var pub_point = _mul_base_ct(Span[UInt8, ...](unsafe_ptr=s_bytes.unsafe_ptr(), length=32))
-    edwards_encode_into(pub_point, output)
+    edwards_encode_into(pub_point, output_ptr)
     ctx.wipe()
     s.wipe()
     var hash_ptr = hash.unsafe_ptr()
@@ -741,40 +753,47 @@ def ed25519_generate_public_key(private_key: Span[UInt8, ...], output: Pointer[m
         s_ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 @no_inline
-def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]) raises:
+def ed25519_sign(
+    private_key: Span[UInt8, ...],
+    message: Span[UInt8, ...],
+    output: Span[mut=True, UInt8, ...],
+) raises:
     # RFC 8032 5.1.6 pure Ed25519:
     # r = SHA512(prefix || M), R = [r]B,
     # k = SHA512(R || A || M), S = r + k*s mod L.
     if len(private_key) != 32:
         raise Error("Ed25519 private key must be 32 bytes")
-    var hash = InlineArray[UInt8, 64](uninitialized=True)
+    if len(output) < 64:
+        raise Error("Ed25519 signature output must be at least 64 bytes")
+    var output_ptr = output.unsafe_ptr()
+    var hash = InlineArray[UInt8, 64](fill=0)
     var ctx = SHA512Context()
     sha512_update(ctx, private_key)
     sha512_final_to_buffer(ctx, hash.unsafe_ptr())
     var s_scalar = Scalar.from_bytes_clamped(Span[UInt8, ...](unsafe_ptr=hash.unsafe_ptr(), length=32))
 
-    var s_bytes = InlineArray[UInt8, 32](uninitialized=True)
+    var s_bytes = InlineArray[UInt8, 32](fill=0)
     s_scalar.to_bytes_into(s_bytes.unsafe_ptr())
     var A_point = _mul_base_ct(Span[UInt8, ...](unsafe_ptr=s_bytes.unsafe_ptr(), length=32))
 
-    var r_hash = InlineArray[UInt8, 64](uninitialized=True)
+    var r_hash = InlineArray[UInt8, 64](fill=0)
     var r_ctx = SHA512Context()
     sha512_update(r_ctx, Span[UInt8, ...](unsafe_ptr=hash.unsafe_ptr().unsafe_offset(32), length=32))
     sha512_update(r_ctx, message)
     sha512_final_to_buffer(r_ctx, r_hash.unsafe_ptr())
 
     var r_scalar = Scalar.from_bytes_wide(Span[UInt8, ...](unsafe_ptr=r_hash.unsafe_ptr(), length=64))
-    var r_bytes = InlineArray[UInt8, 32](uninitialized=True)
+    var r_bytes = InlineArray[UInt8, 32](fill=0)
     r_scalar.to_bytes_into(r_bytes.unsafe_ptr())
     var R_point = _mul_base_ct(Span[UInt8, ...](unsafe_ptr=r_bytes.unsafe_ptr(), length=32))
 
     var zz_inv = (A_point.Z * R_point.Z).invert()
-    var A_enc = InlineArray[UInt8, 32](uninitialized=True)
-    var R_enc = InlineArray[UInt8, 32](uninitialized=True)
+    var A_enc = InlineArray[UInt8, 32](fill=0)
+    var R_enc = InlineArray[UInt8, 32](fill=0)
     _edwards_encode_with_zinv(A_point, zz_inv * R_point.Z, A_enc.unsafe_ptr())
     _edwards_encode_with_zinv(R_point, zz_inv * A_point.Z, R_enc.unsafe_ptr())
 
-    var k_hash = InlineArray[UInt8, 64](uninitialized=True)
+    var k_hash = InlineArray[UInt8, 64](fill=0)
     var k_ctx = SHA512Context()
     sha512_update(k_ctx, Span[UInt8, ...](unsafe_ptr=R_enc.unsafe_ptr(), length=32))
     sha512_update(k_ctx, Span[UInt8, ...](unsafe_ptr=A_enc.unsafe_ptr(), length=32))
@@ -783,11 +802,11 @@ def ed25519_sign(private_key: Span[UInt8, ...], message: Span[UInt8, ...], outpu
 
     var k_scalar = Scalar.from_bytes_wide(Span[UInt8, ...](unsafe_ptr=k_hash.unsafe_ptr(), length=64))
     var S_scalar = r_scalar + k_scalar * s_scalar
-    var S_bytes = InlineArray[UInt8, 32](uninitialized=True)
+    var S_bytes = InlineArray[UInt8, 32](fill=0)
     S_scalar.to_bytes_into(S_bytes.unsafe_ptr())
 
-    for i in range(32): output[unsafe_offset=i] = R_enc[i]
-    for i in range(32): output[unsafe_offset=32 + i] = S_bytes[i]
+    for i in range(32): output_ptr[unsafe_offset=i] = R_enc[i]
+    for i in range(32): output_ptr[unsafe_offset=32 + i] = S_bytes[i]
     ctx.wipe()
     r_ctx.wipe()
     s_scalar.wipe()
@@ -815,20 +834,20 @@ struct Ed25519SigningKey(Copyable, Movable):
     def __init__(out self, private_key: Span[UInt8, ...]) raises:
         if len(private_key) != 32:
             raise Error("Ed25519 private key must be 32 bytes")
-        var hash = InlineArray[UInt8, 64](uninitialized=True)
+        var hash = InlineArray[UInt8, 64](fill=0)
         var ctx = SHA512Context()
         sha512_update(ctx, private_key)
         sha512_final_to_buffer(ctx, hash.unsafe_ptr())
         self._s = Scalar.from_bytes_clamped(Span[UInt8, ...](unsafe_ptr=hash.unsafe_ptr(), length=32))
 
-        self._prefix = InlineArray[UInt8, 32](uninitialized=True)
+        self._prefix = InlineArray[UInt8, 32](fill=0)
         for i in range(32):
             self._prefix[i] = hash[32 + i]
 
-        var s_bytes = InlineArray[UInt8, 32](uninitialized=True)
+        var s_bytes = InlineArray[UInt8, 32](fill=0)
         self._s.to_bytes_into(s_bytes.unsafe_ptr())
         var A_point = _mul_base_ct(Span[UInt8, ...](unsafe_ptr=s_bytes.unsafe_ptr(), length=32))
-        self._a_enc = InlineArray[UInt8, 32](uninitialized=True)
+        self._a_enc = InlineArray[UInt8, 32](fill=0)
         edwards_encode_into(A_point, self._a_enc.unsafe_ptr())
 
         ctx.wipe()
@@ -845,27 +864,34 @@ struct Ed25519SigningKey(Copyable, Movable):
         for i in range(32):
             p.unsafe_store[volatile=True](i, UInt8(0))
 
-    def public_key_into(self, output: Pointer[mut=True, UInt8, _, address_space=_]):
+    def public_key_into(self, output: Span[mut=True, UInt8, ...]) -> Bool:
+        if len(output) < 32:
+            return False
         for i in range(32):
             output[i] = self._a_enc[i]
+        return True
 
     @no_inline
-    def sign(self, message: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]) raises:
-        var r_hash = InlineArray[UInt8, 64](uninitialized=True)
+    def sign(
+        self, message: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
+    ) raises:
+        if len(output) < 64:
+            raise Error("Ed25519 signature output must be at least 64 bytes")
+        var r_hash = InlineArray[UInt8, 64](fill=0)
         var r_ctx = SHA512Context()
         sha512_update(r_ctx, Span[UInt8, ...](unsafe_ptr=self._prefix.unsafe_ptr(), length=32))
         sha512_update(r_ctx, message)
         sha512_final_to_buffer(r_ctx, r_hash.unsafe_ptr())
 
         var r_scalar = Scalar.from_bytes_wide(Span[UInt8, ...](unsafe_ptr=r_hash.unsafe_ptr(), length=64))
-        var r_bytes = InlineArray[UInt8, 32](uninitialized=True)
+        var r_bytes = InlineArray[UInt8, 32](fill=0)
         r_scalar.to_bytes_into(r_bytes.unsafe_ptr())
         var R_point = _mul_base_ct(Span[UInt8, ...](unsafe_ptr=r_bytes.unsafe_ptr(), length=32))
 
-        var R_enc = InlineArray[UInt8, 32](uninitialized=True)
+        var R_enc = InlineArray[UInt8, 32](fill=0)
         edwards_encode_into(R_point, R_enc.unsafe_ptr())
 
-        var k_hash = InlineArray[UInt8, 64](uninitialized=True)
+        var k_hash = InlineArray[UInt8, 64](fill=0)
         var k_ctx = SHA512Context()
         sha512_update(k_ctx, Span[UInt8, ...](unsafe_ptr=R_enc.unsafe_ptr(), length=32))
         sha512_update(k_ctx, Span[UInt8, ...](unsafe_ptr=self._a_enc.unsafe_ptr(), length=32))
@@ -874,7 +900,7 @@ struct Ed25519SigningKey(Copyable, Movable):
 
         var k_scalar = Scalar.from_bytes_wide(Span[UInt8, ...](unsafe_ptr=k_hash.unsafe_ptr(), length=64))
         var S_scalar = r_scalar + k_scalar * self._s
-        var S_bytes = InlineArray[UInt8, 32](uninitialized=True)
+        var S_bytes = InlineArray[UInt8, 32](fill=0)
         S_scalar.to_bytes_into(S_bytes.unsafe_ptr())
 
         for i in range(32):
@@ -909,16 +935,16 @@ def ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], sign
     if _is_small_order(A):
         return False
 
-    var R_enc = InlineArray[UInt8, 32](uninitialized=True)
+    var R_enc = InlineArray[UInt8, 32](fill=0)
     for i in range(32): R_enc[i] = signature[i]
 
-    var S_bytes = InlineArray[UInt8, 32](uninitialized=True)
+    var S_bytes = InlineArray[UInt8, 32](fill=0)
     for i in range(32): S_bytes[i] = signature[32 + i]
     var S_bytes_span = Span[UInt8, ...](unsafe_ptr=S_bytes.unsafe_ptr(), length=32)
     if not _s_lt_l(S_bytes_span):
         return False
 
-    var k_hash = InlineArray[UInt8, 64](uninitialized=True)
+    var k_hash = InlineArray[UInt8, 64](fill=0)
     var k_ctx = SHA512Context()
     sha512_update(k_ctx, Span[UInt8, ...](unsafe_ptr=R_enc.unsafe_ptr(), length=32))
     sha512_update(k_ctx, public_key)
@@ -928,12 +954,12 @@ def ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], sign
     var k_hash_span = Span[UInt8, ...](unsafe_ptr=k_hash.unsafe_ptr(), length=64)
     var k_scalar = Scalar.from_bytes_wide(k_hash_span)
 
-    var k_bytes = InlineArray[UInt8, 32](uninitialized=True)
+    var k_bytes = InlineArray[UInt8, 32](fill=0)
     k_scalar.to_bytes_into(k_bytes.unsafe_ptr())
     var k_bytes_span = Span[UInt8, ...](unsafe_ptr=k_bytes.unsafe_ptr(), length=32)
 
     var Q = _double_scalar_mult_vartime(k_bytes_span, edwards_negate(A), S_bytes_span)
-    var Q_enc = InlineArray[UInt8, 32](uninitialized=True)
+    var Q_enc = InlineArray[UInt8, 32](fill=0)
     edwards_encode_into(Q, Q_enc.unsafe_ptr())
     for i in range(32):
         if Q_enc[i] != R_enc[i]:

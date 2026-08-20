@@ -661,21 +661,21 @@ def _jacobian_to_affine(p: P256JacobianPoint) -> P256Point:
 def _scalar_mult(k: U256, p: P256Point) -> P256Point:
     # Fixed-window scan keeps scalar access constant-time.
     var pm = P256Point(_to_mont(p.x), _to_mont(p.y), False)
-    var jac = InlineArray[P256JacobianPoint, 15](uninitialized=True)
+    var jac = InlineArray[P256JacobianPoint, 15](fill=P256JacobianPoint())
     jac[0] = P256JacobianPoint(pm.x, pm.y, _one_mont(), False)
     jac[1] = _jacobian_double_ct(jac[0])
     for i in range(2, 15):
         jac[i] = _jacobian_add_affine_non_equal_ct(jac[i - 1], pm)
 
     # Normalize the table with one inversion.
-    var prefix = InlineArray[U256, 15](uninitialized=True)
+    var prefix = InlineArray[U256, 15](fill=U256())
     prefix[0] = jac[0].z
     for i in range(1, 15):
         prefix[i] = _mont_mul(prefix[i - 1], jac[i].z)
     var inv_acc = _inv_p(prefix[14])
 
-    var tx = InlineArray[U256, 15](uninitialized=True)
-    var ty = InlineArray[U256, 15](uninitialized=True)
+    var tx = InlineArray[U256, 15](fill=U256())
+    var ty = InlineArray[U256, 15](fill=U256())
     for jj in range(15):
         var j = 14 - jj
         var zinv = inv_acc
@@ -942,7 +942,7 @@ def _wipe_list_u8(mut data: List[UInt8]):
 
 def _rfc6979_p256(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int) -> U256:
     var h1 = _reduce_n(_from_be(digest))
-    var h1_bytes = InlineArray[UInt8, 32](uninitialized=True)
+    var h1_bytes = InlineArray[UInt8, 32](fill=0)
     _to_be(h1, h1_bytes.unsafe_ptr())
     var k = List[UInt8](length=32, fill=0)
     var v = List[UInt8](length=32, fill=1)

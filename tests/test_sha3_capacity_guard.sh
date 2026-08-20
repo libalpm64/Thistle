@@ -3,16 +3,20 @@
 set -uo pipefail
 
 guard_dir=$(mktemp -d)
-guard_binary="$guard_dir/sha3-capacity-guard"
-guard_log="$guard_dir/run.log"
 trap 'rm -rf -- "$guard_dir"' EXIT
 
-mojo build -O3 -I src/ tests/test_sha3_capacity_guard.mojo \
-    -o "$guard_binary" >/dev/null 2>&1
+for assert_mode in safe none; do
+    guard_binary="$guard_dir/sha3-capacity-guard-$assert_mode"
+    guard_log="$guard_dir/run-$assert_mode.log"
 
-if "$guard_binary" >"$guard_log" 2>&1; then
-    echo "SHAKE capacity guard did not reject an oversized output" >&2
-    exit 1
-fi
+    mojo build -O3 -D ASSERT="$assert_mode" -I src/ \
+        tests/test_sha3_capacity_guard.mojo -o "$guard_binary" \
+        >/dev/null 2>&1
 
-grep -q "SHAKE output length exceeds destination capacity" "$guard_log"
+    if "$guard_binary" >"$guard_log" 2>&1; then
+        echo "SHAKE capacity guard failed with ASSERT=$assert_mode" >&2
+        exit 1
+    fi
+
+    grep -q "SHAKE output length exceeds destination capacity" "$guard_log"
+done
