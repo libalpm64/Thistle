@@ -343,9 +343,9 @@ struct SHA3Context(Movable):
     var buffer_len: Int
 
     def __init__(out self, rate_bits: Int):
-        if not (0 < rate_bits <= 1344 and rate_bits % 8 == 0):
+        if not (0 < rate_bits <= 1344 and rate_bits % 64 == 0):
             abort(
-                "SHA-3 rate must be a positive multiple of 8 no larger than 1344 bits"
+                "SHA-3 rate must be a positive multiple of 64 no larger than 1344 bits"
             )
         self.state = StackBuffer[UInt64, 25](fill=0)
         self.rate_bytes = rate_bits // 8
@@ -457,7 +457,7 @@ def sha3_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], o
     ctx.buffer[ctx.rate_bytes - 1] |= 0x80
     sha3_absorb_block(ctx.state.ptr(), ctx.buffer.ptr(), ctx.rate_bytes)
 
-    output.set_len_unchecked(output_len_bytes)
+    output.set_len(output_len_bytes)
 
     var offset = 0
     while offset < output_len_bytes:
@@ -560,7 +560,7 @@ def shake_squeeze_prefix_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt
     if output_len < 0 or output_len > output.capacity():
         abort("SHAKE output length exceeds destination capacity")
     output.clear()
-    output.set_len_unchecked(output_len)
+    output.set_len(output_len)
 
     var offset = 0
     while offset < output_len:
@@ -621,7 +621,7 @@ def shake_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], 
     output.clear()
     shake_finalize(ctx)
 
-    output.set_len_unchecked(output_len)
+    output.set_len(output_len)
 
     var offset = 0
     while offset < output_len:

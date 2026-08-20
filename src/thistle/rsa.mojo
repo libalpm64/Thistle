@@ -734,9 +734,20 @@ struct RsaPublicKey:
 
 
 def _wipe_bn(mut value: StaticTuple[UInt64, _NL], k: Int):
-    var ptr = Pointer(to=value[0]).unsafe_mut_cast[True]()
+    # StaticTuple indexing returns an element by value. Take the address of the
+    # aggregate itself so the volatile stores target the caller's tuple storage.
+    var ptr = Pointer(to=value).unsafe_bitcast[UInt64]()
     for i in range(k):
         ptr.unsafe_store[volatile=True](i, UInt64(0))
+
+
+def _wipe_bn_table(
+    mut table: StaticTuple[StaticTuple[UInt64, _NL], 16], k: Int
+):
+    var ptr = Pointer(to=table).unsafe_bitcast[UInt64]()
+    for row in range(16):
+        for i in range(k):
+            ptr.unsafe_store[volatile=True](row * _NL + i, UInt64(0))
 
 
 struct RsaPrivateKey:
@@ -836,8 +847,7 @@ struct RsaPrivateKey:
         _wipe_bn(base, k)
         _wipe_bn(acc, k)
         _wipe_bn(result, k)
-        for i in range(16):
-            _wipe_bn(table[i], k)
+        _wipe_bn_table(table, k)
         return valid
 
     def pss_sign_with_salt(
@@ -943,8 +953,7 @@ def _private_pow(
     var result = _mont_mul(acc, one, key.n, key.n0, key.k)
     _wipe_bn(base, key.k)
     _wipe_bn(acc, key.k)
-    for i in range(16):
-        _wipe_bn(table[i], key.k)
+    _wipe_bn_table(table, key.k)
     return result
 
 

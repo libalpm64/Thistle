@@ -18,6 +18,8 @@ from thistle.p384 import p384_ecdsa_sign, p384_public_key
 from thistle.pbkdf2 import (
     PBKDF2_SHA256_MAX_DKLEN,
     PBKDF2_SHA512_MAX_DKLEN,
+    PBKDF2SHA256,
+    PBKDF2SHA512,
     pbkdf2_hmac_sha256,
     pbkdf2_hmac_sha512,
 )
@@ -204,6 +206,24 @@ def main() raises:
         rejected = True
     if not rejected:
         raise Error("PBKDF2-SHA512 accepted an oversized derived key")
+
+    var pbkdf256 = PBKDF2SHA256(Span[UInt8, ...](empty))
+    rejected = False
+    try:
+        _ = pbkdf256.derive(Span[UInt8, ...](empty_salt), 0, 32)
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("PBKDF2-SHA256 context accepted zero iterations")
+
+    var pbkdf512 = PBKDF2SHA512(Span[UInt8, ...](empty))
+    rejected = False
+    try:
+        _ = pbkdf512.derive(Span[UInt8, ...](empty_salt), 0, 64)
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("PBKDF2-SHA512 context accepted zero iterations")
 
     var nonce = List[UInt8](length=12, fill=0)
     var plaintext = List[UInt8](length=16, fill=0)

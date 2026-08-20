@@ -154,7 +154,7 @@ struct StackBuffer[T: Copyable & Deinitable & Defaultable, N: Int](Movable):
         self._len = 0
 
     @always_inline
-    def set_len_unchecked(mut self, new_len: Int):
+    def set_len(mut self, new_len: Int):
         if new_len < 0 or new_len > Self.N:
             abort("StackBuffer length out of bounds")
         self._len = new_len

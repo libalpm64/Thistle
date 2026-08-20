@@ -92,8 +92,6 @@ def x25519_public_key(
     if len(private_key) != 32:
         raise Error("X25519 private key must be 32 bytes")
     var base = StackInlineArray[UInt8, 32](fill=0)
-    for i in range(32):
-        base[i] = 0
     base[0] = 9
     x25519(
         private_key,

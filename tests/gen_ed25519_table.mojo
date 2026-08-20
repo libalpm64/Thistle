@@ -82,10 +82,10 @@ def main() raises:
     print("    var p = t.unsafe_ptr()")
     for j in range(32):
         print("    p.unsafe_store[alignment=8](" + String(j * 128) + ", _ED25519_BT" + String(j) + ")")
-    print("    return t")
+    print("    return t^")
     print()
     print("@no_inline")
     print("def ed25519_b_odd_table() -> InlineArray[UInt64, 128]:")
     print("    var t = InlineArray[UInt64, 128](fill=0)")
     print("    t.unsafe_ptr().unsafe_store[alignment=8](0, _ED25519_B_ODD)")
-    print("    return t")
+    print("    return t^")

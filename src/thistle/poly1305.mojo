@@ -39,6 +39,14 @@ struct _RPower(Movable, Copyable, ImplicitlyCopyable):
         self.r0 = take.r0; self.r1 = take.r1; self.r2 = take.r2
         self.s1 = take.s1; self.s2 = take.s2
 
+    @always_inline
+    def wipe(mut self):
+        Pointer(to=self.r0).unsafe_store[volatile=True](0, UInt64(0))
+        Pointer(to=self.r1).unsafe_store[volatile=True](0, UInt64(0))
+        Pointer(to=self.r2).unsafe_store[volatile=True](0, UInt64(0))
+        Pointer(to=self.s1).unsafe_store[volatile=True](0, UInt64(0))
+        Pointer(to=self.s2).unsafe_store[volatile=True](0, UInt64(0))
+
 
 @always_inline
 def _mul_acc(
@@ -124,6 +132,9 @@ struct Poly1305:
         self.r8 = self.r
         self.powers4_ready = False
         self.powers8_ready = False
+
+    def __deinit__(deinit self):
+        self.wipe()
 
     @no_inline
     def _make_powers4(mut self):
@@ -338,12 +349,25 @@ struct Poly1305:
         self._finalize_into_unchecked(output.unsafe_ptr())
 
     def wipe(mut self):
-        var p = Pointer(to=self.h0)
-        p.unsafe_store[volatile=True](0, UInt64(0))
+        self.r.wipe()
+        self.r2.wipe()
+        self.r3.wipe()
+        self.r4.wipe()
+        self.r5.wipe()
+        self.r6.wipe()
+        self.r7.wipe()
+        self.r8.wipe()
+        Pointer(to=self.h0).unsafe_store[volatile=True](0, UInt64(0))
         Pointer(to=self.h1).unsafe_store[volatile=True](0, UInt64(0))
         Pointer(to=self.h2).unsafe_store[volatile=True](0, UInt64(0))
         Pointer(to=self.pad0).unsafe_store[volatile=True](0, UInt64(0))
         Pointer(to=self.pad1).unsafe_store[volatile=True](0, UInt64(0))
+        var buf_ptr = self.buf.unsafe_ptr()
+        for i in range(16):
+            buf_ptr.unsafe_store[volatile=True](i, UInt8(0))
+        self.buf_len = 0
+        self.powers4_ready = False
+        self.powers8_ready = False
 
 
 def poly1305_mac(

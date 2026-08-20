@@ -111,6 +111,8 @@ struct PBKDF2SHA256(Movable):
 
     @always_inline
     def derive(mut self, salt: Span[UInt8, ...], iterations: Int, dklen: Int) raises -> List[UInt8]:
+        if iterations < 1:
+            raise Error("PBKDF2-SHA256 iterations must be positive")
         if dklen < 1 or dklen > PBKDF2_SHA256_MAX_DKLEN:
             raise Error("PBKDF2-SHA256 dkLen exceeds the RFC 8018 limit")
         var hLen = 32
@@ -230,6 +232,8 @@ struct PBKDF2SHA512(Movable):
 
     @always_inline
     def derive(mut self, salt: Span[UInt8, ...], iterations: Int, dklen: Int) raises -> List[UInt8]:
+        if iterations < 1:
+            raise Error("PBKDF2-SHA512 iterations must be positive")
         if dklen < 1 or dklen > PBKDF2_SHA512_MAX_DKLEN:
             raise Error("PBKDF2-SHA512 dkLen exceeds the RFC 8018 limit")
         var hLen = 64
