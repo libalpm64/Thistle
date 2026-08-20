@@ -14,7 +14,7 @@ from thistle.curve25519 import FieldElement51
 def _canonical(fe: FieldElement51) -> FieldElement51:
     var bytes = InlineArray[UInt8, 32](uninitialized=True)
     fe.to_bytes_into(bytes.unsafe_ptr())
-    return fe_from_bytes(Span[UInt8, ...](ptr=bytes.unsafe_ptr(), length=32))
+    return fe_from_bytes(Span[UInt8, ...](unsafe_ptr=bytes.unsafe_ptr(), length=32))
 
 
 def _affine_niels_limbs(p: EdwardsPoint) -> InlineArray[UInt64, 15]:

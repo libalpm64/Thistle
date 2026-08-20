@@ -29,7 +29,13 @@ def run_case(tc_id: String, private_hex: String, public_hex: String, shared_hex:
     var public_key = hex_to_bytes(public_hex)
     var expected = hex_to_bytes(shared_hex)
     var actual = StackInlineArray[UInt8, 32](uninitialized=True)
-    x25519(Span[UInt8, ...](private_key), Span[UInt8, ...](public_key), actual.unsafe_ptr())
+    x25519(
+        Span[UInt8, ...](private_key),
+        Span[UInt8, ...](public_key),
+        Span[mut=True, UInt8, ...](
+            unsafe_ptr=actual.unsafe_ptr(), length=32
+        ),
+    )
     if not matches32(actual, expected):
         print("Test ", tc_id, " mismatch")
         return False

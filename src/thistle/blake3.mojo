@@ -2,7 +2,7 @@
 BLAKE3 cryptographic hash function
 """
 
-from std.algorithm import parallelize
+from max.algorithm import parallelize
 from std.collections import List
 from std.memory import UnsafePointer, bitcast
 from std.bit import count_trailing_zeros
@@ -112,7 +112,7 @@ def compress_internal[
     counter: UInt64,
     blen: UInt8,
     flags: UInt8,
-    out_ptr: UnsafePointer[SIMD[DType.uint32, w], MutAnyOrigin],
+    out_ptr: UnsafePointer[mut=True, SIMD[DType.uint32, w], _, address_space=_],
 ):
     """BLAKE3 compression: 7 rounds of G with message permutation."""
     # fmt: off
@@ -191,7 +191,7 @@ def compress_internal_16way(
     base_counter: UInt64,
     blen: UInt8,
     flags: UInt8,
-    out_ptr: UnsafePointer[SIMD[DType.uint32, 16], MutAnyOrigin],
+    out_ptr: UnsafePointer[mut=True, SIMD[DType.uint32, 16], _, address_space=_],
 ):
     """16-way SIMD compression with per-lane sequential counters."""
     var counters_low = SIMD[DType.uint32, 16](

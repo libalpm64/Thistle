@@ -10,7 +10,7 @@ comptime _M42: UInt64 = 0x3FFFFFFFFFF
 
 
 @always_inline
-def _le64(ptr: UnsafePointer[UInt8, _], offset: Int) -> UInt64:
+def _le64(ptr: UnsafePointer[mut=False, UInt8, _, address_space=_], offset: Int) -> UInt64:
     return (ptr + offset).bitcast[UInt64]().load[width=1, alignment=1]()
 
 
@@ -67,7 +67,7 @@ def _reduce(mut h0: UInt64, mut h1: UInt64, mut h2: UInt64, d0: UInt128, d1: UIn
 
 
 @always_inline
-def _limbs_at(ptr: UnsafePointer[UInt8, _], offset: Int, hibit: UInt64) -> SIMD[DType.uint64, 4]:
+def _limbs_at(ptr: UnsafePointer[mut=False, UInt8, _, address_space=_], offset: Int, hibit: UInt64) -> SIMD[DType.uint64, 4]:
     var t0 = _le64(ptr, offset)
     var t1 = _le64(ptr, offset + 8)
     return SIMD[DType.uint64, 4](
@@ -175,7 +175,7 @@ struct Poly1305:
         _reduce(self.h0, self.h1, self.h2, d0, d1, d2)
 
     @no_inline
-    def _blocks8(mut self, ptr: UnsafePointer[UInt8, _], count8: Int):
+    def _blocks8(mut self, ptr: UnsafePointer[mut=False, UInt8, _, address_space=_], count8: Int):
         var h0 = self.h0
         var h1 = self.h1
         var h2 = self.h2
@@ -207,7 +207,7 @@ struct Poly1305:
         self.h2 = h2
 
     @no_inline
-    def _blocks4(mut self, ptr: UnsafePointer[UInt8, _], count4: Int):
+    def _blocks4(mut self, ptr: UnsafePointer[mut=False, UInt8, _, address_space=_], count4: Int):
         var h0 = self.h0
         var h1 = self.h1
         var h2 = self.h2
@@ -270,7 +270,7 @@ struct Poly1305:
             self.buf_len += 1
             i += 1
 
-    def finalize_into(mut self, output: UnsafePointer[UInt8, MutAnyOrigin]):
+    def finalize_into(mut self, output: UnsafePointer[mut=True, UInt8, _, address_space=_]):
         if self.buf_len > 0:
             self.buf[self.buf_len] = 1
             for j in range(self.buf_len + 1, 16):
@@ -337,7 +337,13 @@ struct Poly1305:
         UnsafePointer(to=self.pad1).store[volatile=True](0, UInt64(0))
 
 
-def poly1305_mac(key: Span[UInt8, ...], message: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]) raises:
+def poly1305_mac(
+    key: Span[UInt8, ...],
+    message: Span[UInt8, ...],
+    output: Span[mut=True, UInt8, ...],
+) raises:
+    if len(output) < 16:
+        raise Error("Poly1305 output needs at least 16 writable bytes")
     var p = Poly1305(key)
     p.update(message)
-    p.finalize_into(output)
+    p.finalize_into(output.unsafe_ptr())

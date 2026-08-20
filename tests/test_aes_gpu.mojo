@@ -3,10 +3,10 @@ from std.python import PythonObject
 from std.collections import List
 from std.sys import has_accelerator
 from thistle.sha2 import bytes_to_hex
-from thistle.aes import cpu_aes_ct_skey, expand_key_128, expand_key_192, expand_key_256
+from thistle.aes import cpu_aes_ct_skey, AESExpandedKey
 from thistle.aes_gpu import aes_gpu_kernel_ecb, aes_gpu_kernel_ctr, aes_gpu_kernel_gcm_ctr
 from std.memory import alloc
-from std.gpu.host import DeviceContext
+from max.gpu.host import DeviceContext
 from std.memory.unsafe_pointer import UnsafePointer
 
 
@@ -88,9 +88,6 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
             
             var key_len = len(key_bytes)
             var rounds = 10 if key_len == 16 else (12 if key_len == 24 else 14)
-            var key_ptr = alloc[UInt8](key_len)
-            for j in range(key_len):
-                key_ptr.store(j, key_bytes[j])
             
             var total_bytes = 64
             var input_host = alloc[Scalar[DType.uint8]](total_bytes)
@@ -103,14 +100,8 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
             var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
             var output_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
 
-            var round_keys: UnsafePointer[UInt32, MutAnyOrigin]
-            if key_len == 16:
-                round_keys = expand_key_128(key_ptr)
-            elif key_len == 24:
-                round_keys = expand_key_192(key_ptr)
-            else:
-                round_keys = expand_key_256(key_ptr)
-            var skey_host = cpu_aes_ct_skey(round_keys, rounds)
+            var round_keys = AESExpandedKey(Span[UInt8, ...](key_bytes))
+            var skey_host = cpu_aes_ct_skey(round_keys.ptr(), rounds)
             var skey_buffer = ctx.enqueue_create_buffer[DType.uint64]((rounds + 1) * 8)
             ctx.enqueue_copy(skey_buffer, skey_host.unsafe_ptr())
             ctx.enqueue_copy(input_buffer, input_host)
@@ -120,11 +111,11 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
             var grid_dim = 1
 
             ctx.enqueue_function[aes_gpu_kernel_ecb](
-                input_buffer.unsafe_ptr(),
-                output_buffer.unsafe_ptr(),
-                skey_buffer.unsafe_ptr(),
-                4,
-                rounds,
+                input_buffer,
+                output_buffer,
+                skey_buffer,
+                Int32(4),
+                Int32(rounds),
                 grid_dim=grid_dim,
                 block_dim=block_dim,
             )
@@ -157,8 +148,6 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
                     got_hex += byte_to_hex(output_host[j])
                 failures.append("AES-GPU " + name + ": expected " + expected + ", got " + got_hex)
             
-            key_ptr.free()
-            round_keys.free()
             input_host.free()
             output_host.free()
     
@@ -183,28 +172,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
         var pt_bytes = hex_to_bytes(pt_hex)
         
         var key_len = len(key_bytes)
-        var key_ptr: UnsafePointer[UInt8, MutAnyOrigin]
-        var round_keys_size: Int
-        var round_keys: UnsafePointer[UInt32, MutAnyOrigin]
-        
-        if key_len == 16:
-                key_ptr = alloc[UInt8](16)
-                for j in range(16):
-                    key_ptr.store(j, key_bytes[j])
-                round_keys_size = 44
-                round_keys = expand_key_128(key_ptr)
-            elif key_len == 24:
-                key_ptr = alloc[UInt8](24)
-                for j in range(24):
-                    key_ptr.store(j, key_bytes[j])
-                round_keys_size = 52
-                round_keys = expand_key_192(key_ptr)
-            else:
-                key_ptr = alloc[UInt8](32)
-                for j in range(32):
-                    key_ptr.store(j, key_bytes[j])
-                round_keys_size = 60
-                round_keys = expand_key_256(key_ptr)
+        var round_keys = AESExpandedKey(Span[UInt8, ...](key_bytes))
         
         var total_bytes = len(pt_bytes)
         var n_blocks = total_bytes // 16
@@ -231,7 +199,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
         else:
             rounds = 14
 
-        var skey_host = cpu_aes_ct_skey(round_keys, rounds)
+        var skey_host = cpu_aes_ct_skey(round_keys.ptr(), rounds)
         var skey_buffer = ctx.enqueue_create_buffer[DType.uint64]((rounds + 1) * 8)
         ctx.enqueue_copy(skey_buffer, skey_host.unsafe_ptr())
         
@@ -239,11 +207,11 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
         var nonce_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
         if "ECB" in mode:
             ctx.enqueue_function[aes_gpu_kernel_ecb](
-                input_buffer.unsafe_ptr(),
-                output_buffer.unsafe_ptr(),
-                skey_buffer.unsafe_ptr(),
-                n_blocks,
-                rounds,
+                input_buffer,
+                output_buffer,
+                skey_buffer,
+                Int32(n_blocks),
+                Int32(rounds),
                 grid_dim=grid_dim,
                 block_dim=block_dim,
             )
@@ -259,12 +227,12 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
 
             ctx.enqueue_copy(nonce_buffer, nonce_ptr)
             ctx.enqueue_function[aes_gpu_kernel_ctr](
-                input_buffer.unsafe_ptr(),
-                output_buffer.unsafe_ptr(),
-                skey_buffer.unsafe_ptr(),
-                n_blocks,
-                nonce_buffer.unsafe_ptr(),
-                rounds,
+                input_buffer,
+                output_buffer,
+                skey_buffer,
+                Int32(n_blocks),
+                nonce_buffer,
+                Int32(rounds),
                 grid_dim=grid_dim,
                 block_dim=block_dim,
             )
@@ -284,22 +252,22 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
 
             ctx.enqueue_copy(nonce_buffer, nonce_ptr)
             ctx.enqueue_function[aes_gpu_kernel_gcm_ctr](
-                input_buffer.unsafe_ptr(),
-                output_buffer.unsafe_ptr(),
-                skey_buffer.unsafe_ptr(),
-                n_blocks,
-                nonce_buffer.unsafe_ptr(),
-                rounds,
+                input_buffer,
+                output_buffer,
+                skey_buffer,
+                Int32(n_blocks),
+                nonce_buffer,
+                Int32(rounds),
                 grid_dim=grid_dim,
                 block_dim=block_dim,
             )
         else:
             ctx.enqueue_function[aes_gpu_kernel_ecb](
-                input_buffer.unsafe_ptr(),
-                output_buffer.unsafe_ptr(),
-                skey_buffer.unsafe_ptr(),
-                n_blocks,
-                rounds,
+                input_buffer,
+                output_buffer,
+                skey_buffer,
+                Int32(n_blocks),
+                Int32(rounds),
                 grid_dim=grid_dim,
                 block_dim=block_dim,
             )
@@ -332,8 +300,6 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
                 got_hex += byte_to_hex(ct_ptr.load(j))
             failures.append(mode + " " + String(i) + ": expected " + expected_ct + ", got " + got_hex)
         
-        key_ptr.free()
-        round_keys.free()
         pt_ptr.free()
         ct_ptr.free()
         nonce_ptr.free()

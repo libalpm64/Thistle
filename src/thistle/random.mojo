@@ -4,7 +4,7 @@ from std.sys import CompilationTarget, inlined_assembly
 
 
 @always_inline
-def _getrandom_linux_x86(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) -> Int:
+def _getrandom_linux_x86(buf: UnsafePointer[mut=True, UInt8, _, address_space=_], length: Int) -> Int:
     # Linux x86-64: getrandom(buf, len, flags=0), syscall 318.
     # rax is both syscall-number input and return-value output.
     return Int(
@@ -18,7 +18,7 @@ def _getrandom_linux_x86(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) -
 
 
 @always_inline
-def _getrandom_linux_arm(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) -> Int:
+def _getrandom_linux_arm(buf: UnsafePointer[mut=True, UInt8, _, address_space=_], length: Int) -> Int:
     # Linux aarch64: getrandom(buf, len, flags=0), syscall 278.
     # inputs go via scratch registers to avoid asm constraint conflicts
     return Int(
@@ -38,7 +38,7 @@ def _getrandom_linux_arm(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) -
 
 
 @always_inline
-def _getentropy_macos_arm(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) -> Int:
+def _getentropy_macos_arm(buf: UnsafePointer[mut=True, UInt8, _, address_space=_], length: Int) -> Int:
     # Darwin arm64: getentropy(buf, size), syscall 500.
     # x16 = syscall number, x0 = buffer, x1 = size.
     # Errors set carry and return errno in x0; convert that to -errno.
@@ -61,7 +61,7 @@ def _getentropy_macos_arm(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) 
     )
 
 
-def _fill_linux_x86(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) raises:
+def _fill_linux_x86(buf: UnsafePointer[mut=True, UInt8, _, address_space=_], length: Int) raises:
     var offset = 0
     while offset < length:
         var ret = _getrandom_linux_x86(buf + offset, length - offset)
@@ -74,7 +74,7 @@ def _fill_linux_x86(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) raises
         offset += ret
 
 
-def _fill_linux_arm(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) raises:
+def _fill_linux_arm(buf: UnsafePointer[mut=True, UInt8, _, address_space=_], length: Int) raises:
     var offset = 0
     while offset < length:
         var ret = _getrandom_linux_arm(buf + offset, length - offset)
@@ -87,7 +87,7 @@ def _fill_linux_arm(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) raises
         offset += ret
 
 
-def _fill_macos_arm(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) raises:
+def _fill_macos_arm(buf: UnsafePointer[mut=True, UInt8, _, address_space=_], length: Int) raises:
     var offset = 0
     while offset < length:
         var chunk = min(256, length - offset)
@@ -99,20 +99,20 @@ def _fill_macos_arm(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) raises
         offset += chunk
 
 
-def random_fill(buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int) raises:
-    if length < 0:
-        raise Error("random_fill length must be non-negative")
+def random_fill(buf: Span[mut=True, UInt8, ...]) raises:
+    var length = len(buf)
     if length == 0:
         return
+    var ptr = buf.unsafe_ptr()
 
     comptime if CompilationTarget.is_linux() and CompilationTarget.is_x86():
-        _fill_linux_x86(buf, length)
+        _fill_linux_x86(ptr, length)
 
     elif CompilationTarget.is_linux() and CompilationTarget.has_neon():
-        _fill_linux_arm(buf, length)
+        _fill_linux_arm(ptr, length)
 
     elif CompilationTarget.is_macos() and CompilationTarget.is_apple_silicon():
-        _fill_macos_arm(buf, length)
+        _fill_macos_arm(ptr, length)
 
     else:
         CompilationTarget.unsupported_target_error[operation="random_fill"]()
@@ -122,5 +122,5 @@ def random_bytes(n: Int) raises -> List[UInt8]:
     if n < 0:
         raise Error("random_bytes length must be non-negative")
     var result = List[UInt8](length=n, fill=0)
-    random_fill(result.unsafe_ptr(), n)
+    random_fill(Span[mut=True, UInt8, ...](result))
     return result^

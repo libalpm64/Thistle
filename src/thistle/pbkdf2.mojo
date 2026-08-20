@@ -18,13 +18,13 @@ from .sha2 import (
 )
 
 @always_inline
-def _xor_block_32(dst: UnsafePointer[UInt8, MutAnyOrigin], src: UnsafePointer[UInt8, MutAnyOrigin]):
+def _xor_block_32(dst: UnsafePointer[mut=True, UInt8, _, address_space=_], src: UnsafePointer[mut=True, UInt8, _, address_space=_]):
     var d = dst.bitcast[UInt64]().load[width=4, alignment=1]()
     var s = src.bitcast[UInt64]().load[width=4, alignment=1]()
     dst.bitcast[UInt64]().store[width=4, alignment=1](0, d ^ s)
 
 @always_inline
-def _xor_block_64(dst: UnsafePointer[UInt8, MutAnyOrigin], src: UnsafePointer[UInt8, MutAnyOrigin]):
+def _xor_block_64(dst: UnsafePointer[mut=True, UInt8, _, address_space=_], src: UnsafePointer[mut=True, UInt8, _, address_space=_]):
     var d = dst.bitcast[UInt64]().load[width=8, alignment=1]()
     var s = src.bitcast[UInt64]().load[width=8, alignment=1]()
     dst.bitcast[UInt64]().store[width=8, alignment=1](0, d ^ s)
@@ -54,7 +54,8 @@ struct PBKDF2SHA256(Movable):
             sha256_update(ctx, password)
             sha256_final_to_buffer(ctx, k.ptr())
         else:
-            memcpy(dest=k.ptr(), src=password.unsafe_ptr(), count=len(password))
+            for i in range(len(password)):
+                k[i] = password[i]
 
         for i in range(64):
             self.ipad[i] = k[i] ^ 0x36
@@ -71,13 +72,13 @@ struct PBKDF2SHA256(Movable):
     @always_inline
     def hmac(mut self, data: Span[UInt8, ...]):
         self.inner_ctx.reset()
-        sha256_update(self.inner_ctx, Span[UInt8, ...](ptr=self.ipad.ptr(), length=64))
+        sha256_update(self.inner_ctx, Span[UInt8, ...](unsafe_ptr=self.ipad.ptr(), length=64))
         sha256_update(self.inner_ctx, data)
         sha256_final_to_buffer(self.inner_ctx, self.inner_hash.ptr())
 
         self.outer_ctx.reset()
-        sha256_update(self.outer_ctx, Span[UInt8, ...](ptr=self.opad.ptr(), length=64))
-        sha256_update(self.outer_ctx, Span[UInt8, ...](ptr=self.inner_hash.ptr(), length=32))
+        sha256_update(self.outer_ctx, Span[UInt8, ...](unsafe_ptr=self.opad.ptr(), length=64))
+        sha256_update(self.outer_ctx, Span[UInt8, ...](unsafe_ptr=self.inner_hash.ptr(), length=32))
         sha256_final_to_buffer(self.outer_ctx, self.u_block.ptr())
 
     @always_inline
@@ -88,14 +89,14 @@ struct PBKDF2SHA256(Movable):
         self.counter_bytes[3] = UInt8(counter & 0xFF)
 
         self.inner_ctx.reset()
-        sha256_update(self.inner_ctx, Span[UInt8, ...](ptr=self.ipad.ptr(), length=64))
+        sha256_update(self.inner_ctx, Span[UInt8, ...](unsafe_ptr=self.ipad.ptr(), length=64))
         sha256_update(self.inner_ctx, data)
-        sha256_update(self.inner_ctx, Span[UInt8, ...](ptr=self.counter_bytes.ptr(), length=4))
+        sha256_update(self.inner_ctx, Span[UInt8, ...](unsafe_ptr=self.counter_bytes.ptr(), length=4))
         sha256_final_to_buffer(self.inner_ctx, self.inner_hash.ptr())
 
         self.outer_ctx.reset()
-        sha256_update(self.outer_ctx, Span[UInt8, ...](ptr=self.opad.ptr(), length=64))
-        sha256_update(self.outer_ctx, Span[UInt8, ...](ptr=self.inner_hash.ptr(), length=32))
+        sha256_update(self.outer_ctx, Span[UInt8, ...](unsafe_ptr=self.opad.ptr(), length=64))
+        sha256_update(self.outer_ctx, Span[UInt8, ...](unsafe_ptr=self.inner_hash.ptr(), length=32))
         sha256_final_to_buffer(self.outer_ctx, self.u_block.ptr())
 
     @always_inline
@@ -105,13 +106,21 @@ struct PBKDF2SHA256(Movable):
 
         var derived_key = List[UInt8](capacity=dklen)
         var t_block = StackBuffer[UInt8, 32](fill=0)
+        var input_block = StackBuffer[UInt8, 32](fill=0)
 
         for block_idx in range(1, num_blocks + 1):
             self.hmac_with_counter(salt, UInt32(block_idx))
             memcpy(dest=t_block.ptr(), src=self.u_block.ptr(), count=32)
 
             for _ in range(1, iterations):
-                self.hmac(Span[UInt8, ...](ptr=self.u_block.ptr(), length=32))
+                memcpy(
+                    dest=input_block.ptr(),
+                    src=self.u_block.ptr(),
+                    count=32,
+                )
+                self.hmac(
+                    Span[UInt8, ...](unsafe_ptr=input_block.ptr(), length=32)
+                )
                 _xor_block_32(t_block.ptr(), self.u_block.ptr())
 
             var remaining = dklen - len(derived_key)
@@ -156,7 +165,8 @@ struct PBKDF2SHA512(Movable):
             sha512_update(ctx, password)
             sha512_final_to_buffer(ctx, k.ptr())
         else:
-            memcpy(dest=k.ptr(), src=password.unsafe_ptr(), count=len(password))
+            for i in range(len(password)):
+                k[i] = password[i]
 
         for i in range(128):
             self.ipad[i] = k[i] ^ 0x36
@@ -173,13 +183,13 @@ struct PBKDF2SHA512(Movable):
     @always_inline
     def hmac(mut self, data: Span[UInt8, ...]):
         self.inner_ctx.reset()
-        sha512_update(self.inner_ctx, Span[UInt8, ...](ptr=self.ipad.ptr(), length=128))
+        sha512_update(self.inner_ctx, Span[UInt8, ...](unsafe_ptr=self.ipad.ptr(), length=128))
         sha512_update(self.inner_ctx, data)
         sha512_final_to_buffer(self.inner_ctx, self.inner_hash.ptr())
 
         self.outer_ctx.reset()
-        sha512_update(self.outer_ctx, Span[UInt8, ...](ptr=self.opad.ptr(), length=128))
-        sha512_update(self.outer_ctx, Span[UInt8, ...](ptr=self.inner_hash.ptr(), length=64))
+        sha512_update(self.outer_ctx, Span[UInt8, ...](unsafe_ptr=self.opad.ptr(), length=128))
+        sha512_update(self.outer_ctx, Span[UInt8, ...](unsafe_ptr=self.inner_hash.ptr(), length=64))
         sha512_final_to_buffer(self.outer_ctx, self.u_block.ptr())
 
     @always_inline
@@ -190,14 +200,14 @@ struct PBKDF2SHA512(Movable):
         self.counter_bytes[3] = UInt8(counter & 0xFF)
 
         self.inner_ctx.reset()
-        sha512_update(self.inner_ctx, Span[UInt8, ...](ptr=self.ipad.ptr(), length=128))
+        sha512_update(self.inner_ctx, Span[UInt8, ...](unsafe_ptr=self.ipad.ptr(), length=128))
         sha512_update(self.inner_ctx, data)
-        sha512_update(self.inner_ctx, Span[UInt8, ...](ptr=self.counter_bytes.ptr(), length=4))
+        sha512_update(self.inner_ctx, Span[UInt8, ...](unsafe_ptr=self.counter_bytes.ptr(), length=4))
         sha512_final_to_buffer(self.inner_ctx, self.inner_hash.ptr())
 
         self.outer_ctx.reset()
-        sha512_update(self.outer_ctx, Span[UInt8, ...](ptr=self.opad.ptr(), length=128))
-        sha512_update(self.outer_ctx, Span[UInt8, ...](ptr=self.inner_hash.ptr(), length=64))
+        sha512_update(self.outer_ctx, Span[UInt8, ...](unsafe_ptr=self.opad.ptr(), length=128))
+        sha512_update(self.outer_ctx, Span[UInt8, ...](unsafe_ptr=self.inner_hash.ptr(), length=64))
         sha512_final_to_buffer(self.outer_ctx, self.u_block.ptr())
 
     @always_inline
@@ -207,13 +217,21 @@ struct PBKDF2SHA512(Movable):
 
         var derived_key = List[UInt8](capacity=dklen)
         var t_block = StackBuffer[UInt8, 64](fill=0)
+        var input_block = StackBuffer[UInt8, 64](fill=0)
 
         for block_idx in range(1, num_blocks + 1):
             self.hmac_with_counter(salt, UInt32(block_idx))
             memcpy(dest=t_block.ptr(), src=self.u_block.ptr(), count=64)
 
             for _ in range(1, iterations):
-                self.hmac(Span[UInt8, ...](ptr=self.u_block.ptr(), length=64))
+                memcpy(
+                    dest=input_block.ptr(),
+                    src=self.u_block.ptr(),
+                    count=64,
+                )
+                self.hmac(
+                    Span[UInt8, ...](unsafe_ptr=input_block.ptr(), length=64)
+                )
                 _xor_block_64(t_block.ptr(), self.u_block.ptr())
 
             var remaining = dklen - len(derived_key)
@@ -259,7 +277,8 @@ def hmac_sha384(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
         for i in range(48):
             khp.store[volatile=True](i, UInt8(0))
     else:
-        memcpy(dest=k.ptr(), src=key.unsafe_ptr(), count=len(key))
+        for i in range(len(key)):
+            k[i] = key[i]
 
     var ipad = StackBuffer[UInt8, 128](fill=0)
     var opad = StackBuffer[UInt8, 128](fill=0)
@@ -268,12 +287,12 @@ def hmac_sha384(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
         opad[i] = k[i] ^ 0x5C
 
     var inner = SHA512Context(SHA384_IV)
-    sha512_update(inner, Span[UInt8, ...](ptr=ipad.ptr(), length=128))
+    sha512_update(inner, Span[UInt8, ...](unsafe_ptr=ipad.ptr(), length=128))
     sha512_update(inner, data)
     var inner_hash = sha512_final_with_len(inner, 48)
 
     var outer = SHA512Context(SHA384_IV)
-    sha512_update(outer, Span[UInt8, ...](ptr=opad.ptr(), length=128))
+    sha512_update(outer, Span[UInt8, ...](unsafe_ptr=opad.ptr(), length=128))
     sha512_update(outer, Span[UInt8, ...](inner_hash))
     var result = sha512_final_with_len(outer, 48)
 

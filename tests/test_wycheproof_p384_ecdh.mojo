@@ -125,7 +125,7 @@ def run_case(
     var got = p384_ecdh(
         Span[UInt8, ...](private_key),
         Span[UInt8, ...](public_key),
-        actual.unsafe_ptr(),
+        Span[mut=True, UInt8, ...](unsafe_ptr=actual.unsafe_ptr(), length=48),
     )
     if is_valid and not got:
         print(

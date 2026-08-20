@@ -1,6 +1,6 @@
 from std.time import perf_counter, perf_counter_ns
 from std.collections import List
-from std.algorithm import parallelize
+from max.algorithm import parallelize
 from std.random import random_ui64, seed
 from std.math import ceildiv
 from std.sys import has_accelerator
@@ -47,18 +47,18 @@ def benchmark_x25519(duration_secs: Float64) raises -> String:
     for i in range(32):
         scalar[i] = UInt8(i + 1)
         point[i] = UInt8(9) if i == 0 else UInt8(0)
-    var scalar_span = Span[UInt8, ...](ptr=scalar.unsafe_ptr(), length=32)
-    var point_span = Span[UInt8, ...](ptr=point.unsafe_ptr(), length=32)
-    x25519(scalar_span, point_span, out.unsafe_ptr())
+    var scalar_span = Span[UInt8, ...](unsafe_ptr=scalar.unsafe_ptr(), length=32)
+    var point_span = Span[UInt8, ...](unsafe_ptr=point.unsafe_ptr(), length=32)
+    x25519(scalar_span, point_span, Span[mut=True, UInt8, ...](out))
     var count = 0
     var start = perf_counter()
     while perf_counter() - start < duration_secs:
-        x25519(scalar_span, point_span, out.unsafe_ptr())
+        x25519(scalar_span, point_span, Span[mut=True, UInt8, ...](out))
         scalar.unsafe_ptr().store[volatile=True](0, out[0] | 8)
         count += 1
     var duration = perf_counter() - start
     var ops = Float64(count) / duration
-    return "x25519 | throughput: " + String(ops)[byte=:8] + " ops/s, ops: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+    return "x25519 | throughput: " + String(ops) + " ops/s, ops: " + String(count) + ", time: " + String(duration) + "s"
 
 
 def benchmark_p384(duration_secs: Float64) -> String:
@@ -66,15 +66,15 @@ def benchmark_p384(duration_secs: Float64) -> String:
     var out = InlineArray[UInt8, 97](fill=0)
     scalar[47] = 7
     var scalar_span = Span[UInt8, ...](scalar)
-    _ = p384_public_key(scalar_span, out.unsafe_ptr())
+    _ = p384_public_key(scalar_span, Span[mut=True, UInt8, ...](out))
     var count = 0
     var start = perf_counter()
     while perf_counter() - start < duration_secs:
-        _ = p384_public_key(scalar_span, out.unsafe_ptr())
+        _ = p384_public_key(scalar_span, Span[mut=True, UInt8, ...](out))
         count += 1
     var duration = perf_counter() - start
     var ops = Float64(count) / duration
-    return "p384-public-key | throughput: " + String(ops)[byte=:8] + " ops/s, ops: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+    return "p384-public-key | throughput: " + String(ops) + " ops/s, ops: " + String(count) + ", time: " + String(duration) + "s"
 
 
 def benchmark_ecdsa(duration_secs: Float64) -> String:
@@ -89,7 +89,9 @@ def benchmark_ecdsa(duration_secs: Float64) -> String:
     var start = perf_counter()
     while perf_counter() - start < duration_secs:
         _ = p256_ecdsa_sign(
-            Span[UInt8, ...](p256_key), msg, p256_sig.unsafe_ptr()
+            Span[UInt8, ...](p256_key),
+            msg,
+            Span[mut=True, UInt8, ...](unsafe_ptr=p256_sig.unsafe_ptr(), length=64),
         )
         p256_count += 1
     var p256_time = perf_counter() - start
@@ -98,16 +100,18 @@ def benchmark_ecdsa(duration_secs: Float64) -> String:
     start = perf_counter()
     while perf_counter() - start < duration_secs:
         _ = p384_ecdsa_sign(
-            Span[UInt8, ...](p384_key), msg, p384_sig.unsafe_ptr()
+            Span[UInt8, ...](p384_key),
+            msg,
+            Span[mut=True, UInt8, ...](unsafe_ptr=p384_sig.unsafe_ptr(), length=96),
         )
         p384_count += 1
     var p384_time = perf_counter() - start
 
     return (
         "p256-ecdsa-sign | throughput: "
-        + String(Float64(p256_count) / p256_time)[byte=:8] + " ops/s\n"
+        + String(Float64(p256_count) / p256_time) + " ops/s\n"
         + "p384-ecdsa-sign | throughput: "
-        + String(Float64(p384_count) / p384_time)[byte=:8] + " ops/s"
+        + String(Float64(p384_count) / p384_time) + " ops/s"
     )
 
 
@@ -120,10 +124,10 @@ def benchmark_ed25519(duration_secs: Float64) raises -> String:
         sk[i] = UInt8(i * 7 + 1)
     for i in range(64):
         msg[i] = UInt8(i)
-    var sk_span = Span[UInt8, ...](ptr=sk.unsafe_ptr(), length=32)
-    var msg_span = Span[UInt8, ...](ptr=msg.unsafe_ptr(), length=64)
-    var sig_span = Span[UInt8, ...](ptr=sig.unsafe_ptr(), length=64)
-    var pk_span = Span[UInt8, ...](ptr=pk.unsafe_ptr(), length=32)
+    var sk_span = Span[UInt8, ...](unsafe_ptr=sk.unsafe_ptr(), length=32)
+    var msg_span = Span[UInt8, ...](unsafe_ptr=msg.unsafe_ptr(), length=64)
+    var sig_span = Span[UInt8, ...](unsafe_ptr=sig.unsafe_ptr(), length=64)
+    var pk_span = Span[UInt8, ...](unsafe_ptr=pk.unsafe_ptr(), length=32)
     ed25519_generate_public_key(sk_span, pk.unsafe_ptr())
     ed25519_sign(sk_span, msg_span, sig.unsafe_ptr())
 
@@ -146,8 +150,8 @@ def benchmark_ed25519(duration_secs: Float64) raises -> String:
     var verify_duration = perf_counter() - start
     var verify_ops = Float64(verify_count) / verify_duration
 
-    var result = "ed25519-sign | throughput: " + String(sign_ops)[byte=:8] + " ops/s, ops: " + String(sign_count) + ", time: " + String(sign_duration)[byte=:4] + "s\n"
-    result += "ed25519-verify | throughput: " + String(verify_ops)[byte=:8] + " ops/s, ops: " + String(verify_count) + ", time: " + String(verify_duration)[byte=:4] + "s"
+    var result = "ed25519-sign | throughput: " + String(sign_ops) + " ops/s, ops: " + String(sign_count) + ", time: " + String(sign_duration) + "s\n"
+    result += "ed25519-verify | throughput: " + String(verify_ops) + " ops/s, ops: " + String(verify_count) + ", time: " + String(verify_duration) + "s"
     if verify_failures > 0:
         result += " [" + String(verify_failures) + " FAILED VERIFICATIONS]"
     return result
@@ -165,7 +169,7 @@ def benchmark_sha256(data: List[UInt8], duration_secs: Float64) -> String:
     var duration = end - start
     var mb = Float64(len(data) * count) / (1024 * 1024)
     var mbps = mb / duration
-    return "sha256 | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+    return "sha256 | throughput: " + String(mbps) + " mb/s, hashes: " + String(count) + ", time: " + String(duration) + "s"
 
 
 def benchmark_sha256ni(data: List[UInt8], duration_secs: Float64) -> String:
@@ -182,7 +186,7 @@ def benchmark_sha256ni(data: List[UInt8], duration_secs: Float64) -> String:
     var duration = end - start
     var mb = Float64(len(data) * count) / (1024 * 1024)
     var mbps = mb / duration
-    return "sha256-ni | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+    return "sha256-ni | throughput: " + String(mbps) + " mb/s, hashes: " + String(count) + ", time: " + String(duration) + "s"
 
 
 def benchmark_sha512(data: List[UInt8], duration_secs: Float64) -> String:
@@ -197,7 +201,7 @@ def benchmark_sha512(data: List[UInt8], duration_secs: Float64) -> String:
     var duration = end - start
     var mb = Float64(len(data) * count) / (1024 * 1024)
     var mbps = mb / duration
-    return "sha512 | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+    return "sha512 | throughput: " + String(mbps) + " mb/s, hashes: " + String(count) + ", time: " + String(duration) + "s"
 
 
 def benchmark_sha3_256(data: List[UInt8], duration_secs: Float64) -> String:
@@ -212,7 +216,7 @@ def benchmark_sha3_256(data: List[UInt8], duration_secs: Float64) -> String:
     var duration = end - start
     var mb = Float64(len(data) * count) / (1024 * 1024)
     var mbps = mb / duration
-    return "sha3-256 | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+    return "sha3-256 | throughput: " + String(mbps) + " mb/s, hashes: " + String(count) + ", time: " + String(duration) + "s"
 
 
 def benchmark_blake2b(data: List[UInt8], duration_secs: Float64) raises -> String:
@@ -228,7 +232,7 @@ def benchmark_blake2b(data: List[UInt8], duration_secs: Float64) raises -> Strin
     var duration = end - start
     var mb = Float64(len(data) * count) / (1024 * 1024)
     var mbps = mb / duration
-    return "blake2b | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+    return "blake2b | throughput: " + String(mbps) + " mb/s, hashes: " + String(count) + ", time: " + String(duration) + "s"
 
 
 def benchmark_blake3(data: List[UInt8], duration_secs: Float64) raises -> String:
@@ -243,7 +247,7 @@ def benchmark_blake3(data: List[UInt8], duration_secs: Float64) raises -> String
     var duration = end - start
     var mb = Float64(len(data) * count) / (1024 * 1024)
     var mbps = mb / duration
-    return "blake3 | throughput: " + String(mbps)[byte=:6] + " mb/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+    return "blake3 | throughput: " + String(mbps) + " mb/s, hashes: " + String(count) + ", time: " + String(duration) + "s"
 
 
 def benchmark_camellia(data_size: Int, duration_secs: Float64) raises -> String:
@@ -271,7 +275,7 @@ def benchmark_camellia(data_size: Int, duration_secs: Float64) raises -> String:
     blocks.free()
 
     var mbps = Float64(count * 16) / (1024 * 1024) / duration
-    return "camellia | throughput: " + String(mbps)[byte=:6] + " mb/s, blocks: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+    return "camellia | throughput: " + String(mbps) + " mb/s, blocks: " + String(count) + ", time: " + String(duration) + "s"
 
 
 def benchmark_camellia_ctr(duration_secs: Float64) raises -> String:
@@ -302,14 +306,14 @@ def benchmark_camellia_ctr(duration_secs: Float64) raises -> String:
     nonce.free()
 
     var mbps = Float64(count * size) / (1024 * 1024) / duration
-    return "camellia-ctr | throughput: " + String(mbps)[byte=:6] + " mb/s, chunks: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+    return "camellia-ctr | throughput: " + String(mbps) + " mb/s, chunks: " + String(count) + ", time: " + String(duration) + "s"
 
 
 def benchmark_chacha20(data_size: Int, duration_secs: Float64) raises -> String:
     var key = SIMD[DType.uint8, 32](0)
     for i in range(32):
         key[i] = UInt8(i)
-    var nonce = SIMD[DType.uint8, 12](0)
+    var nonce = SIMD[DType.uint8, 16](0)
     
     var data = List[UInt8](capacity=data_size)
     for i in range(data_size):
@@ -330,7 +334,7 @@ def benchmark_chacha20(data_size: Int, duration_secs: Float64) raises -> String:
     _ = checksum
     var mb = Float64(data_size * count) / (1024 * 1024)
     var mbps = mb / duration
-    return "chacha20 | throughput: " + String(mbps)[byte=:6] + " mb/s, encrypts: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+    return "chacha20 | throughput: " + String(mbps) + " mb/s, encrypts: " + String(count) + ", time: " + String(duration) + "s"
 
 
 def benchmark_kcipher2(data_size: Int, duration_secs: Float64) -> String:
@@ -353,7 +357,7 @@ def benchmark_kcipher2(data_size: Int, duration_secs: Float64) -> String:
     var duration = end - start
     var mb = Float64(data_size * count) / (1024 * 1024)
     var mbps = mb / duration
-    return "kcipher2 | throughput: " + String(mbps)[byte=:6] + " mb/s, encrypts: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+    return "kcipher2 | throughput: " + String(mbps) + " mb/s, encrypts: " + String(count) + ", time: " + String(duration) + "s"
 
 
 def benchmark_argon2(duration_secs: Float64) raises -> String:
@@ -371,7 +375,7 @@ def benchmark_argon2(duration_secs: Float64) raises -> String:
     var end = perf_counter()
     var duration = end - start
     var hps = Float64(count) / duration
-    return "argon2id | throughput: " + String(hps)[byte=:6] + " h/s, hashes: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+    return "argon2id | throughput: " + String(hps) + " h/s, hashes: " + String(count) + ", time: " + String(duration) + "s"
 
 
 def benchmark_aes_cpu(duration_secs: Float64) raises -> String:
@@ -396,7 +400,7 @@ def benchmark_aes_cpu(duration_secs: Float64) raises -> String:
     blocks.free()
 
     var mbps = Float64(count * 16) / (1024 * 1024) / duration
-    return "aes-128-cpu | throughput: " + String(mbps)[byte=:6] + " mb/s, blocks: " + String(count) + ", time: " + String(duration)[byte=:4] + "s"
+    return "aes-128-cpu | throughput: " + String(mbps) + " mb/s, blocks: " + String(count) + ", time: " + String(duration) + "s"
 
 
 def benchmark_aes_gpu_ecb() raises -> String:
@@ -404,13 +408,15 @@ def benchmark_aes_gpu_ecb() raises -> String:
     if not has_accelerator():
         return "aes-128-gpu-ecb | (GPU not available)"
     
-    from std.gpu.host import DeviceContext
+    from max.gpu.host import DeviceContext
     from thistle.aes_gpu import aes_gpu_kernel_ecb
     
     var key_ptr = alloc[UInt8](16)
     for i in range(16):
         key_ptr.store(i, TEST_KEY[i])
-    var round_keys = expand_key_128(key_ptr)
+    var round_keys = expand_key_128(
+        Span[UInt8, ...](unsafe_ptr=key_ptr, length=16)
+    )
     var num_blocks = 131072
     var total_bytes = num_blocks * 16
 
@@ -423,7 +429,7 @@ def benchmark_aes_gpu_ecb() raises -> String:
     with DeviceContext() as ctx:
         var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
         var output_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
-        var skey_host = cpu_aes_ct_skey(round_keys, 10)
+        var skey_host = cpu_aes_ct_skey(round_keys.ptr(), 10)
         var skey_buffer = ctx.enqueue_create_buffer[DType.uint64](88)
         ctx.enqueue_copy(skey_buffer, skey_host.unsafe_ptr())
         
@@ -434,11 +440,11 @@ def benchmark_aes_gpu_ecb() raises -> String:
         var grid_dim = ceildiv(num_blocks, block_dim)
         
         ctx.enqueue_function[aes_gpu_kernel_ecb](
-            input_buffer.unsafe_ptr(),
-            output_buffer.unsafe_ptr(),
-            skey_buffer.unsafe_ptr(),
-            num_blocks,
-            10,
+            input_buffer,
+            output_buffer,
+            skey_buffer,
+            Int32(num_blocks),
+            Int32(10),
             grid_dim=grid_dim,
             block_dim=block_dim,
         )
@@ -448,11 +454,11 @@ def benchmark_aes_gpu_ecb() raises -> String:
         var start = perf_counter()
         for _ in range(iterations):
             ctx.enqueue_function[aes_gpu_kernel_ecb](
-                input_buffer.unsafe_ptr(),
-                output_buffer.unsafe_ptr(),
-                skey_buffer.unsafe_ptr(),
-                num_blocks,
-                10,
+                input_buffer,
+                output_buffer,
+                skey_buffer,
+                Int32(num_blocks),
+                Int32(10),
                 grid_dim=grid_dim,
                 block_dim=block_dim,
             )
@@ -465,10 +471,9 @@ def benchmark_aes_gpu_ecb() raises -> String:
         
         input_host.free()
         output_host.free()
-        round_keys.free()
         key_ptr.free()
         
-        return "aes-128-gpu-ecb | throughput: " + String(gbps)[byte=:6] + " gb/s, iterations: " + String(iterations)
+        return "aes-128-gpu-ecb | throughput: " + String(gbps) + " gb/s, iterations: " + String(iterations)
 
 
 def benchmark_aes_gpu_ctr() raises -> String:
@@ -476,13 +481,15 @@ def benchmark_aes_gpu_ctr() raises -> String:
     if not has_accelerator():
         return "aes-128-gpu-ctr | (GPU not available)"
     
-    from std.gpu.host import DeviceContext
+    from max.gpu.host import DeviceContext
     from thistle.aes_gpu import aes_gpu_kernel_ctr
     
     var key_ptr = alloc[UInt8](16)
     for i in range(16):
         key_ptr.store(i, TEST_KEY[i])
-    var round_keys = expand_key_128(key_ptr)
+    var round_keys = expand_key_128(
+        Span[UInt8, ...](unsafe_ptr=key_ptr, length=16)
+    )
     var num_blocks = 131072
     var total_bytes = num_blocks * 16
 
@@ -498,7 +505,7 @@ def benchmark_aes_gpu_ctr() raises -> String:
     with DeviceContext() as ctx:
         var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
         var output_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
-        var skey_host = cpu_aes_ct_skey(round_keys, 10)
+        var skey_host = cpu_aes_ct_skey(round_keys.ptr(), 10)
         var skey_buffer = ctx.enqueue_create_buffer[DType.uint64](88)
         ctx.enqueue_copy(skey_buffer, skey_host.unsafe_ptr())
         var nonce_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
@@ -511,12 +518,12 @@ def benchmark_aes_gpu_ctr() raises -> String:
         var grid_dim = ceildiv(num_blocks, block_dim)
         
         ctx.enqueue_function[aes_gpu_kernel_ctr](
-            input_buffer.unsafe_ptr(),
-            output_buffer.unsafe_ptr(),
-            skey_buffer.unsafe_ptr(),
-            num_blocks,
-            nonce_buffer.unsafe_ptr(),
-            10,
+            input_buffer,
+            output_buffer,
+            skey_buffer,
+            Int32(num_blocks),
+            nonce_buffer,
+            Int32(10),
             grid_dim=grid_dim,
             block_dim=block_dim,
         )
@@ -526,12 +533,12 @@ def benchmark_aes_gpu_ctr() raises -> String:
         var start = perf_counter()
         for _ in range(iterations):
             ctx.enqueue_function[aes_gpu_kernel_ctr](
-                input_buffer.unsafe_ptr(),
-                output_buffer.unsafe_ptr(),
-                skey_buffer.unsafe_ptr(),
-                num_blocks,
-                nonce_buffer.unsafe_ptr(),
-                10,
+                input_buffer,
+                output_buffer,
+                skey_buffer,
+                Int32(num_blocks),
+                nonce_buffer,
+                Int32(10),
                 grid_dim=grid_dim,
                 block_dim=block_dim,
             )
@@ -545,10 +552,9 @@ def benchmark_aes_gpu_ctr() raises -> String:
         input_host.free()
         output_host.free()
         nonce_host.free()
-        round_keys.free()
         key_ptr.free()
         
-        return "aes-128-gpu-ctr | throughput: " + String(gbps)[byte=:6] + " gb/s, iterations: " + String(iterations)
+        return "aes-128-gpu-ctr | throughput: " + String(gbps) + " gb/s, iterations: " + String(iterations)
 
 
 
@@ -559,13 +565,15 @@ def benchmark_aes_gpu_gcm() raises -> String:
     if not has_accelerator():
         return "aes-128-gpu-gcm | (GPU not available)"
     
-    from std.gpu.host import DeviceContext
+    from max.gpu.host import DeviceContext
     from thistle.aes_gpu import aes_gpu_kernel_gcm_ctr
     
     var key_ptr = alloc[UInt8](16)
     for i in range(16):
         key_ptr.store(i, TEST_KEY[i])
-    var round_keys = expand_key_128(key_ptr)
+    var round_keys = expand_key_128(
+        Span[UInt8, ...](unsafe_ptr=key_ptr, length=16)
+    )
     var num_blocks = 131072
     var total_bytes = num_blocks * 16
 
@@ -582,7 +590,7 @@ def benchmark_aes_gpu_gcm() raises -> String:
     with DeviceContext() as ctx:
         var input_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
         var output_buffer = ctx.enqueue_create_buffer[DType.uint8](total_bytes)
-        var skey_host = cpu_aes_ct_skey(round_keys, 10)
+        var skey_host = cpu_aes_ct_skey(round_keys.ptr(), 10)
         var skey_buffer = ctx.enqueue_create_buffer[DType.uint64](88)
         ctx.enqueue_copy(skey_buffer, skey_host.unsafe_ptr())
         var nonce_buffer = ctx.enqueue_create_buffer[DType.uint8](16)
@@ -595,12 +603,12 @@ def benchmark_aes_gpu_gcm() raises -> String:
         var grid_dim = ceildiv(num_blocks, block_dim)
         
         ctx.enqueue_function[aes_gpu_kernel_gcm_ctr](
-            input_buffer.unsafe_ptr(),
-            output_buffer.unsafe_ptr(),
-            skey_buffer.unsafe_ptr(),
-            num_blocks,
-            nonce_buffer.unsafe_ptr(),
-            10,
+            input_buffer,
+            output_buffer,
+            skey_buffer,
+            Int32(num_blocks),
+            nonce_buffer,
+            Int32(10),
             grid_dim=grid_dim,
             block_dim=block_dim,
         )
@@ -610,12 +618,12 @@ def benchmark_aes_gpu_gcm() raises -> String:
         var start = perf_counter()
         for _ in range(iterations):
             ctx.enqueue_function[aes_gpu_kernel_gcm_ctr](
-                input_buffer.unsafe_ptr(),
-                output_buffer.unsafe_ptr(),
-                skey_buffer.unsafe_ptr(),
-                num_blocks,
-                nonce_buffer.unsafe_ptr(),
-                10,
+                input_buffer,
+                output_buffer,
+                skey_buffer,
+                Int32(num_blocks),
+                nonce_buffer,
+                Int32(10),
                 grid_dim=grid_dim,
                 block_dim=block_dim,
             )
@@ -629,10 +637,9 @@ def benchmark_aes_gpu_gcm() raises -> String:
         input_host.free()
         output_host.free()
         nonce_host.free()
-        round_keys.free()
         key_ptr.free()
         
-        return "aes-128-gpu-gcm | throughput: " + String(gbps)[byte=:6] + " gb/s, iterations: " + String(iterations)
+        return "aes-128-gpu-gcm | throughput: " + String(gbps) + " gb/s, iterations: " + String(iterations)
 
 
 

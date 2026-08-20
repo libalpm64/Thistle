@@ -235,7 +235,7 @@ def run_aes_sw(mut rng: Rng) raises -> Bool:
     var kb = List[UInt8]()
     for i in range(16):
         kb.append(UInt8(i + 1))
-    var rk = expand_key_128(kb.unsafe_ptr())
+    var rk = expand_key_128(Span[UInt8, ...](kb))
     var cls = _classes(N_FAST, rng)
     var inp = _fast_inputs(cls, 16, rng)
     var times = List[Float64](capacity=N_FAST)
@@ -248,10 +248,9 @@ def run_aes_sw(mut rng: Rng) raises -> Bool:
         for _ in range(BATCH):
             for j in range(16):
                 blk[j] = inp[i * 16 + j]
-            cpu_aes_encrypt(blk.unsafe_ptr(), rk, 10)
+            cpu_aes_encrypt(blk.unsafe_ptr(), rk.ptr(), 10)
             sink ^= blk[0]
         times.append(Float64(perf_counter_ns() - t0))
-    rk.free()
     if sink == 42:
         print("")
     return _report("aes-128 software (fixed/random pt)", times, cls)
@@ -260,7 +259,7 @@ def run_aes_sw(mut rng: Rng) raises -> Bool:
 def run_chacha20(mut rng: Rng) raises -> Bool:
     var cls = _classes(N_FAST, rng)
     var inp = _fast_inputs(cls, 32, rng)
-    var nonce = SIMD[DType.uint8, 12](0)
+    var nonce = SIMD[DType.uint8, 16](0)
     var times = List[Float64](capacity=N_FAST)
     var sink: UInt8 = 0
     var data = List[UInt8]()
@@ -402,7 +401,9 @@ def run_x25519(mut rng: Rng) raises -> Bool:
             sc[0] = 0x40
         var t0 = perf_counter_ns()
         x25519(
-            Span[UInt8, ...](sc), Span[UInt8, ...](base), out.unsafe_ptr()
+            Span[UInt8, ...](sc),
+            Span[UInt8, ...](base),
+            Span[mut=True, UInt8, ...](out),
         )
         times.append(Float64(perf_counter_ns() - t0))
         sink ^= out[0]
@@ -451,7 +452,9 @@ def run_p256(mut rng: Rng) raises -> Bool:
     for i in range(N_ASYM):
         var sc = _valid_scalar(32, rng, cls[i] == 0)
         var t0 = perf_counter_ns()
-        var ok = p256_public_key(Span[UInt8, ...](sc), out.unsafe_ptr())
+        var ok = p256_public_key(
+            Span[UInt8, ...](sc), Span[mut=True, UInt8, ...](out)
+        )
         times.append(Float64(perf_counter_ns() - t0))
         sink ^= out[0] ^ (UInt8(1) if ok else UInt8(0))
     if sink == 42:
@@ -469,7 +472,9 @@ def run_p384(mut rng: Rng) raises -> Bool:
     for i in range(N_ASYM):
         var sc = _valid_scalar(48, rng, cls[i] == 0)
         var t0 = perf_counter_ns()
-        var ok = p384_public_key(Span[UInt8, ...](sc), out.unsafe_ptr())
+        var ok = p384_public_key(
+            Span[UInt8, ...](sc), Span[mut=True, UInt8, ...](out)
+        )
         times.append(Float64(perf_counter_ns() - t0))
         sink ^= out[0] ^ (UInt8(1) if ok else UInt8(0))
     if sink == 42:
@@ -489,7 +494,7 @@ def run_p256_sign(mut rng: Rng) -> Bool:
         var ok = p256_ecdsa_sign(
             Span[UInt8, ...](private_key),
             Span[UInt8, ...](message),
-            signature.unsafe_ptr(),
+            Span[mut=True, UInt8, ...](signature),
         )
         times.append(Float64(perf_counter_ns() - t0))
         sink ^= signature[0] ^ (UInt8(1) if ok else UInt8(0))
@@ -510,7 +515,7 @@ def run_p384_sign(mut rng: Rng) -> Bool:
         var ok = p384_ecdsa_sign(
             Span[UInt8, ...](private_key),
             Span[UInt8, ...](message),
-            signature.unsafe_ptr(),
+            Span[mut=True, UInt8, ...](signature),
         )
         times.append(Float64(perf_counter_ns() - t0))
         sink ^= signature[0] ^ (UInt8(1) if ok else UInt8(0))

@@ -395,7 +395,7 @@ struct KCipher2:
         ik[10] = ik[6] ^ ik[9]
         ik[11] = ik[7] ^ ik[10]
 
-        return ik
+        return ik^
 
     @always_inline
     def _select_u32(self, a: UInt32, b: UInt32, choice: UInt32) -> UInt32:

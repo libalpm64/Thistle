@@ -343,7 +343,7 @@ def base_case_multiply(a0: Int16, a1: Int16, b0: Int16, b1: Int16, zeta: Int16) 
 
 def poly_reduce(mut r: Poly):
     comptime W = simd_width_of[DType.int16]()
-    var ptr = r.coeffs.unsafe_ptr()
+    var ptr = r.coeffs.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
 
     def reduce_chunk[w: Int](i: Int) {ptr}:
         var a = ptr.load[width=w](i)
@@ -379,7 +379,7 @@ def poly_basemul_montgomery(mut r: Poly, ref a: Poly, ref b: Poly):
 def poly_tomont(mut r: Poly):
     comptime F: Int16 = Int16((1 << 32) % Q)
     comptime W = simd_width_of[DType.int16]()
-    var ptr = r.coeffs.unsafe_ptr()
+    var ptr = r.coeffs.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
 
     def tomont_chunk[w: Int](i: Int) {ptr}:
         var a = ptr.load[width=w](i)
@@ -391,8 +391,12 @@ def poly_tomont(mut r: Poly):
 
 def poly_add_inplace(mut r: Poly, ref b: Poly):
     comptime W = simd_width_of[DType.int16]()
-    var rp = r.coeffs.unsafe_ptr()
-    var bp = b.coeffs.unsafe_ptr()
+    var rp = r.coeffs.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
+    var bp = (
+        b.coeffs.unsafe_ptr()
+        .unsafe_mut_cast[False]()
+        .unsafe_origin_cast[ImmutAnyOrigin]()
+    )
 
     def add_inplace_chunk[w: Int](i: Int) {rp, bp}:
         rp.store[width=w](i, rp.load[width=w](i) + bp.load[width=w](i))
@@ -402,8 +406,12 @@ def poly_add_inplace(mut r: Poly, ref b: Poly):
 
 def poly_sub_from(mut r: Poly, ref a: Poly):
     comptime W = simd_width_of[DType.int16]()
-    var rp = r.coeffs.unsafe_ptr()
-    var ap = a.coeffs.unsafe_ptr()
+    var rp = r.coeffs.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
+    var ap = (
+        a.coeffs.unsafe_ptr()
+        .unsafe_mut_cast[False]()
+        .unsafe_origin_cast[ImmutAnyOrigin]()
+    )
 
     def sub_from_chunk[w: Int](i: Int) {rp, ap}:
         rp.store[width=w](i, ap.load[width=w](i) - rp.load[width=w](i))
@@ -823,7 +831,7 @@ def prf(key: Span[UInt8, ...], iv: UInt8, out_len: Int) raises -> List[UInt8]:
     for i in range(SYMBYTES):
         input.push_unchecked(key[i])
     input.push_unchecked(iv)
-    return shake256(Span[UInt8, ...](ptr=input.ptr(), length=input.len()), out_len)
+    return shake256(Span[UInt8, ...](unsafe_ptr=input.ptr(), length=input.len()), out_len)
 
 
 def prf_into(mut out: StackBuffer[UInt8, ...], key: Span[UInt8, ...], iv: UInt8, out_len: Int) raises:
@@ -833,7 +841,7 @@ def prf_into(mut out: StackBuffer[UInt8, ...], key: Span[UInt8, ...], iv: UInt8,
     for i in range(SYMBYTES):
         input.push_unchecked(key[i])
     input.push_unchecked(iv)
-    shake256_into(out, Span[UInt8, ...](ptr=input.ptr(), length=input.len()), out_len)
+    shake256_into(out, Span[UInt8, ...](unsafe_ptr=input.ptr(), length=input.len()), out_len)
 
 
 def rkprf(key: Span[UInt8, ...], input: Span[UInt8, ...]) raises -> List[UInt8]:
@@ -846,7 +854,7 @@ def rkprf(key: Span[UInt8, ...], input: Span[UInt8, ...]) raises -> List[UInt8]:
         buf.push_unchecked(key[i])
     for i in range(len(input)):
         buf.push_unchecked(input[i])
-    return shake256(Span[UInt8, ...](ptr=buf.ptr(), length=buf.len()), SYMBYTES)
+    return shake256(Span[UInt8, ...](unsafe_ptr=buf.ptr(), length=buf.len()), SYMBYTES)
 
 
 def rkprf_into(mut out: StackBuffer[UInt8, SYMBYTES], key: Span[UInt8, ...], input: Span[UInt8, ...]) raises:
@@ -859,7 +867,7 @@ def rkprf_into(mut out: StackBuffer[UInt8, SYMBYTES], key: Span[UInt8, ...], inp
         buf.push_unchecked(key[i])
     for i in range(len(input)):
         buf.push_unchecked(input[i])
-    shake256_into(out, Span[UInt8, ...](ptr=buf.ptr(), length=buf.len()), SYMBYTES)
+    shake256_into(out, Span[UInt8, ...](unsafe_ptr=buf.ptr(), length=buf.len()), SYMBYTES)
 
 
 def hash_h_into(mut out: StackBuffer[UInt8, SYMBYTES], input: Span[UInt8, ...]):
@@ -878,7 +886,7 @@ def xof(seed: Span[UInt8, ...], x: UInt8, y: UInt8, out_len: Int) raises -> List
         extseed.push_unchecked(seed[i])
     extseed.push_unchecked(x)
     extseed.push_unchecked(y)
-    return shake128(Span[UInt8, ...](ptr=extseed.ptr(), length=extseed.len()), out_len)
+    return shake128(Span[UInt8, ...](unsafe_ptr=extseed.ptr(), length=extseed.len()), out_len)
 
 
 def rej_uniform(mut r: Poly, start: Int, buf: Span[UInt8, ...]) -> Int:
@@ -907,14 +915,14 @@ def sample_ntt_into(mut out: Poly, seed: Span[UInt8, ...], x: UInt8, y: UInt8) r
     extseed.push_unchecked(y)
 
     var ctx = SHA3Context(1344)
-    sha3_update(ctx, Span[UInt8, ...](ptr=extseed.ptr(), length=extseed.len()))
+    sha3_update(ctx, Span[UInt8, ...](unsafe_ptr=extseed.ptr(), length=extseed.len()))
     shake_finalize(ctx)
 
     var block = StackBuffer[UInt8, 504]()
     var ctr = 0
     while ctr < N:
         shake_squeeze_prefix_into(ctx, block, 504)
-        ctr += rej_uniform(out, ctr, Span[UInt8, ...](ptr=block.ptr(), length=block.len()))
+        ctr += rej_uniform(out, ctr, Span[UInt8, ...](unsafe_ptr=block.ptr(), length=block.len()))
         if ctr < N:
             shake_advance(ctx)
 
@@ -922,19 +930,19 @@ def sample_ntt_into(mut out: Poly, seed: Span[UInt8, ...], x: UInt8, y: UInt8) r
 def poly_getnoise_eta1_512(mut r: Poly, seed: Span[UInt8, ...], iv: UInt8) raises:
     var buf = StackBuffer[UInt8, ETA1_512 * N // 4]()
     prf_into(buf, seed, iv, ETA1_512 * N // 4)
-    poly_cbd_eta1_512(r, Span[UInt8, ...](ptr=buf.ptr(), length=buf.len()))
+    poly_cbd_eta1_512(r, Span[UInt8, ...](unsafe_ptr=buf.ptr(), length=buf.len()))
 
 
 def poly_getnoise_eta1(mut r: Poly, seed: Span[UInt8, ...], iv: UInt8) raises:
     var buf = StackBuffer[UInt8, ETA1 * N // 4]()
     prf_into(buf, seed, iv, ETA1 * N // 4)
-    poly_cbd_eta1(r, Span[UInt8, ...](ptr=buf.ptr(), length=buf.len()))
+    poly_cbd_eta1(r, Span[UInt8, ...](unsafe_ptr=buf.ptr(), length=buf.len()))
 
 
 def poly_getnoise_eta2(mut r: Poly, seed: Span[UInt8, ...], iv: UInt8) raises:
     var buf = StackBuffer[UInt8, ETA2 * N // 4]()
     prf_into(buf, seed, iv, ETA2 * N // 4)
-    poly_cbd_eta2(r, Span[UInt8, ...](ptr=buf.ptr(), length=buf.len()))
+    poly_cbd_eta2(r, Span[UInt8, ...](unsafe_ptr=buf.ptr(), length=buf.len()))
 
 
 def gen_matrix(mut a: InlineArray[Polyvec, K_MAX], seed: Span[UInt8, ...], transposed: Bool, k: Int) raises:
@@ -1057,9 +1065,9 @@ def k_pke_keygen(mut ek: KPKEEncryptionKey, mut dk: KPKEDecapsulationKey, d: Spa
         g_input.push_unchecked(d[i])
     g_input.push_unchecked(UInt8(k))
     var g = StackBuffer[UInt8, 2 * SYMBYTES]()
-    hash_g_into(g, Span[UInt8, ...](ptr=g_input.ptr(), length=g_input.len()))
-    var rho = Span[UInt8, ...](ptr=g.ptr(), length=SYMBYTES)
-    var sigma = Span[UInt8, ...](ptr=g.ptr() + SYMBYTES, length=SYMBYTES)
+    hash_g_into(g, Span[UInt8, ...](unsafe_ptr=g_input.ptr(), length=g_input.len()))
+    var rho = Span[UInt8, ...](unsafe_ptr=g.ptr(), length=SYMBYTES)
+    var sigma = Span[UInt8, ...](unsafe_ptr=g.ptr() + SYMBYTES, length=SYMBYTES)
 
     var a = InlineArray[Polyvec, K_MAX](fill=Polyvec())
     gen_matrix(a, Span[UInt8, ...](rho), False, k)
@@ -1108,9 +1116,9 @@ def k_pke_keygen_k[k: Int](mut ek: KPKEEncryptionKey, mut dk: KPKEDecapsulationK
         g_input.push_unchecked(d[i])
     g_input.push_unchecked(UInt8(k))
     var g = StackBuffer[UInt8, 2 * SYMBYTES]()
-    hash_g_into(g, Span[UInt8, ...](ptr=g_input.ptr(), length=g_input.len()))
-    var rho = Span[UInt8, ...](ptr=g.ptr(), length=SYMBYTES)
-    var sigma = Span[UInt8, ...](ptr=g.ptr() + SYMBYTES, length=SYMBYTES)
+    hash_g_into(g, Span[UInt8, ...](unsafe_ptr=g_input.ptr(), length=g_input.len()))
+    var rho = Span[UInt8, ...](unsafe_ptr=g.ptr(), length=SYMBYTES)
+    var sigma = Span[UInt8, ...](unsafe_ptr=g.ptr() + SYMBYTES, length=SYMBYTES)
 
     var a = InlineArray[Polyvec, K_MAX](fill=Polyvec())
     gen_matrix_k_static[k, False](a, Span[UInt8, ...](rho))
@@ -1305,7 +1313,7 @@ def kem_keygen_internal(seed: Span[UInt8, ...], k: Int) raises -> DecapsulationK
     for i in range(ek_bytes.len()):
         dk.ek.raw_bytes[i] = ek_bytes[i]
     var h = StackBuffer[UInt8, SYMBYTES]()
-    hash_h_into(h, Span[UInt8, ...](ptr=ek_bytes.ptr(), length=ek_bytes.len()))
+    hash_h_into(h, Span[UInt8, ...](unsafe_ptr=ek_bytes.ptr(), length=ek_bytes.len()))
     for i in range(SYMBYTES):
         dk.ek.h[i] = h[i]
         dk.z[i] = z[i]
@@ -1327,7 +1335,7 @@ def kem_keygen_internal_k[k: Int](seed: Span[UInt8, ...]) raises -> Decapsulatio
     for i in range(ek_bytes.len()):
         dk.ek.raw_bytes[i] = ek_bytes[i]
     var h = StackBuffer[UInt8, SYMBYTES]()
-    hash_h_into(h, Span[UInt8, ...](ptr=ek_bytes.ptr(), length=ek_bytes.len()))
+    hash_h_into(h, Span[UInt8, ...](unsafe_ptr=ek_bytes.ptr(), length=ek_bytes.len()))
     for i in range(SYMBYTES):
         dk.ek.h[i] = h[i]
         dk.z[i] = z[i]
@@ -1635,11 +1643,11 @@ def mlkem_encaps_seed_into(mut ciphertext_out: StackBuffer[UInt8, CIPHERTEXTBYTE
     for i in range(SYMBYTES):
         g_input.push_unchecked(h[i])
     var g = StackBuffer[UInt8, 2 * SYMBYTES]()
-    hash_g_into(g, Span[UInt8, ...](ptr=g_input.ptr(), length=g_input.len()))
+    hash_g_into(g, Span[UInt8, ...](unsafe_ptr=g_input.ptr(), length=g_input.len()))
     zero_stack_u8(g_input)
     for i in range(SYMBYTES):
         shared_out.push_unchecked(g[i])
-    if not k_pke_encrypt_into(ciphertext_out, ek, m, Span[UInt8, ...](ptr=g.ptr() + SYMBYTES, length=SYMBYTES)):
+    if not k_pke_encrypt_into(ciphertext_out, ek, m, Span[UInt8, ...](unsafe_ptr=g.ptr() + SYMBYTES, length=SYMBYTES)):
         zero_stack_u8(g)
         zero_stack_u8(shared_out)
         zero_stack_u8(ciphertext_out)
@@ -1667,11 +1675,11 @@ def mlkem_encaps_seed_into_k[k: Int](mut ciphertext_out: StackBuffer[UInt8, CIPH
     for i in range(SYMBYTES):
         g_input.push_unchecked(h[i])
     var g = StackBuffer[UInt8, 2 * SYMBYTES]()
-    hash_g_into(g, Span[UInt8, ...](ptr=g_input.ptr(), length=g_input.len()))
+    hash_g_into(g, Span[UInt8, ...](unsafe_ptr=g_input.ptr(), length=g_input.len()))
     zero_stack_u8(g_input)
     for i in range(SYMBYTES):
         shared_out.push_unchecked(g[i])
-    if not k_pke_encrypt_into_k[k](ciphertext_out, ek, m, Span[UInt8, ...](ptr=g.ptr() + SYMBYTES, length=SYMBYTES)):
+    if not k_pke_encrypt_into_k[k](ciphertext_out, ek, m, Span[UInt8, ...](unsafe_ptr=g.ptr() + SYMBYTES, length=SYMBYTES)):
         zero_stack_u8(g)
         zero_stack_u8(shared_out)
         zero_stack_u8(ciphertext_out)
@@ -1732,11 +1740,11 @@ def mlkem_decaps_into(mut shared_out: StackBuffer[UInt8, SYMBYTES], dk_bytes: Sp
     for i in range(SYMBYTES):
         g_input.push_unchecked(dk.ek.h[i])
     var g = StackBuffer[UInt8, 2 * SYMBYTES]()
-    hash_g_into(g, Span[UInt8, ...](ptr=g_input.ptr(), length=g_input.len()))
+    hash_g_into(g, Span[UInt8, ...](unsafe_ptr=g_input.ptr(), length=g_input.len()))
     zero_stack_u8(g_input)
 
     var ct_check = StackBuffer[UInt8, CIPHERTEXTBYTES_MAX]()
-    if not k_pke_encrypt_into(ct_check, dk.ek.pke_ek, Span[UInt8, ...](ptr=m.ptr(), length=m.len()), Span[UInt8, ...](ptr=g.ptr() + SYMBYTES, length=SYMBYTES)):
+    if not k_pke_encrypt_into(ct_check, dk.ek.pke_ek, Span[UInt8, ...](unsafe_ptr=m.ptr(), length=m.len()), Span[UInt8, ...](unsafe_ptr=g.ptr() + SYMBYTES, length=SYMBYTES)):
         zero_stack_u8(m)
         zero_stack_u8(g)
         zero_stack_u8(ct_check)
@@ -1744,7 +1752,7 @@ def mlkem_decaps_into(mut shared_out: StackBuffer[UInt8, SYMBYTES], dk_bytes: Sp
 
     var rejection = StackBuffer[UInt8, SYMBYTES]()
     rkprf_into(rejection, Span[UInt8, ...](dk.z), ciphertext)
-    var equal = _ct_is_zero_u8(_bytes_diff(Span[UInt8, ...](ptr=ct_check.ptr(), length=ct_check.len()), ciphertext))
+    var equal = _ct_is_zero_u8(_bytes_diff(Span[UInt8, ...](unsafe_ptr=ct_check.ptr(), length=ct_check.len()), ciphertext))
     for i in range(SYMBYTES):
         shared_out.push_unchecked(_ct_select_u8(rejection[i], g[i], equal))
 
@@ -1776,11 +1784,11 @@ def mlkem_decaps_into_k[k: Int](mut shared_out: StackBuffer[UInt8, SYMBYTES], dk
     for i in range(SYMBYTES):
         g_input.push_unchecked(dk.ek.h[i])
     var g = StackBuffer[UInt8, 2 * SYMBYTES]()
-    hash_g_into(g, Span[UInt8, ...](ptr=g_input.ptr(), length=g_input.len()))
+    hash_g_into(g, Span[UInt8, ...](unsafe_ptr=g_input.ptr(), length=g_input.len()))
     zero_stack_u8(g_input)
 
     var ct_check = StackBuffer[UInt8, CIPHERTEXTBYTES_MAX]()
-    if not k_pke_encrypt_into_k[k](ct_check, dk.ek.pke_ek, Span[UInt8, ...](ptr=m.ptr(), length=m.len()), Span[UInt8, ...](ptr=g.ptr() + SYMBYTES, length=SYMBYTES)):
+    if not k_pke_encrypt_into_k[k](ct_check, dk.ek.pke_ek, Span[UInt8, ...](unsafe_ptr=m.ptr(), length=m.len()), Span[UInt8, ...](unsafe_ptr=g.ptr() + SYMBYTES, length=SYMBYTES)):
         zero_stack_u8(m)
         zero_stack_u8(g)
         zero_stack_u8(ct_check)
@@ -1788,7 +1796,7 @@ def mlkem_decaps_into_k[k: Int](mut shared_out: StackBuffer[UInt8, SYMBYTES], dk
 
     var rejection = StackBuffer[UInt8, SYMBYTES]()
     rkprf_into(rejection, Span[UInt8, ...](dk.z), ciphertext)
-    var equal = _ct_is_zero_u8(_bytes_diff(Span[UInt8, ...](ptr=ct_check.ptr(), length=ct_check.len()), ciphertext))
+    var equal = _ct_is_zero_u8(_bytes_diff(Span[UInt8, ...](unsafe_ptr=ct_check.ptr(), length=ct_check.len()), ciphertext))
     for i in range(SYMBYTES):
         shared_out.push_unchecked(_ct_select_u8(rejection[i], g[i], equal))
 

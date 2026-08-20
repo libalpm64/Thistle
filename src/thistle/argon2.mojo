@@ -5,27 +5,27 @@ RFC 9106
 
 from std.collections import List
 from std.memory import alloc, UnsafePointer, memcpy, memset_zero
-from std.algorithm import parallelize
+from max.algorithm import parallelize
 from std.bit import rotate_bits_left
 from .blake2b import Blake2b
 
 comptime MASK32 = 0xFFFFFFFF
 
 @always_inline
-def zero_buffer(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
+def zero_buffer(ptr: UnsafePointer[mut=True, UInt8, _, address_space=_], len: Int):
     memset_zero(ptr, len)
 
 @always_inline
-def zero_buffer_u64(ptr: UnsafePointer[UInt64, MutAnyOrigin], len: Int):
+def zero_buffer_u64(ptr: UnsafePointer[mut=True, UInt64, _, address_space=_], len: Int):
     memset_zero(ptr, len)
 
 @always_inline
-def zero_and_free(ptr: UnsafePointer[UInt8, MutAnyOrigin], len: Int):
+def zero_and_free(ptr: UnsafePointer[mut=True, UInt8, _, address_space=_], len: Int):
     zero_buffer(ptr, len)
     ptr.free()
 
 @always_inline
-def zero_and_free_u64(ptr: UnsafePointer[UInt64, MutAnyOrigin], len: Int):
+def zero_and_free_u64(ptr: UnsafePointer[mut=True, UInt64, _, address_space=_], len: Int):
     zero_buffer_u64(ptr, len)
     ptr.free()
 
@@ -46,7 +46,7 @@ def gb(a: UInt64, b: UInt64, c: UInt64, d: UInt64) -> Tuple[UInt64, UInt64, UInt
     return (a_new, b_new, c_new, d_new)
 
 @always_inline
-def _p_column(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
+def _p_column(base: Int, v: UnsafePointer[mut=True, UInt64, _, address_space=_]):
     var v0, v4, v8, v12 = gb(v[base + 0], v[base + 4], v[base + 8], v[base + 12])
     var v1, v5, v9, v13 = gb(v[base + 1], v[base + 5], v[base + 9], v[base + 13])
     var v2, v6, v10, v14 = gb(v[base + 2], v[base + 6], v[base + 10], v[base + 14])
@@ -69,7 +69,7 @@ def _p_column(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
     v[base + 15] = v15
 
 @always_inline
-def _p_diagonal(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
+def _p_diagonal(base: Int, v: UnsafePointer[mut=True, UInt64, _, address_space=_]):
     var v0, v5, v10, v15 = gb(v[base + 0], v[base + 5], v[base + 10], v[base + 15])
     var v1, v6, v11, v12 = gb(v[base + 1], v[base + 6], v[base + 11], v[base + 12])
     var v2, v7, v8, v13 = gb(v[base + 2], v[base + 7], v[base + 8], v[base + 13])
@@ -92,8 +92,8 @@ def _p_diagonal(base: Int, v: UnsafePointer[UInt64, MutAnyOrigin]):
     v[base + 14] = v14
 
 struct MemoryPool:
-    var block_buffer: UnsafePointer[UInt64, MutAnyOrigin]
-    var temp_buffer: UnsafePointer[UInt64, MutAnyOrigin]
+    var block_buffer: UnsafePointer[UInt64, MutUntrackedOrigin]
+    var temp_buffer: UnsafePointer[UInt64, MutUntrackedOrigin]
     var buffer_size: Int
 
     def __init__(out self, size: Int):
@@ -106,18 +106,18 @@ struct MemoryPool:
         zero_and_free_u64(self.temp_buffer, self.buffer_size)
 
     @always_inline
-    def get_block(self) -> UnsafePointer[UInt64, MutAnyOrigin]:
+    def get_block(self) -> UnsafePointer[UInt64, MutUntrackedOrigin]:
         return self.block_buffer
 
     @always_inline
-    def get_temp(self) -> UnsafePointer[UInt64, MutAnyOrigin]:
+    def get_temp(self) -> UnsafePointer[UInt64, MutUntrackedOrigin]:
         return self.temp_buffer
 
 @always_inline
 def compression_g_with_pool(
-    out_ptr: UnsafePointer[UInt64, MutAnyOrigin],
-    x_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
-    y_ptr: UnsafePointer[UInt64, ImmutAnyOrigin],
+    out_ptr: UnsafePointer[mut=True, UInt64, _, address_space=_],
+    x_ptr: UnsafePointer[mut=False, UInt64, _, address_space=_],
+    y_ptr: UnsafePointer[mut=False, UInt64, _, address_space=_],
     with_xor: Bool,
     pool: MemoryPool,
 ):
@@ -186,66 +186,89 @@ def compression_g_with_pool(
         out_ptr[i] = block[i] ^ block_xy[i]
 
 @always_inline
-def store_le32(ptr: UnsafePointer[UInt8, MutAnyOrigin], offset: Int, val: Int):
+def store_le32(ptr: UnsafePointer[mut=True, UInt8, _, address_space=_], offset: Int, val: Int):
     ptr[offset + 0] = UInt8(val & 0xFF)
     ptr[offset + 1] = UInt8((val >> 8) & 0xFF)
     ptr[offset + 2] = UInt8((val >> 16) & 0xFF)
     ptr[offset + 3] = UInt8((val >> 24) & 0xFF)
 
 
-def variable_length_hash_to_ptr(t_len: Int, input: Span[UInt8, ...], out_ptr: UnsafePointer[UInt8, MutAnyOrigin]) raises:
-    var le_buf = alloc[UInt8](4)
+def variable_length_hash_into(
+    t_len: Int, input: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
+) raises:
+    if t_len < 1:
+        raise Error("Argon2 variable-length hash output must not be empty")
+    if t_len > len(output):
+        raise Error("Argon2 variable-length hash output exceeds destination")
+    if t_len > Int.MAX - 31:
+        raise Error("Argon2 variable-length hash output is too large")
+
+    var out_ptr = output.unsafe_ptr()
 
     if t_len <= 64:
-        var ctx = Blake2b(t_len)
-        store_le32(le_buf, 0, t_len)
-        ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
-        ctx.update(input)
-        ctx.finalize_into(out_ptr)
-        zero_and_free(le_buf, 4)
+        var le_buf = alloc[UInt8](4)
+        try:
+            var ctx = Blake2b(t_len)
+            store_le32(le_buf, 0, t_len)
+            ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
+            ctx.update(input)
+            ctx.finalize_into(out_ptr)
+        finally:
+            zero_and_free(le_buf, 4)
         return
 
+    var le_buf = alloc[UInt8](4)
     var r = (t_len + 31) // 32 - 2
     var v_buf = alloc[UInt8](64)
+    try:
+        var ctx1 = Blake2b(64)
+        store_le32(le_buf, 0, t_len)
+        ctx1.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
+        ctx1.update(input)
+        ctx1.finalize_into(v_buf)
 
-    var ctx1 = Blake2b(64)
-    store_le32(le_buf, 0, t_len)
-    ctx1.update(Span[UInt8, ...](ptr=le_buf, length=4))
-    ctx1.update(input)
-    ctx1.finalize_into(v_buf)
+        var out_offset = 0
+        for _ in range(r - 1):
+            for j in range(32):
+                out_ptr[out_offset + j] = v_buf[j]
+            out_offset += 32
 
-    var out_offset = 0
-    for _ in range(r - 1):
-        memcpy(dest=out_ptr + out_offset, src=v_buf, count=32)
+            var ctx = Blake2b(64)
+            ctx.update(Span[UInt8, ...](unsafe_ptr=v_buf, length=64))
+            ctx.finalize_into(v_buf)
+
+        for j in range(32):
+            out_ptr[out_offset + j] = v_buf[j]
         out_offset += 32
 
-        var ctx = Blake2b(64)
-        ctx.update(Span[UInt8, ...](ptr=v_buf, length=64))
-        ctx.finalize_into(v_buf)
-
-    memcpy(dest=out_ptr + out_offset, src=v_buf, count=32)
-    out_offset += 32
-
-    var last_len = t_len - 32 * r
-    var ctx_last = Blake2b(last_len)
-    ctx_last.update(Span[UInt8, ...](ptr=v_buf, length=64))
-    ctx_last.finalize_into(out_ptr + out_offset)
-
-    zero_and_free(v_buf, 64)
-    zero_and_free(le_buf, 4)
+        var last_len = t_len - 32 * r
+        var ctx_last = Blake2b(last_len)
+        ctx_last.update(Span[UInt8, ...](unsafe_ptr=v_buf, length=64))
+        ctx_last.finalize_into(out_ptr + out_offset)
+    finally:
+        zero_and_free(v_buf, 64)
+        zero_and_free(le_buf, 4)
 
 def variable_length_hash(t_len: Int, input: Span[UInt8, ...]) raises -> List[UInt8]:
+    if t_len < 1:
+        raise Error("Argon2 variable-length hash output must not be empty")
     var out_buf = alloc[UInt8](t_len)
-    variable_length_hash_to_ptr(t_len, input, out_buf)
-    var result = List[UInt8](capacity=t_len)
-    for i in range(t_len):
-        result.append(out_buf[i])
-    zero_and_free(out_buf, t_len)
-    return result^
+    try:
+        variable_length_hash_into(
+            t_len,
+            input,
+            Span[mut=True, UInt8, ...](unsafe_ptr=out_buf, length=t_len),
+        )
+        var result = List[UInt8](capacity=t_len)
+        for i in range(t_len):
+            result.append(out_buf[i])
+        return result^
+    finally:
+        zero_and_free(out_buf, t_len)
 
 @always_inline
 def _argon2_process_lane(
-    memory: UnsafePointer[UInt64, MutAnyOrigin],
+    memory: UnsafePointer[mut=True, UInt64, _, address_space=_],
     lane: Int,
     t: Int,
     slice_idx: Int,
@@ -348,7 +371,13 @@ def _argon2_process_lane(
         var r_ptr = memory + (ref_lane * q * 128 + ref_index * 128)
         var c_ptr = memory + (lane * q * 128 + index * 128)
 
-        compression_g_with_pool(c_ptr, p_ptr, r_ptr, t > 0, pool)
+        compression_g_with_pool(
+            c_ptr,
+            p_ptr.unsafe_origin_cast[MutAnyOrigin](),
+            r_ptr.unsafe_origin_cast[MutAnyOrigin](),
+            t > 0,
+            pool,
+        )
 
     zero_and_free_u64(addressing_block, 128)
     zero_and_free_u64(z_u64, 128)
@@ -439,28 +468,28 @@ struct Argon2id:
         var h0_ctx = Blake2b(64)
         var le_buf = alloc[UInt8](4)
         store_le32(le_buf, 0, self.parallelism)
-        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
         store_le32(le_buf, 0, self.tag_length)
-        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
         store_le32(le_buf, 0, self.memory_size_kb)
-        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
         store_le32(le_buf, 0, self.iterations)
-        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
         store_le32(le_buf, 0, self.version)
-        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
         store_le32(le_buf, 0, self.type_code)
-        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
         store_le32(le_buf, 0, len(password))
-        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
         h0_ctx.update(password)
         store_le32(le_buf, 0, len(self.salt))
-        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
         h0_ctx.update(Span[UInt8, ...](self.salt))
         store_le32(le_buf, 0, len(self.secret))
-        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
         h0_ctx.update(Span[UInt8, ...](self.secret))
         store_le32(le_buf, 0, len(self.ad))
-        h0_ctx.update(Span[UInt8, ...](ptr=le_buf, length=4))
+        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
         h0_ctx.update(Span[UInt8, ...](self.ad))
         zero_and_free(le_buf, 4)
 
@@ -488,7 +517,13 @@ struct Argon2id:
                 store_le32(h0_input, 68, i)
                 
                 var b_bytes = alloc[UInt8](1024)
-                variable_length_hash_to_ptr(1024, Span[UInt8, ...](ptr=h0_input, length=72), b_bytes)
+                variable_length_hash_into(
+                    1024,
+                    Span[UInt8, ...](unsafe_ptr=h0_input, length=72),
+                    Span[mut=True, UInt8, ...](
+                        unsafe_ptr=b_bytes, length=1024
+                    ),
+                )
                 
                 for k in range(128):
                     var word = (b_bytes + k * 8).bitcast[UInt64]().load[width=1, alignment=1]()
@@ -536,7 +571,7 @@ struct Argon2id:
         zero_and_free_u64(c_block, 128)
         zero_and_free_u64(memory, m_prime_blocks * 128)
         
-        var result = variable_length_hash(self.tag_length, Span[UInt8, ...](ptr=c_bytes, length=1024))
+        var result = variable_length_hash(self.tag_length, Span[UInt8, ...](unsafe_ptr=c_bytes, length=1024))
         zero_and_free(c_bytes, 1024)
         return result^
 

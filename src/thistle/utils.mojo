@@ -1,7 +1,7 @@
 from std.bit import byte_swap
 
 
-struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
+struct StackInlineArray[ElementType: Copyable & Deinitable, size: Int](Copyable):
     var _data: InlineArray[Self.ElementType, Self.size]
 
     @always_inline
@@ -98,9 +98,7 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
         return self.unsafe_get(idx)
 
     @always_inline
-    def unsafe_set[
-        _T: Copyable & ImplicitlyDestructible
-    ](mut self: StackInlineArray[_T, ...], idx: Int, var value: _T):
+    def unsafe_set(mut self, idx: Int, var value: Self.ElementType):
         debug_assert(
             0 <= idx < Self.size,
             "The index provided must be within the range [0, len(List) -1] when using List.unsafe_set()",
@@ -109,7 +107,7 @@ struct StackInlineArray[ElementType: Copyable, size: Int](Copyable):
         (self._data.unsafe_ptr() + idx).init_pointee_move(value^)
 
 
-struct StackBuffer[T: Copyable & ImplicitlyDestructible, N: Int](Movable):
+struct StackBuffer[T: Copyable & Deinitable, N: Int](Movable):
     var _data: InlineArray[Self.T, Self.N]
     var _len: Int
 
@@ -143,7 +141,9 @@ struct StackBuffer[T: Copyable & ImplicitlyDestructible, N: Int](Movable):
 
     @always_inline
     def push(mut self, var val: Self.T):
-        debug_assert(self._len < Self.N, "StackBuffer overflow")
+        debug_assert[assert_mode="safe"](
+            self._len < Self.N, "StackBuffer overflow"
+        )
         self._data[self._len] = val^
         self._len += 1
 
@@ -154,13 +154,17 @@ struct StackBuffer[T: Copyable & ImplicitlyDestructible, N: Int](Movable):
 
     @always_inline
     def pop(mut self) -> Self.T:
-        debug_assert(self._len > 0, "StackBuffer underflow")
+        debug_assert[assert_mode="safe"](
+            self._len > 0, "StackBuffer underflow"
+        )
         self._len -= 1
         return self._data[self._len].copy()
 
     @always_inline
     def top(ref self) -> ref[self._data] Self.T:
-        debug_assert(self._len > 0, "StackBuffer empty")
+        debug_assert[assert_mode="safe"](
+            self._len > 0, "StackBuffer empty"
+        )
         return self._data[self._len - 1]
 
     @always_inline
@@ -169,7 +173,10 @@ struct StackBuffer[T: Copyable & ImplicitlyDestructible, N: Int](Movable):
 
     @always_inline
     def set_len_unchecked(mut self, new_len: Int):
-        debug_assert(0 <= new_len <= Self.N, "StackBuffer set_len_unchecked out of bounds")
+        debug_assert[assert_mode="safe"](
+            0 <= new_len <= Self.N,
+            "StackBuffer set_len_unchecked out of bounds",
+        )
         self._len = new_len
 
     @always_inline
@@ -178,31 +185,44 @@ struct StackBuffer[T: Copyable & ImplicitlyDestructible, N: Int](Movable):
 
     @always_inline
     def __getitem__(ref self, i: Int) -> ref[self._data] Self.T:
-        debug_assert(0 <= i < Self.N, "StackBuffer index out of bounds")
+        debug_assert[assert_mode="safe"](
+            0 <= i < Self.N, "StackBuffer index out of bounds"
+        )
         return self._data[i]
 
     @always_inline
     def __setitem__(mut self, i: Int, var val: Self.T):
-        debug_assert(0 <= i < Self.N, "StackBuffer index out of bounds")
+        debug_assert[assert_mode="safe"](
+            0 <= i < Self.N, "StackBuffer index out of bounds"
+        )
         self._data[i] = val^
 
     @always_inline
-    def ptr(mut self) -> UnsafePointer[Self.T, MutAnyOrigin]:
-        return self._data.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
+    def ptr[
+        origin: Origin, address_space: AddressSpace, //
+    ](ref[origin, address_space] self) -> UnsafePointer[
+        Self.T, origin, address_space=address_space
+    ]:
+        return (
+            self._data.unsafe_ptr()
+            .unsafe_mut_cast[origin.mut]()
+            .unsafe_origin_cast[origin]()
+            .address_space_cast[address_space]()
+        )
 
 
 @always_inline
-def load_32be(ptr: UnsafePointer[UInt8, ImmutAnyOrigin], offset: Int) -> UInt32:
+def load_32be(ptr: UnsafePointer[mut=False, UInt8, _, address_space=_], offset: Int) -> UInt32:
     return byte_swap((ptr + offset).bitcast[UInt32]().load[width=1, alignment=1]())
 
 
 @always_inline
-def load_64be(ptr: UnsafePointer[UInt8, ImmutAnyOrigin], offset: Int) -> UInt64:
+def load_64be(ptr: UnsafePointer[mut=False, UInt8, _, address_space=_], offset: Int) -> UInt64:
     return byte_swap((ptr + offset).bitcast[UInt64]().load[width=1, alignment=1]())
 
 
 @always_inline
-def store_64be(p: UnsafePointer[UInt8, MutAnyOrigin], off: Int, v: UInt64):
+def store_64be(p: UnsafePointer[mut=True, UInt8, _, address_space=_], off: Int, v: UInt64):
     for i in range(8):
         p[off + i] = UInt8((v >> UInt64(56 - 8 * i)) & 0xFF)
 
@@ -248,7 +268,11 @@ def nibble_to_hex_char(nibble: UInt8) -> UInt8:
 
 
 @always_inline
-def bytes_to_hex_simd(data: UnsafePointer[UInt8, ImmutAnyOrigin], len: Int) -> String:
+def bytes_to_hex_simd(data: UnsafePointer[mut=False, UInt8, _, address_space=_], len: Int) -> String:
+    debug_assert[assert_mode="safe"](
+        0 <= len <= Int.MAX // 2,
+        "Hex input length cannot be negative or overflow the output size",
+    )
     var result = String(capacity=len * 2)
     for i in range(len):
         var b = data[i]

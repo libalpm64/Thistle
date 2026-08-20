@@ -27,11 +27,17 @@ def _cswap_pair(
     _cswap_fe(swap, z_2, z_3)
 
 @no_inline
-def x25519(scalar_in: Span[UInt8, ...], point: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]) raises:
+def x25519(
+    scalar_in: Span[UInt8, ...],
+    point: Span[UInt8, ...],
+    output: Span[mut=True, UInt8, ...],
+) raises:
     if len(scalar_in) < 32:
         raise Error("X25519 scalar must be 32 bytes")
     if len(point) < 32:
         raise Error("X25519 point must be 32 bytes")
+    if len(output) < 32:
+        raise Error("X25519 output needs at least 32 writable bytes")
     var scalar = StackInlineArray[UInt8, 32](uninitialized=True)
     for i in range(32):
         scalar[i] = scalar_in[i]
@@ -74,14 +80,14 @@ def x25519(scalar_in: Span[UInt8, ...], point: Span[UInt8, ...], output: UnsafeP
     _cswap_pair(swap, x_2, x_3, z_2, z_3)
         
     var res = x_2 * z_2.invert()
-    res.to_bytes_into(output)
+    res.to_bytes_into(output.unsafe_ptr())
     var scalar_ptr = scalar.unsafe_ptr()
     for i in range(32):
         scalar_ptr.store[volatile=True](i, UInt8(0))
 
 
 def x25519_public_key(
-    private_key: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]
+    private_key: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
 ) raises:
     if len(private_key) != 32:
         raise Error("X25519 private key must be 32 bytes")
@@ -89,11 +95,18 @@ def x25519_public_key(
     for i in range(32):
         base[i] = 0
     base[0] = 9
-    x25519(private_key, Span[UInt8, ...](ptr=base.unsafe_ptr(), length=32), output)
+    x25519(
+        private_key,
+        Span[UInt8, ...](unsafe_ptr=base.unsafe_ptr(), length=32),
+        output,
+    )
 
 
 def x25519_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
     var private_key = random_bytes(32)
     var public_key = List[UInt8](unsafe_uninit_length=32)
-    x25519_public_key(Span[UInt8, ...](private_key), public_key.unsafe_ptr())
+    x25519_public_key(
+        Span[UInt8, ...](private_key),
+        Span[mut=True, UInt8, ...](public_key),
+    )
     return (private_key^, public_key^)

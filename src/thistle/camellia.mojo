@@ -150,7 +150,7 @@ def _slice_subkey(k: UInt64) -> InlineArray[UInt64, 8]:
         for i in range(8):
             p |= (((lanes >> UInt64(8 * i + kk)) & 1) * UInt64(0xFF)) << UInt64(8 * i)
         out[kk] = p
-    return out
+    return out^
 
 
 @always_inline
@@ -260,7 +260,7 @@ comptime _ONE_VALUE_LANES: UInt64 = 0xFF
 
 
 @always_inline
-def _wipe_u64(ptr: UnsafePointer[UInt64, MutAnyOrigin], count: Int):
+def _wipe_u64(ptr: UnsafePointer[mut=True, UInt64, _, address_space=_], count: Int):
     for i in range(count):
         ptr.store[volatile=True](i, UInt64(0))
 
@@ -327,7 +327,7 @@ def _f_scalar(f_in: UInt64, ke: UInt64) -> UInt64:
         a[k] = acc
     a[0] = UInt64(a[0]) ^ _ONE_VALUE_LANES
 
-    _ct_sbox(a)
+    _ct_sbox[1](a)
 
     var b = InlineArray[SIMD[DType.uint64, 1], 8](fill=0)
     comptime for k in range(8):
@@ -703,7 +703,7 @@ struct CamelliaCipher:
 
 @always_inline
 def _load_half[W: Int](
-    buf: UnsafePointer[UInt8, MutAnyOrigin], off: Int, kw: UInt64
+    buf: UnsafePointer[mut=True, UInt8, _, address_space=_], off: Int, kw: UInt64
 ) -> InlineArray[SIMD[DType.uint64, W], 8]:
     var q = InlineArray[SIMD[DType.uint64, W], 8](fill=0)
     var kwl = byte_swap(kw)
@@ -716,13 +716,13 @@ def _load_half[W: Int](
                 )[0]
                 ^ kwl
             )
-    _ct_ortho(q)
-    return q
+    _ct_ortho[W](q)
+    return q^
 
 
 @always_inline
 def _store_half[W: Int](
-    buf: UnsafePointer[UInt8, MutAnyOrigin],
+    buf: UnsafePointer[mut=True, UInt8, _, address_space=_],
     off: Int,
     mut q: InlineArray[SIMD[DType.uint64, W], 8],
     kw: UInt64,
@@ -757,7 +757,7 @@ def _six_rounds[forward: Bool, W: Int](
 
 @always_inline
 def _encrypt_batch[W: Int](
-    cipher: CamelliaCipher, buf: UnsafePointer[UInt8, MutAnyOrigin]
+    cipher: CamelliaCipher, buf: UnsafePointer[mut=True, UInt8, _, address_space=_]
 ):
     var a = _load_half[W](buf, 0, cipher.kw[0])
     var b = _load_half[W](buf, 8, cipher.kw[1])
@@ -780,7 +780,7 @@ def _encrypt_batch[W: Int](
 
 @always_inline
 def _decrypt_batch[W: Int](
-    cipher: CamelliaCipher, buf: UnsafePointer[UInt8, MutAnyOrigin]
+    cipher: CamelliaCipher, buf: UnsafePointer[mut=True, UInt8, _, address_space=_]
 ):
     var b = _load_half[W](buf, 0, cipher.kw[2])
     var a = _load_half[W](buf, 8, cipher.kw[3])
@@ -803,7 +803,7 @@ def _decrypt_batch[W: Int](
 
 @always_inline
 def _batch[encrypt: Bool, W: Int](
-    cipher: CamelliaCipher, buf: UnsafePointer[UInt8, MutAnyOrigin]
+    cipher: CamelliaCipher, buf: UnsafePointer[mut=True, UInt8, _, address_space=_]
 ):
     comptime if encrypt:
         _encrypt_batch[W](cipher, buf)
@@ -931,7 +931,7 @@ def _six_rounds_bs[forward: Bool](
 
 @always_inline
 def _batch16_hw[encrypt: Bool](
-    cipher: CamelliaCipher, buf: UnsafePointer[UInt8, MutAnyOrigin]
+    cipher: CamelliaCipher, buf: UnsafePointer[mut=True, UInt8, _, address_space=_]
 ):
     var m = InlineArray[_U8x16, 16](fill=_U8x16(0))
     comptime for i in range(16):
@@ -1094,7 +1094,7 @@ def _camellia_block[encrypt: Bool](
 
 def _camellia_blocks[encrypt: Bool](
     cipher: CamelliaCipher,
-    data: UnsafePointer[UInt8, MutAnyOrigin],
+    data: UnsafePointer[mut=True, UInt8, _, address_space=_],
     num_blocks: Int,
 ):
     comptime if _has_hw_sbox():
@@ -1142,7 +1142,7 @@ def camellia_decrypt_block(
 
 def camellia_encrypt_blocks(
     cipher: CamelliaCipher,
-    data: UnsafePointer[UInt8, MutAnyOrigin],
+    data: UnsafePointer[mut=True, UInt8, _, address_space=_],
     num_blocks: Int,
 ):
     _camellia_blocks[True](cipher, data, num_blocks)
@@ -1150,18 +1150,18 @@ def camellia_encrypt_blocks(
 
 def camellia_decrypt_blocks(
     cipher: CamelliaCipher,
-    data: UnsafePointer[UInt8, MutAnyOrigin],
+    data: UnsafePointer[mut=True, UInt8, _, address_space=_],
     num_blocks: Int,
 ):
     _camellia_blocks[False](cipher, data, num_blocks)
 
 
 def camellia_cbc_encrypt_kernel(
-    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
-    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    input_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    output_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
     cipher: CamelliaCipher,
     num_blocks: Int,
-    iv_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    iv_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
 ):
     var prev = iv_ptr.load[width=16, alignment=1](0)
     for i in range(num_blocks):
@@ -1171,11 +1171,11 @@ def camellia_cbc_encrypt_kernel(
 
 
 def camellia_cbc_decrypt_kernel(
-    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
-    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    input_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    output_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
     cipher: CamelliaCipher,
     num_blocks: Int,
-    iv_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    iv_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
 ):
     var ct = InlineArray[UInt8, 1024](fill=0)
     var pt = InlineArray[UInt8, 1024](fill=0)
@@ -1200,11 +1200,11 @@ def camellia_cbc_decrypt_kernel(
 
 
 def camellia_ctr_kernel(
-    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
-    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    input_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    output_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
     cipher: CamelliaCipher,
     num_blocks: Int,
-    nonce_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    nonce_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
 ):
     var ks = InlineArray[UInt8, 512](fill=0)
     var kp = ks.unsafe_ptr()

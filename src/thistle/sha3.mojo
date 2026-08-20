@@ -10,8 +10,9 @@ from std.bit import rotate_bits_left
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
 from std.sys import llvm_intrinsic, CompilationTarget
+from std.utils import StaticTuple
 
-comptime KECCAK_RC = SIMD[DType.uint64, 24](
+comptime KECCAK_RC = StaticTuple[UInt64, 24](
     0x0000000000000001, 0x0000000000008082,
     0x800000000000808A, 0x8000000080008000,
     0x000000000000808B, 0x0000000080000001,
@@ -60,7 +61,7 @@ def _bcax(a: _U64x2, b: _U64x2, c: _U64x2) -> _U64x2:
     return llvm_intrinsic["llvm.aarch64.crypto.bcaxu", _U64x2, has_side_effect=False](a, b, c)
 
 
-def _keccak_f1600_hw(state: UnsafePointer[UInt64, MutAnyOrigin]):
+def _keccak_f1600_hw(state: UnsafePointer[mut=True, UInt64, _, address_space=_]):
     var a0 = _U64x2(state[0], 0)
     var a1 = _U64x2(state[1], 0)
     var a2 = _U64x2(state[2], 0)
@@ -180,14 +181,14 @@ def _keccak_f1600_hw(state: UnsafePointer[UInt64, MutAnyOrigin]):
     state[24] = a24[0]
 
 
-def keccak_f1600(state: UnsafePointer[UInt64, MutAnyOrigin]):
+def keccak_f1600(state: UnsafePointer[mut=True, UInt64, _, address_space=_]):
     comptime if _has_sha3_ext:
         _keccak_f1600_hw(state)
         return
     _keccak_f1600_scalar(state)
 
 
-def _keccak_f1600_scalar(state: UnsafePointer[UInt64, MutAnyOrigin]):
+def _keccak_f1600_scalar(state: UnsafePointer[mut=True, UInt64, _, address_space=_]):
     var a0 = state[0]
     var a1 = state[1]
     var a2 = state[2]
@@ -341,6 +342,10 @@ struct SHA3Context(Movable):
     var buffer_len: Int
 
     def __init__(out self, rate_bits: Int):
+        debug_assert[assert_mode="safe"](
+            0 < rate_bits <= 1344 and rate_bits % 8 == 0,
+            "SHA-3 rate must be a positive multiple of 8 no larger than 1344 bits",
+        )
         self.state = StackBuffer[UInt64, 25](fill=0)
         self.rate_bytes = rate_bits // 8
         self.buffer = StackBuffer[UInt8, 168](fill=0)
@@ -362,7 +367,7 @@ struct SHA3Context(Movable):
 
 
 @always_inline
-def sha3_absorb_block(state: UnsafePointer[UInt64, MutAnyOrigin], block: UnsafePointer[UInt8, ImmutAnyOrigin], rate_bytes: Int):
+def sha3_absorb_block(state: UnsafePointer[mut=True, UInt64, _, address_space=_], block: UnsafePointer[mut=False, UInt8, _, address_space=_], rate_bytes: Int):
     var full_lanes = rate_bytes // 8
     for i in range(full_lanes):
         state[i] ^= (block + i * 8).bitcast[UInt64]().load[width=1, alignment=1]()
@@ -376,20 +381,14 @@ def sha3_update(mut ctx: SHA3Context, data: Span[UInt8, ...]):
     if ctx.buffer_len > 0:
         var available = ctx.rate_bytes - ctx.buffer_len
         if total_len >= available:
-            memcpy(
-                dest=ctx.buffer.ptr() + ctx.buffer_len,
-                src=data.unsafe_ptr(),
-                count=available,
-            )
+            for j in range(available):
+                ctx.buffer[ctx.buffer_len + j] = data[j]
             sha3_absorb_block(ctx.state.ptr(), ctx.buffer.ptr(), ctx.rate_bytes)
             ctx.buffer_len = 0
             i += available
         else:
-            memcpy(
-                dest=ctx.buffer.ptr() + ctx.buffer_len,
-                src=data.unsafe_ptr(),
-                count=total_len,
-            )
+            for j in range(total_len):
+                ctx.buffer[ctx.buffer_len + j] = data[j]
             ctx.buffer_len += total_len
             return
 
@@ -399,15 +398,15 @@ def sha3_update(mut ctx: SHA3Context, data: Span[UInt8, ...]):
 
     if i < total_len:
         var remaining = total_len - i
-        memcpy(
-            dest=ctx.buffer.ptr(),
-            src=data.unsafe_ptr() + i,
-            count=remaining,
-        )
+        for j in range(remaining):
+            ctx.buffer[j] = data[i + j]
         ctx.buffer_len = remaining
 
 
 def sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
+    debug_assert[assert_mode="safe"](
+        output_len_bytes >= 0, "SHA-3 output length cannot be negative"
+    )
     ctx.buffer[ctx.buffer_len] = 0x06
     ctx.buffer_len += 1
 
@@ -444,6 +443,10 @@ def sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
 
 @always_inline
 def sha3_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], output_len_bytes: Int):
+    debug_assert[assert_mode="safe"](
+        0 <= output_len_bytes <= output.capacity(),
+        "SHA-3 output length exceeds destination capacity",
+    )
     output.clear()
     ctx.buffer[ctx.buffer_len] = 0x06
     ctx.buffer_len += 1
@@ -556,6 +559,10 @@ def shake_finalize(mut ctx: SHA3Context):
 
 @always_inline
 def shake_squeeze_prefix_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], output_len: Int):
+    debug_assert[assert_mode="safe"](
+        0 <= output_len <= output.capacity(),
+        "SHAKE output length exceeds destination capacity",
+    )
     output.clear()
     output.set_len_unchecked(output_len)
 
@@ -584,6 +591,9 @@ def shake_advance(mut ctx: SHA3Context):
 
 @always_inline
 def shake_final(mut ctx: SHA3Context, output_len: Int) -> List[UInt8]:
+    debug_assert[assert_mode="safe"](
+        output_len >= 0, "SHAKE output length cannot be negative"
+    )
     shake_finalize(ctx)
 
     var output = List[UInt8](capacity=output_len)
@@ -611,6 +621,10 @@ def shake_final(mut ctx: SHA3Context, output_len: Int) -> List[UInt8]:
 
 @always_inline
 def shake_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], output_len: Int):
+    debug_assert[assert_mode="safe"](
+        0 <= output_len <= output.capacity(),
+        "SHAKE output length exceeds destination capacity",
+    )
     output.clear()
     shake_finalize(ctx)
 

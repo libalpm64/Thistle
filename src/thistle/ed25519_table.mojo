@@ -401,10 +401,10 @@ def ed25519_base_table() -> InlineArray[UInt64, 4096]:
     p.store[alignment=8](3712, _ED25519_BT29)
     p.store[alignment=8](3840, _ED25519_BT30)
     p.store[alignment=8](3968, _ED25519_BT31)
-    return t
+    return t^
 
 @no_inline
 def ed25519_b_odd_table() -> InlineArray[UInt64, 128]:
     var t = InlineArray[UInt64, 128](uninitialized=True)
     t.unsafe_ptr().store[alignment=8](0, _ED25519_B_ODD)
-    return t
+    return t^

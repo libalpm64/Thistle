@@ -13,9 +13,11 @@ test-ml-dsa = "mojo run -I src/ tests/test_ml_dsa.mojo"
 test-p256-ecdh = "mojo run -I src/ tests/test_wycheproof_p256_ecdh.mojo"
 test-p384-ecdh = "mojo run -I src/ tests/test_wycheproof_p384_ecdh.mojo"
 test-signing = "mojo run -I src/ tests/test_signing.mojo"
+test-security-boundaries = "mojo run -I src/ tests/test_security_boundaries.mojo"
+test-sha3-guard = "zsh tests/test_sha3_capacity_guard.sh"
 bench = "mojo run -I src/ tests/benchmark.mojo"
 
 [dependencies]
 python = "3.12.*"
-max = "==26.4.0"
-mojo = ">=1.0.0b2,<2"
+max = "==26.5.0"
+mojo = "==1.0.0"

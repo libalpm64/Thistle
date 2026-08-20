@@ -227,7 +227,7 @@ comptime _CTR_INC4 = SIMD[DType.uint32, 16](
 def _quad_rows_init(
     key: SIMD[DType.uint32, 8],
     counter: UInt32,
-    nonce: SIMD[DType.uint32, 3],
+    nonce: SIMD[DType.uint32, 4],
 ) -> Tuple[
     SIMD[DType.uint32, 16],
     SIMD[DType.uint32, 16],
@@ -456,7 +456,7 @@ def _qr_scalar(mut a: UInt32, mut b: UInt32, mut c: UInt32, mut d: UInt32):
 def chacha20_block_core(
     key: SIMD[DType.uint32, 8],
     counter: UInt32,
-    nonce: SIMD[DType.uint32, 3],
+    nonce: SIMD[DType.uint32, 4],
 ) -> SIMD[DType.uint32, 16]:
 
     var row0 = CHACHA_CONSTANTS
@@ -490,7 +490,7 @@ def chacha20_block_core(
 def _chacha20_block_scalar(
     key: SIMD[DType.uint32, 8],
     counter: UInt32,
-    nonce: SIMD[DType.uint32, 3],
+    nonce: SIMD[DType.uint32, 4],
 ) -> SIMD[DType.uint32, 16]:
     var x0: UInt32 = 0x61707865
     var x1: UInt32 = 0x3320646E
@@ -529,19 +529,19 @@ def _chacha20_block_scalar(
 
 
 def chacha20_block(
-    key: SIMD[DType.uint8, 32], counter: UInt32, nonce: SIMD[DType.uint8, 12]
+    key: SIMD[DType.uint8, 32], counter: UInt32, nonce: SIMD[DType.uint8, 16]
 ) -> SIMD[DType.uint8, 64]:
 
     var key_words = bitcast[DType.uint32, 8](key)
-    var nonce_words = bitcast[DType.uint32, 3](nonce)
+    var nonce_words = bitcast[DType.uint32, 4](nonce)
     var state = chacha20_block_core(key_words, counter, nonce_words)
     return bitcast[DType.uint8, 64](state)
 
 
 @always_inline
 def _xor_block64(
-    src: UnsafePointer[UInt8, MutAnyOrigin],
-    dst: UnsafePointer[UInt8, MutAnyOrigin],
+    src: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    dst: UnsafePointer[mut=True, UInt8, _, address_space=_],
     keystream: SIMD[DType.uint32, 16],
     offset: Int,
 ):
@@ -552,17 +552,17 @@ def _xor_block64(
 
 struct ChaCha20:
     var key: SIMD[DType.uint32, 8]
-    var nonce: SIMD[DType.uint32, 3]
+    var nonce: SIMD[DType.uint32, 4]
     var counter: UInt32
 
     def __init__(
         out self,
         key_bytes: SIMD[DType.uint8, 32],
-        nonce_bytes: SIMD[DType.uint8, 12],
+        nonce_bytes: SIMD[DType.uint8, 16],
         counter: UInt32 = 1,
     ):
         self.key = bitcast[DType.uint32, 8](key_bytes)
-        self.nonce = bitcast[DType.uint32, 3](nonce_bytes)
+        self.nonce = bitcast[DType.uint32, 4](nonce_bytes)
         self.counter = counter
 
     def _check_counter_space(self, data_len: Int) raises:
@@ -574,8 +574,8 @@ struct ChaCha20:
     @always_inline
     def _stream_xor(
         mut self,
-        src: UnsafePointer[UInt8, MutAnyOrigin],
-        dst: UnsafePointer[UInt8, MutAnyOrigin],
+        src: UnsafePointer[mut=True, UInt8, _, address_space=_],
+        dst: UnsafePointer[mut=True, UInt8, _, address_space=_],
         length: Int,
     ) raises:
         self._check_counter_space(length)

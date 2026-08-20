@@ -3,7 +3,7 @@ AES CPU implementation
 """
 
 from std.bit import byte_swap
-from std.memory import alloc, memset_zero
+from std.memory import memset_zero
 from std.utils import StaticTuple
 from .utils import StackBuffer
 
@@ -11,7 +11,7 @@ comptime ROUNDS_128: Int = 10
 
 @always_inline
 def _ct_encrypt1(
-    block: UnsafePointer[UInt8, MutAnyOrigin],
+    block: UnsafePointer[mut=True, UInt8, _, address_space=_],
     skey: List[UInt64],
     rounds: Int,
 ) -> None:
@@ -25,15 +25,15 @@ def _ct_encrypt1(
 
 @always_inline
 def cpu_aes_encrypt(
-    pt_bytes: UnsafePointer[UInt8, MutAnyOrigin],
-    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    pt_bytes: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    round_keys: UnsafePointer[mut=True, UInt32, _, address_space=_],
 ) -> None:
     cpu_aes_encrypt(pt_bytes, round_keys, 10)
 
 @always_inline
 def cpu_aes_encrypt(
-    pt_bytes: UnsafePointer[UInt8, MutAnyOrigin],
-    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    pt_bytes: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    round_keys: UnsafePointer[mut=True, UInt32, _, address_space=_],
     rounds: Int,
 ) -> None:
     var skey = cpu_aes_ct_skey(round_keys, rounds)
@@ -41,9 +41,9 @@ def cpu_aes_encrypt(
 
 @always_inline
 def cpu_aes_ecb_kernel(
-    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
-    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
-    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    input_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    output_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    round_keys: UnsafePointer[mut=True, UInt32, _, address_space=_],
     num_blocks: Int,
     rounds: Int
 ) -> None:
@@ -64,11 +64,11 @@ def cpu_aes_ecb_kernel(
 
 @always_inline
 def cpu_aes_cbc_kernel(
-    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
-    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
-    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    input_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    output_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    round_keys: UnsafePointer[mut=True, UInt32, _, address_space=_],
     num_blocks: Int,
-    iv_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    iv_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
     var skey = cpu_aes_ct_skey(round_keys, rounds)
@@ -96,8 +96,8 @@ def cpu_aes_cbc_kernel(
 
 @always_inline
 def _ctr_write_block(
-    dst: UnsafePointer[UInt8, MutAnyOrigin],
-    nonce_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    dst: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    nonce_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
     offset: Int,
 ) -> None:
     for j in range(16):
@@ -113,11 +113,11 @@ def _ctr_write_block(
 
 @always_inline
 def cpu_aes_ctr_kernel(
-    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
-    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
-    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    input_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    output_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    round_keys: UnsafePointer[mut=True, UInt32, _, address_space=_],
     num_blocks: Int,
-    nonce_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    nonce_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
     var skey = cpu_aes_ct_skey(round_keys, rounds)
@@ -139,7 +139,7 @@ def cpu_aes_ctr_kernel(
         i += n
 
 @always_inline
-def cpu_xts_mul_alpha_inplace(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> None:
+def cpu_xts_mul_alpha_inplace(tweak_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_]) -> None:
     var carry = (tweak_ptr.load(15) & 0x80) != 0
     for i in range(15, 0, -1):
         tweak_ptr.store(i, (tweak_ptr.load(i) << UInt8(1)) | (tweak_ptr.load(i - 1) >> UInt8(7)))
@@ -150,12 +150,12 @@ def cpu_xts_mul_alpha_inplace(tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin]) -> 
 
 @always_inline
 def cpu_aes_xts_kernel(
-    input_ptr: UnsafePointer[UInt8, MutAnyOrigin],
-    output_ptr: UnsafePointer[UInt8, MutAnyOrigin],
-    round_keys1: UnsafePointer[UInt32, MutAnyOrigin],
-    round_keys2: UnsafePointer[UInt32, MutAnyOrigin],
+    input_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    output_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    round_keys1: UnsafePointer[mut=True, UInt32, _, address_space=_],
+    round_keys2: UnsafePointer[mut=True, UInt32, _, address_space=_],
     num_blocks: Int,
-    tweak_ptr: UnsafePointer[UInt8, MutAnyOrigin],
+    tweak_ptr: UnsafePointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
     var skey1 = cpu_aes_ct_skey(round_keys1, rounds)
@@ -197,10 +197,10 @@ def sub_word(w: UInt32) -> UInt32:
     var pair = _ct_interleave_in[1](_ct_le32(bp, 0), 0, 0, 0)
     q[0] = pair[0]
     q[4] = pair[1]
-    _ct_ortho(q)
-    _ct_sbox(q)
-    _ct_ortho(q)
-    var ws = _ct_interleave_out(q[0], q[4])
+    _ct_ortho[1](q)
+    _ct_sbox[1](q)
+    _ct_ortho[1](q)
+    var ws = _ct_interleave_out[1](q[0], q[4])
     var v = UInt64(ws[0])
     return (
         (UInt32(v & 0xFF) << 24) | (UInt32((v >> 8) & 0xFF) << 16)
@@ -212,8 +212,8 @@ comptime RCON: StaticTuple[UInt8, 11] = StaticTuple[UInt8, 11](
 )
 
 def expand_key_128_into(
-    key_bytes: UnsafePointer[UInt8, MutAnyOrigin],
-    w: UnsafePointer[UInt32, MutAnyOrigin],
+    key_bytes: UnsafePointer[mut=False, UInt8, _, address_space=_],
+    w: UnsafePointer[mut=True, UInt32, _, address_space=_],
 ) raises -> None:
     for i in range(4):
         var key_val: UInt32 = 0
@@ -229,8 +229,8 @@ def expand_key_128_into(
         w.store(i, w.load(i - 4) ^ temp)
 
 def expand_key_192_into(
-    key_bytes: UnsafePointer[UInt8, MutAnyOrigin],
-    w: UnsafePointer[UInt32, MutAnyOrigin],
+    key_bytes: UnsafePointer[mut=False, UInt8, _, address_space=_],
+    w: UnsafePointer[mut=True, UInt32, _, address_space=_],
 ) raises -> None:
     for i in range(6):
         var key_val: UInt32 = 0
@@ -246,8 +246,8 @@ def expand_key_192_into(
         w.store(i, w.load(i - 6) ^ temp)
 
 def expand_key_256_into(
-    key_bytes: UnsafePointer[UInt8, MutAnyOrigin],
-    w: UnsafePointer[UInt32, MutAnyOrigin],
+    key_bytes: UnsafePointer[mut=False, UInt8, _, address_space=_],
+    w: UnsafePointer[mut=True, UInt32, _, address_space=_],
 ) raises -> None:
     for i in range(8):
         var key_val: UInt32 = 0
@@ -264,20 +264,59 @@ def expand_key_256_into(
             temp = sub_word(temp)
         w.store(i, w.load(i - 8) ^ temp)
 
-def expand_key_128(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
-    var w = alloc[UInt32](44)
-    expand_key_128_into(key_bytes, w)
-    return w
+struct AESExpandedKey(Movable):
+    """Owned AES-128/192/256 round-key schedule, wiped on destruction."""
 
-def expand_key_192(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
-    var w = alloc[UInt32](52)
-    expand_key_192_into(key_bytes, w)
-    return w
+    var _round_keys: StackBuffer[UInt32, 60]
+    var rounds: Int
 
-def expand_key_256(key_bytes: UnsafePointer[UInt8, MutAnyOrigin]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
-    var w = alloc[UInt32](60)
-    expand_key_256_into(key_bytes, w)
-    return w
+    def __init__(out self, key: Span[UInt8, ...]) raises:
+        self._round_keys = StackBuffer[UInt32, 60](fill=0)
+        if len(key) == 16:
+            self.rounds = 10
+            expand_key_128_into(key.unsafe_ptr(), self._round_keys.ptr())
+        elif len(key) == 24:
+            self.rounds = 12
+            expand_key_192_into(key.unsafe_ptr(), self._round_keys.ptr())
+        elif len(key) == 32:
+            self.rounds = 14
+            expand_key_256_into(key.unsafe_ptr(), self._round_keys.ptr())
+        else:
+            raise Error("AES keys must contain exactly 16, 24, or 32 bytes")
+
+    def __deinit__(deinit self):
+        memset_zero(self._round_keys.ptr(), 60)
+
+    @always_inline
+    def ptr[
+        origin: Origin, address_space: AddressSpace, //
+    ](ref[origin, address_space] self) -> UnsafePointer[
+        UInt32, origin, address_space=address_space
+    ]:
+        return (
+            self._round_keys.ptr()
+            .unsafe_mut_cast[origin.mut]()
+            .unsafe_origin_cast[origin]()
+            .address_space_cast[address_space]()
+        )
+
+
+def expand_key_128(key: Span[UInt8, ...]) raises -> AESExpandedKey:
+    if len(key) != 16:
+        raise Error("AES-128 keys must contain exactly 16 bytes")
+    return AESExpandedKey(key)
+
+
+def expand_key_192(key: Span[UInt8, ...]) raises -> AESExpandedKey:
+    if len(key) != 24:
+        raise Error("AES-192 keys must contain exactly 24 bytes")
+    return AESExpandedKey(key)
+
+
+def expand_key_256(key: Span[UInt8, ...]) raises -> AESExpandedKey:
+    if len(key) != 32:
+        raise Error("AES-256 keys must contain exactly 32 bytes")
+    return AESExpandedKey(key)
 
 struct AESKey:
     var _data: StackBuffer[UInt8, 16]
@@ -290,12 +329,21 @@ struct AESKey:
         self._round_keys = StackBuffer[UInt32, 44]()
         expand_key_128_into(self._data.ptr(), self._round_keys.ptr())
     
-    def __del__(deinit self):
+    def __deinit__(deinit self):
         memset_zero(self._data.ptr(), 16)
         memset_zero(self._round_keys.ptr(), 44)
 
-    def round_keys(mut self) -> UnsafePointer[UInt32, MutAnyOrigin]:
-        return self._round_keys.ptr()
+    def round_keys[
+        origin: Origin, address_space: AddressSpace, //
+    ](ref[origin, address_space] self) -> UnsafePointer[
+        UInt32, origin, address_space=address_space
+    ]:
+        return (
+            self._round_keys.ptr()
+            .unsafe_mut_cast[origin.mut]()
+            .unsafe_origin_cast[origin]()
+            .address_space_cast[address_space]()
+        )
 
 
 @always_inline
@@ -580,7 +628,7 @@ def _ct_mix_columns[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
 
 
 def cpu_aes_ct_skey(
-    round_keys: UnsafePointer[UInt32, MutAnyOrigin], rounds: Int
+    round_keys: UnsafePointer[mut=True, UInt32, _, address_space=_], rounds: Int
 ) -> List[UInt64]:
     var skey = List[UInt64](capacity=(rounds + 1) * 8)
     for r in range(rounds + 1):
@@ -590,17 +638,17 @@ def cpu_aes_ct_skey(
         var w3 = SIMD[DType.uint64, 1](UInt64(byte_swap(round_keys.load(r * 4 + 3))))
         var q = InlineArray[SIMD[DType.uint64, 1], 8](fill=0)
         for i in range(4):
-            var pair = _ct_interleave_in(w0, w1, w2, w3)
+            var pair = _ct_interleave_in[1](w0, w1, w2, w3)
             q[i] = pair[0]
             q[i + 4] = pair[1]
-        _ct_ortho(q)
+        _ct_ortho[1](q)
         for i in range(8):
             skey.append(UInt64(q[i]))
     return skey^
 
 
 @always_inline
-def _ct_le32(p: UnsafePointer[UInt8, MutAnyOrigin], off: Int) -> UInt64:
+def _ct_le32(p: UnsafePointer[mut=True, UInt8, _, address_space=_], off: Int) -> UInt64:
     return (
         UInt64(p.load(off))
         | (UInt64(p.load(off + 1)) << 8)
@@ -610,7 +658,7 @@ def _ct_le32(p: UnsafePointer[UInt8, MutAnyOrigin], off: Int) -> UInt64:
 
 
 @always_inline
-def _ct_store_le32(p: UnsafePointer[UInt8, MutAnyOrigin], off: Int, w: UInt64):
+def _ct_store_le32(p: UnsafePointer[mut=True, UInt8, _, address_space=_], off: Int, w: UInt64):
     p.store(off, UInt8(w & 0xFF))
     p.store(off + 1, UInt8((w >> 8) & 0xFF))
     p.store(off + 2, UInt8((w >> 16) & 0xFF))
@@ -619,8 +667,8 @@ def _ct_store_le32(p: UnsafePointer[UInt8, MutAnyOrigin], off: Int, w: UInt64):
 
 @always_inline
 def _ct_encrypt_blocks[W: Int](
-    blocks: UnsafePointer[UInt8, MutAnyOrigin],
-    skp: UnsafePointer[UInt64, ImmutAnyOrigin],
+    blocks: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    skp: UnsafePointer[mut=False, UInt64, _, address_space=_],
     rounds: Int,
 ) -> None:
     var q = InlineArray[SIMD[DType.uint64, W], 8](fill=0)
@@ -665,7 +713,7 @@ def _ct_encrypt_blocks[W: Int](
 
 
 def cpu_aes_ct_encrypt4(
-    blocks: UnsafePointer[UInt8, MutAnyOrigin],
+    blocks: UnsafePointer[mut=True, UInt8, _, address_space=_],
     skey: List[UInt64],
     rounds: Int,
 ) -> None:
@@ -673,7 +721,7 @@ def cpu_aes_ct_encrypt4(
 
 
 def cpu_aes_ct_encrypt16(
-    blocks: UnsafePointer[UInt8, MutAnyOrigin],
+    blocks: UnsafePointer[mut=True, UInt8, _, address_space=_],
     skey: List[UInt64],
     rounds: Int,
 ) -> None:
@@ -681,8 +729,8 @@ def cpu_aes_ct_encrypt16(
 
 
 def cpu_aes_ct_encrypt(
-    pt_bytes: UnsafePointer[UInt8, MutAnyOrigin],
-    round_keys: UnsafePointer[UInt32, MutAnyOrigin],
+    pt_bytes: UnsafePointer[mut=True, UInt8, _, address_space=_],
+    round_keys: UnsafePointer[mut=True, UInt32, _, address_space=_],
     rounds: Int = 10,
 ) -> None:
     var skey = cpu_aes_ct_skey(round_keys, rounds)

@@ -1,5 +1,4 @@
 from std.builtin.dtype import DType
-from std.collections import InlineArray
 
 @always_inline
 def _u128_shr[shift: Int](x: UInt128) -> UInt128:
@@ -22,38 +21,19 @@ def _u128_shr[shift: Int](x: UInt128) -> UInt128:
                     return UInt128(hi >> UInt64(shift - 64))
 
 struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
-    var limbs: InlineArray[UInt64, 5]
+    var limbs: SIMD[DType.uint64, 8]
 
     @always_inline
     def __init__(out self):
-        self.limbs = InlineArray[UInt64, 5](uninitialized=True)
-        self.limbs[0] = 0
-        self.limbs[1] = 0
-        self.limbs[2] = 0
-        self.limbs[3] = 0
-        self.limbs[4] = 0
+        self.limbs = SIMD[DType.uint64, 8](0)
 
     @always_inline
     def __init__(out self, l0: UInt64, l1: UInt64, l2: UInt64, l3: UInt64, l4: UInt64):
-        self.limbs = InlineArray[UInt64, 5](uninitialized=True)
-        self.limbs[0] = l0
-        self.limbs[1] = l1
-        self.limbs[2] = l2
-        self.limbs[3] = l3
-        self.limbs[4] = l4
+        self.limbs = SIMD[DType.uint64, 8](l0, l1, l2, l3, l4, 0, 0, 0)
 
     @always_inline
-    def __init__(out self, limbs: InlineArray[UInt64, 5]):
+    def __init__(out self, limbs: SIMD[DType.uint64, 8]):
         self.limbs = limbs
-
-    @always_inline
-    def __init__(out self, limbs: SIMD[DType.uint64, 5]):
-        self.limbs = InlineArray[UInt64, 5](uninitialized=True)
-        self.limbs[0] = limbs[0]
-        self.limbs[1] = limbs[1]
-        self.limbs[2] = limbs[2]
-        self.limbs[3] = limbs[3]
-        self.limbs[4] = limbs[4]
 
     @always_inline
     def __copyinit__(out self, copy: Self):
@@ -146,7 +126,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
 
     @always_inline
     def __sub__(self, other: FieldElement51) -> FieldElement51:
-        var l = InlineArray[UInt64, 5](uninitialized=True)
+        var l = SIMD[DType.uint64, 8](0)
         l[0] = (self.limbs[0] + 0x7FFFFFFFFFFED0) - other.limbs[0]
         l[1] = (self.limbs[1] + 0x7FFFFFFFFFFFF0) - other.limbs[1]
         l[2] = (self.limbs[2] + 0x7FFFFFFFFFFFF0) - other.limbs[2]
@@ -293,7 +273,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return FieldElement51(l0_2, l1_2, l2, l3, l4)
 
     @always_inline
-    def _reduce(self, limbs: InlineArray[UInt64, 5]) -> FieldElement51:
+    def _reduce(self, limbs: SIMD[DType.uint64, 8]) -> FieldElement51:
         var l = limbs
         var MASK = UInt64(0x7FFFFFFFFFFFF)
         for _ in range(5):
@@ -309,7 +289,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         if len(bytes) < 32:
             raise Error("FieldElement51 input must be at least 32 bytes")
         @always_inline
-        def load8(ptr: UnsafePointer[UInt8, _]) -> UInt64:
+        def load8(ptr: UnsafePointer[mut=False, UInt8, _, address_space=_]) -> UInt64:
             return ptr.bitcast[UInt64]().load[width=1, alignment=1]()
 
         var ptr = bytes.unsafe_ptr()
@@ -323,7 +303,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         
         return FieldElement51(l0, l1, l2, l3, l4)
 
-    def to_bytes_into(self, output: UnsafePointer[UInt8, MutAnyOrigin]):
+    def to_bytes_into(self, output: UnsafePointer[mut=True, UInt8, _, address_space=_]):
         var res = self._reduce(self.limbs)
         var limbs = res.limbs
 

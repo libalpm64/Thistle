@@ -35,7 +35,7 @@ def main() raises:
     var large = List[UInt8](capacity=257)
     for _ in range(257):
         large.append(0)
-    random_fill(large.unsafe_ptr(), 257)
+    random_fill(Span[mut=True, UInt8, ...](large))
     if _all_zero(large):
         raise Error("random_fill(257) returned all-zero output")
 
@@ -43,7 +43,7 @@ def main() raises:
         var second = List[UInt8](capacity=257)
         for _ in range(257):
             second.append(0)
-        random_fill(second.unsafe_ptr(), 257)
+        random_fill(Span[mut=True, UInt8, ...](second))
         if second[256] == 0:
             raise Error("random_fill(257) did not appear to write byte 256")
 
