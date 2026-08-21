@@ -102,7 +102,7 @@ def test_p256() raises:
     if not p256_ecdsa_sign(
         Span[UInt8, ...](private_key),
         Span[UInt8, ...](message),
-        signature.unsafe_ptr(),
+        Span[mut=True, UInt8, ...](signature),
     ):
         raise Error("P-256 signing failed")
     if not equal(signature, expected):
@@ -158,7 +158,7 @@ def test_p384() raises:
     if not p384_ecdsa_sign(
         Span[UInt8, ...](private_key),
         Span[UInt8, ...](message),
-        signature.unsafe_ptr(),
+        Span[mut=True, UInt8, ...](signature),
     ):
         raise Error("P-384 signing failed")
     if not equal(signature, expected):
@@ -193,7 +193,8 @@ def test_keygen() raises:
     var p256_public = p256_pair[1].copy()
     var p256_check = List[UInt8](unsafe_uninit_length=65)
     if not p256_public_key(
-        Span[UInt8, ...](p256_private), p256_check.unsafe_ptr()
+        Span[UInt8, ...](p256_private),
+        Span[mut=True, UInt8, ...](p256_check),
     ) or not equal(p256_public, p256_check):
         raise Error("P-256 key generation failed")
 
@@ -202,7 +203,8 @@ def test_keygen() raises:
     var p384_public = p384_pair[1].copy()
     var p384_check = List[UInt8](unsafe_uninit_length=97)
     if not p384_public_key(
-        Span[UInt8, ...](p384_private), p384_check.unsafe_ptr()
+        Span[UInt8, ...](p384_private),
+        Span[mut=True, UInt8, ...](p384_check),
     ) or not equal(p384_public, p384_check):
         raise Error("P-384 key generation failed")
 
@@ -210,7 +212,9 @@ def test_keygen() raises:
     var x_private = x_pair[0].copy()
     var x_public = x_pair[1].copy()
     var x_check = List[UInt8](unsafe_uninit_length=32)
-    x25519_public_key(Span[UInt8, ...](x_private), x_check.unsafe_ptr())
+    x25519_public_key(
+        Span[UInt8, ...](x_private), Span[mut=True, UInt8, ...](x_check)
+    )
     if not equal(x_public, x_check):
         raise Error("X25519 key generation failed")
 
@@ -225,6 +229,18 @@ def test_rsa_pss_signing() raises:
     )
     var msg = hex_bytes("74686973746c65")
     var salt = List[UInt8](length=32, fill=0xA5)
+    var raw_key = RsaPrivateKey(
+        Span[UInt8, ...](n), Span[UInt8, ...](e), Span[UInt8, ...](d)
+    )
+    var short_rsa_signature = List[UInt8](length=255, fill=0)
+    if raw_key.pss_sign_with_salt(
+        Span[UInt8, ...](msg),
+        Span[UInt8, ...](salt),
+        SHA256,
+        SHA256,
+        Span[mut=True, UInt8, ...](short_rsa_signature),
+    ):
+        raise Error("RSA-PSS accepted an undersized signature destination")
     var sig = rsa_pss_sign_with_salt(
         Span[UInt8, ...](n),
         Span[UInt8, ...](e),
@@ -268,13 +284,21 @@ def test_rsa_pss_signing() raises:
         Span[UInt8, ...](dq),
         Span[UInt8, ...](qi),
     )
+    if crt.pss_sign_with_salt(
+        Span[UInt8, ...](msg),
+        Span[UInt8, ...](salt),
+        SHA256,
+        SHA256,
+        Span[mut=True, UInt8, ...](short_rsa_signature),
+    ):
+        raise Error("RSA-PSS CRT accepted an undersized signature destination")
     var sig2 = List[UInt8](unsafe_uninit_length=256)
     if not crt.pss_sign_with_salt(
         Span[UInt8, ...](msg),
         Span[UInt8, ...](salt),
         SHA256,
         SHA256,
-        sig2.unsafe_ptr(),
+        Span[mut=True, UInt8, ...](sig2),
     ):
         raise Error("crt sign")
     if not rsa_pss_verify(

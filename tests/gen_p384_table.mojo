@@ -36,8 +36,8 @@ def main() raises:
         print(")")
         print("")
     print("def p384_base_table() -> InlineArray[UInt64, 8704]:")
-    print("    var t = InlineArray[UInt64, 8704](uninitialized=True)")
+    print("    var t = InlineArray[UInt64, 8704](fill=0)")
     print("    var p = t.unsafe_ptr()")
     for c in range(68):
-        print("    p.store[alignment=8](" + String(c * 128) + ", _P384_BT" + String(c) + ")")
+        print("    p.unsafe_store[alignment=8](" + String(c * 128) + ", _P384_BT" + String(c) + ")")
     print("    return t^")

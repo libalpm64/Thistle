@@ -12,7 +12,7 @@ data, zeroize sensitive temporaries with volatile stores when practical.
 
 from std.collections import List
 from std.builtin.globals import global_constant
-from std.memory import memset_zero
+from std.memory import unsafe_memset_zero
 from thistle.sha3 import SHA3Context, sha3_update, shake_final, shake128, shake256
 from thistle.random import random_bytes
 from thistle.utils import StackBuffer, zero_stack_u8
@@ -83,7 +83,7 @@ comptime ZETAS_TABLE: InlineArray[UInt32, 256] = [
 def _zeta(i: Int) -> UInt32:
     debug_assert(i >= 0 and i < 256, "ML-DSA zeta index out of bounds")
     ref zetas = global_constant[ZETAS_TABLE]()
-    return zetas.unsafe_ptr()[i]
+    return zetas.unsafe_ptr()[unsafe_offset=i]
 
 
 @fieldwise_init
@@ -110,8 +110,8 @@ struct DSAPolyVec[ROWS: Int](Movable):
         return self.data[i]
 
     @always_inline
-    def __setitem__(mut self, i: Int, value: DSAPoly):
-        self.data[i] = value
+    def __setitem__(mut self, i: Int, var value: DSAPoly):
+        self.data[i] = value^
 
 
 @fieldwise_init
@@ -133,25 +133,25 @@ struct MLDSAPrivateKey(Copyable, Movable):
     var t0: List[List[UInt32]]
     var k_seed: List[UInt8]
 
-    def __del__(deinit self):
+    def __deinit__(deinit self):
         var seed_ptr = self.seed.unsafe_ptr()
         for i in range(len(self.seed)):
-            seed_ptr.store[volatile=True](i, UInt8(0))
+            seed_ptr.unsafe_store[volatile=True](i, UInt8(0))
         var key_ptr = self.k_seed.unsafe_ptr()
         for i in range(len(self.k_seed)):
-            key_ptr.store[volatile=True](i, UInt8(0))
+            key_ptr.unsafe_store[volatile=True](i, UInt8(0))
         for row in range(len(self.s1)):
             var ptr = self.s1[row].unsafe_ptr()
             for i in range(len(self.s1[row])):
-                ptr.store[volatile=True](i, UInt32(0))
+                ptr.unsafe_store[volatile=True](i, UInt32(0))
         for row in range(len(self.s2)):
             var ptr = self.s2[row].unsafe_ptr()
             for i in range(len(self.s2[row])):
-                ptr.store[volatile=True](i, UInt32(0))
+                ptr.unsafe_store[volatile=True](i, UInt32(0))
         for row in range(len(self.t0)):
             var ptr = self.t0[row].unsafe_ptr()
             for i in range(len(self.t0[row])):
-                ptr.store[volatile=True](i, UInt32(0))
+                ptr.unsafe_store[volatile=True](i, UInt32(0))
 
 
 def params44() -> MLDSAParams:
@@ -183,7 +183,7 @@ def private_key_size(p: MLDSAParams) -> Int:
 
 def _zero_poly() -> List[UInt32]:
     var r = List[UInt32](unsafe_uninit_length=N)
-    memset_zero(r.unsafe_ptr(), N)
+    unsafe_memset_zero(r.unsafe_ptr(), N)
     return r^
 
 
@@ -198,25 +198,25 @@ def _zero_dsa_poly_vec[ROWS: Int]() -> DSAPolyVec[ROWS]:
 def _zero_dsa_poly(mut p: DSAPoly):
     var ptr = p.unsafe_ptr()
     for i in range(N):
-        ptr.store[volatile=True](i, UInt32(0))
+        ptr.unsafe_store[volatile=True](i, UInt32(0))
 
 
 def _zero_dsa_poly_vec[ROWS: Int](mut v: DSAPolyVec[ROWS]):
-    var ptr = v.data.unsafe_ptr().bitcast[UInt32]()
+    var ptr = v.data.unsafe_ptr().unsafe_bitcast[UInt32]()
     for i in range(ROWS * N):
-        ptr.store[volatile=True](i, UInt32(0))
+        ptr.unsafe_store[volatile=True](i, UInt32(0))
 
 
 def _zero_dsa_hint_vec(mut h: DSAHintVec):
-    var ptr = h.unsafe_ptr().bitcast[UInt8]()
+    var ptr = h.unsafe_ptr().unsafe_bitcast[UInt8]()
     for i in range(MAX_K * N):
-        ptr.store[volatile=True](i, UInt8(0))
+        ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
 def _zero_dsa_ch(mut ch: InlineArray[UInt8, MLDSA_CRHBYTES]):
     var ptr = ch.unsafe_ptr()
     for i in range(MLDSA_CRHBYTES):
-        ptr.store[volatile=True](i, UInt8(0))
+        ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
 def _zero_poly_vec(count: Int) -> List[List[UInt32]]:
@@ -228,7 +228,8 @@ def _zero_poly_vec(count: Int) -> List[List[UInt32]]:
 
 def _copy_bytes(src: Span[UInt8, ...]) -> List[UInt8]:
     var out = List[UInt8](capacity=len(src))
-    out.extend(src)
+    for i in range(len(src)):
+        out.append(src[i])
     return out^
 
 
@@ -237,7 +238,8 @@ def _slice_bytes(src: Span[UInt8, ...], start: Int, count: Int) -> List[UInt8]:
 
 
 def _append_bytes(mut out: List[UInt8], src: Span[UInt8, ...]):
-    out.extend(src)
+    for i in range(len(src)):
+        out.append(src[i])
 
 
 def _append_bytes_stack(mut out: StackBuffer[UInt8, ...], src: Span[UInt8, ...]):
@@ -253,13 +255,13 @@ def _ct_bool_to_u32(b: Bool) -> UInt32:
 def _zero_list_u8(mut data: List[UInt8]):
     var ptr = data.unsafe_ptr()
     for i in range(len(data)):
-        ptr.store[volatile=True](i, UInt8(0))
+        ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
 def _zero_list_u32(mut data: List[UInt32]):
     var ptr = data.unsafe_ptr()
     for i in range(len(data)):
-        ptr.store[volatile=True](i, UInt32(0))
+        ptr.unsafe_store[volatile=True](i, UInt32(0))
 
 
 def _zero_poly_vec_u32(mut data: List[List[UInt32]]):
@@ -393,7 +395,8 @@ def _dsa_poly_sub_into(mut r: DSAPoly, b: DSAPoly):
 
 
 def _dsa_copy_poly_into(mut r: DSAPoly, a: DSAPoly):
-    r = a
+    for i in range(N):
+        r[i] = a[i]
 
 
 def _ntt_mul_into(mut r: List[UInt32], a: List[UInt32], b: List[UInt32]):
@@ -403,13 +406,13 @@ def _ntt_mul_into(mut r: List[UInt32], a: List[UInt32], b: List[UInt32]):
 
 @always_inline
 def _ntt_mul_ptrs(
-    r: UnsafePointer[UInt32, MutAnyOrigin],
-    a: UnsafePointer[UInt32, ImmutAnyOrigin],
-    b: UnsafePointer[UInt32, ImmutAnyOrigin],
+    r: Pointer[mut=True, UInt32, _, address_space=_],
+    a: Pointer[mut=False, UInt32, _, address_space=_],
+    b: Pointer[mut=False, UInt32, _, address_space=_],
 ):
     var i = 0
     while i < N:
-        r.store(i, _montgomery_mul_v(a.load[width=_VW](i), b.load[width=_VW](i)))
+        r.unsafe_store(i, _montgomery_mul_v(a.unsafe_load[width=_VW](i), b.unsafe_load[width=_VW](i)))
         i += _VW
 
 
@@ -456,11 +459,11 @@ def _dsa_ntt_inplace(mut f: DSAPoly):
                 var zv = _U32v(zeta).cast[DType.uint64]()
                 var j = start
                 while j < start + length:
-                    var a = p.load[width=_VW](j)
-                    var b = p.load[width=_VW](j + length)
+                    var a = p.unsafe_load[width=_VW](j)
+                    var b = p.unsafe_load[width=_VW](j + length)
                     var t = _montgomery_reduce_v(zv * b.cast[DType.uint64]())
-                    p.store(j + length, _field_reduce_once_v(a - t + _U32v(Q)))
-                    p.store(j, _field_reduce_once_v(a + t))
+                    p.unsafe_store(j + length, _field_reduce_once_v(a - t + _U32v(Q)))
+                    p.unsafe_store(j, _field_reduce_once_v(a + t))
                     j += _VW
             else:
                 var j = start
@@ -511,10 +514,10 @@ def _dsa_inverse_ntt_inplace(mut f: DSAPoly):
                 var zv = _U32v(zeta).cast[DType.uint64]()
                 var j = start
                 while j < start + length:
-                    var a = p.load[width=_VW](j)
-                    var b = p.load[width=_VW](j + length)
-                    p.store(j, _field_reduce_once_v(a + b))
-                    p.store(
+                    var a = p.unsafe_load[width=_VW](j)
+                    var b = p.unsafe_load[width=_VW](j + length)
+                    p.unsafe_store(j, _field_reduce_once_v(a + b))
+                    p.unsafe_store(
                         j + length,
                         _montgomery_reduce_v(
                             zv * (b - a + _U32v(Q)).cast[DType.uint64]()
@@ -532,7 +535,7 @@ def _dsa_inverse_ntt_inplace(mut f: DSAPoly):
         length *= 2
     var i = 0
     while i < N:
-        p.store(i, _montgomery_mul_v(p.load[width=_VW](i), _U32v(16382)))
+        p.unsafe_store(i, _montgomery_mul_v(p.unsafe_load[width=_VW](i), _U32v(16382)))
         i += _VW
 
 
@@ -557,7 +560,7 @@ def _sample_ntt(rho: Span[UInt8, ...], s: UInt8, r: UInt8) raises -> List[UInt32
 
     var out_len = 840
     while True:
-        var buf = _shake128_expand(Span[UInt8, ...](ptr=input.ptr(), length=input.len()), out_len)
+        var buf = _shake128_expand(Span[UInt8, ...](unsafe_ptr=input.ptr(), length=input.len()), out_len)
         var a = List[UInt32](unsafe_uninit_length=N)
         var ap = a.unsafe_ptr()
         var bp = buf.unsafe_ptr()
@@ -566,13 +569,13 @@ def _sample_ntt(rho: Span[UInt8, ...], s: UInt8, r: UInt8) raises -> List[UInt32
         var limit = len(buf) - 2
         while off < limit and n < N:
             var v = (
-                UInt32(bp[off])
-                | (UInt32(bp[off + 1]) << 8)
-                | (UInt32(bp[off + 2]) << 16)
+                UInt32(bp[unsafe_offset=off])
+                | (UInt32(bp[unsafe_offset=off + 1]) << 8)
+                | (UInt32(bp[unsafe_offset=off + 2]) << 16)
             ) & 0x7FFFFF
             off += 3
             if v < Q:
-                ap[n] = _field_to_montgomery_unchecked(v)
+                ap[unsafe_offset=n] = _field_to_montgomery_unchecked(v)
                 n += 1
         if n == N:
             return a^
@@ -601,7 +604,7 @@ def _sample_bounded_poly(rho: Span[UInt8, ...], r: UInt8, p: MLDSAParams) -> Lis
 
     var out_len = 272
     while True:
-        var buf = _shake256_expand(Span[UInt8, ...](ptr=input.ptr(), length=input.len()), out_len)
+        var buf = _shake256_expand(Span[UInt8, ...](unsafe_ptr=input.ptr(), length=input.len()), out_len)
         var a = List[UInt32](capacity=N)
         for i in range(len(buf)):
             var z0 = buf[i] & 0x0F
@@ -676,7 +679,7 @@ def _sample_in_ball_dsa(rho: Span[UInt8, ...], p: MLDSAParams) -> DSAPoly:
                 break
         _zero_list_u8(buf)
         if ok:
-            return c
+            return c^
         out_len *= 2
 
 
@@ -1118,7 +1121,7 @@ def _compute_message_hash(tr: Span[UInt8, ...], msg: Span[UInt8, ...], context: 
     var prefix = StackBuffer[UInt8, 2]()
     prefix.push_unchecked(UInt8(0))
     prefix.push_unchecked(UInt8(len(context)))
-    sha3_update(ctx, Span[UInt8, ...](ptr=prefix.ptr(), length=prefix.len()))
+    sha3_update(ctx, Span[UInt8, ...](unsafe_ptr=prefix.ptr(), length=prefix.len()))
     zero_stack_u8(prefix)
 
     sha3_update(ctx, context)
@@ -1137,7 +1140,7 @@ def mldsa_private_key_from_seed(seed: Span[UInt8, ...], p: MLDSAParams) raises -
     _append_bytes_stack(xi, seed)
     xi.push_unchecked(UInt8(p.k))
     xi.push_unchecked(UInt8(p.l))
-    var expanded = shake256(Span[UInt8, ...](ptr=xi.ptr(), length=xi.len()), 128)
+    var expanded = shake256(Span[UInt8, ...](unsafe_ptr=xi.ptr(), length=xi.len()), 128)
     zero_stack_u8(xi)
     var rho = _slice_bytes(Span[UInt8, ...](expanded), 0, 32)
     var rho_s = _slice_bytes(Span[UInt8, ...](expanded), 32, 64)
@@ -1282,7 +1285,7 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
     _append_bytes_stack(h_input, Span[UInt8, ...](priv.k_seed))
     _append_bytes_stack(h_input, random)
     _append_bytes_stack(h_input, mu)
-    var nonce = shake256(Span[UInt8, ...](ptr=h_input.ptr(), length=h_input.len()), 64)
+    var nonce = shake256(Span[UInt8, ...](unsafe_ptr=h_input.ptr(), length=h_input.len()), 64)
     zero_stack_u8(h_input)
 
     # signing scratch allocated once and reused across attempts
@@ -1305,7 +1308,7 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
             seed.push_unchecked(UInt8(kappa & 0xFF))
             seed.push_unchecked(UInt8((kappa >> 8) & 0xFF))
             kappa += 1
-            var v = shake256(Span[UInt8, ...](ptr=seed.ptr(), length=seed.len()), (p.gamma1_log + 1) * N // 8)
+            var v = shake256(Span[UInt8, ...](unsafe_ptr=seed.ptr(), length=seed.len()), (p.gamma1_log + 1) * N // 8)
             zero_stack_u8(seed)
             _dsa_bit_unpack_into(y[_r], Span[UInt8, ...](v), p)
             _zero_list_u8(v)
@@ -1325,7 +1328,7 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
         _append_bytes_stack(ch_input, mu)
         for i in range(p.k):
             _dsa_append_w1_encoded_stack(ch_input, w[i], p)
-        var ch_list = shake256(Span[UInt8, ...](ptr=ch_input.ptr(), length=ch_input.len()), p.lambda_bits // 4)
+        var ch_list = shake256(Span[UInt8, ...](unsafe_ptr=ch_input.ptr(), length=ch_input.len()), p.lambda_bits // 4)
         zero_stack_u8(ch_input)
         var ch = InlineArray[UInt8, MLDSA_CRHBYTES](fill=0)
         for i in range(p.lambda_bits // 4):
@@ -1482,7 +1485,7 @@ def mldsa_verify_external_mu(pub: MLDSAPublicKey, mu: Span[UInt8, ...], sig: Spa
     _append_bytes_stack(ch_input, mu)
     for i in range(p.k):
         _append_use_hint_encoded_stack(ch_input, w[i], h[i], p)
-    var computed = shake256(Span[UInt8, ...](ptr=ch_input.ptr(), length=ch_input.len()), p.lambda_bits // 4)
+    var computed = shake256(Span[UInt8, ...](unsafe_ptr=ch_input.ptr(), length=ch_input.len()), p.lambda_bits // 4)
     zero_stack_u8(ch_input)
     var ok = _bytes_equal(Span[UInt8, ...](ch), Span[UInt8, ...](computed))
     _zero_list_u8(ch)

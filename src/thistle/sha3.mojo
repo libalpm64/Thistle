@@ -4,14 +4,16 @@ FIPS 202
 """
 
 from std.collections import List
-from std.memory import UnsafePointer, memcpy, memset_zero
+from std.memory import Pointer, unsafe_memcpy, unsafe_memset_zero
+from std.os import abort
 from .utils import StackBuffer, bytes_to_hex, string_to_bytes
 from std.bit import rotate_bits_left
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
 from std.sys import llvm_intrinsic, CompilationTarget
+from std.utils import StaticTuple
 
-comptime KECCAK_RC = SIMD[DType.uint64, 24](
+comptime KECCAK_RC = StaticTuple[UInt64, 24](
     0x0000000000000001, 0x0000000000008082,
     0x800000000000808A, 0x8000000080008000,
     0x000000000000808B, 0x0000000080000001,
@@ -60,32 +62,32 @@ def _bcax(a: _U64x2, b: _U64x2, c: _U64x2) -> _U64x2:
     return llvm_intrinsic["llvm.aarch64.crypto.bcaxu", _U64x2, has_side_effect=False](a, b, c)
 
 
-def _keccak_f1600_hw(state: UnsafePointer[UInt64, MutAnyOrigin]):
-    var a0 = _U64x2(state[0], 0)
-    var a1 = _U64x2(state[1], 0)
-    var a2 = _U64x2(state[2], 0)
-    var a3 = _U64x2(state[3], 0)
-    var a4 = _U64x2(state[4], 0)
-    var a5 = _U64x2(state[5], 0)
-    var a6 = _U64x2(state[6], 0)
-    var a7 = _U64x2(state[7], 0)
-    var a8 = _U64x2(state[8], 0)
-    var a9 = _U64x2(state[9], 0)
-    var a10 = _U64x2(state[10], 0)
-    var a11 = _U64x2(state[11], 0)
-    var a12 = _U64x2(state[12], 0)
-    var a13 = _U64x2(state[13], 0)
-    var a14 = _U64x2(state[14], 0)
-    var a15 = _U64x2(state[15], 0)
-    var a16 = _U64x2(state[16], 0)
-    var a17 = _U64x2(state[17], 0)
-    var a18 = _U64x2(state[18], 0)
-    var a19 = _U64x2(state[19], 0)
-    var a20 = _U64x2(state[20], 0)
-    var a21 = _U64x2(state[21], 0)
-    var a22 = _U64x2(state[22], 0)
-    var a23 = _U64x2(state[23], 0)
-    var a24 = _U64x2(state[24], 0)
+def _keccak_f1600_hw(state: Pointer[mut=True, UInt64, _, address_space=_]):
+    var a0 = _U64x2(state[unsafe_offset=0], 0)
+    var a1 = _U64x2(state[unsafe_offset=1], 0)
+    var a2 = _U64x2(state[unsafe_offset=2], 0)
+    var a3 = _U64x2(state[unsafe_offset=3], 0)
+    var a4 = _U64x2(state[unsafe_offset=4], 0)
+    var a5 = _U64x2(state[unsafe_offset=5], 0)
+    var a6 = _U64x2(state[unsafe_offset=6], 0)
+    var a7 = _U64x2(state[unsafe_offset=7], 0)
+    var a8 = _U64x2(state[unsafe_offset=8], 0)
+    var a9 = _U64x2(state[unsafe_offset=9], 0)
+    var a10 = _U64x2(state[unsafe_offset=10], 0)
+    var a11 = _U64x2(state[unsafe_offset=11], 0)
+    var a12 = _U64x2(state[unsafe_offset=12], 0)
+    var a13 = _U64x2(state[unsafe_offset=13], 0)
+    var a14 = _U64x2(state[unsafe_offset=14], 0)
+    var a15 = _U64x2(state[unsafe_offset=15], 0)
+    var a16 = _U64x2(state[unsafe_offset=16], 0)
+    var a17 = _U64x2(state[unsafe_offset=17], 0)
+    var a18 = _U64x2(state[unsafe_offset=18], 0)
+    var a19 = _U64x2(state[unsafe_offset=19], 0)
+    var a20 = _U64x2(state[unsafe_offset=20], 0)
+    var a21 = _U64x2(state[unsafe_offset=21], 0)
+    var a22 = _U64x2(state[unsafe_offset=22], 0)
+    var a23 = _U64x2(state[unsafe_offset=23], 0)
+    var a24 = _U64x2(state[unsafe_offset=24], 0)
 
     comptime for round in range(24):
         var c0 = _eor3(a0, a5, _eor3(a10, a15, a20))
@@ -153,66 +155,66 @@ def _keccak_f1600_hw(state: UnsafePointer[UInt64, MutAnyOrigin]):
         a23 = _bcax(b23, b20, b24)
         a24 = _bcax(b24, b21, b20)
 
-    state[0] = a0[0]
-    state[1] = a1[0]
-    state[2] = a2[0]
-    state[3] = a3[0]
-    state[4] = a4[0]
-    state[5] = a5[0]
-    state[6] = a6[0]
-    state[7] = a7[0]
-    state[8] = a8[0]
-    state[9] = a9[0]
-    state[10] = a10[0]
-    state[11] = a11[0]
-    state[12] = a12[0]
-    state[13] = a13[0]
-    state[14] = a14[0]
-    state[15] = a15[0]
-    state[16] = a16[0]
-    state[17] = a17[0]
-    state[18] = a18[0]
-    state[19] = a19[0]
-    state[20] = a20[0]
-    state[21] = a21[0]
-    state[22] = a22[0]
-    state[23] = a23[0]
-    state[24] = a24[0]
+    state[unsafe_offset=0] = a0[0]
+    state[unsafe_offset=1] = a1[0]
+    state[unsafe_offset=2] = a2[0]
+    state[unsafe_offset=3] = a3[0]
+    state[unsafe_offset=4] = a4[0]
+    state[unsafe_offset=5] = a5[0]
+    state[unsafe_offset=6] = a6[0]
+    state[unsafe_offset=7] = a7[0]
+    state[unsafe_offset=8] = a8[0]
+    state[unsafe_offset=9] = a9[0]
+    state[unsafe_offset=10] = a10[0]
+    state[unsafe_offset=11] = a11[0]
+    state[unsafe_offset=12] = a12[0]
+    state[unsafe_offset=13] = a13[0]
+    state[unsafe_offset=14] = a14[0]
+    state[unsafe_offset=15] = a15[0]
+    state[unsafe_offset=16] = a16[0]
+    state[unsafe_offset=17] = a17[0]
+    state[unsafe_offset=18] = a18[0]
+    state[unsafe_offset=19] = a19[0]
+    state[unsafe_offset=20] = a20[0]
+    state[unsafe_offset=21] = a21[0]
+    state[unsafe_offset=22] = a22[0]
+    state[unsafe_offset=23] = a23[0]
+    state[unsafe_offset=24] = a24[0]
 
 
-def keccak_f1600(state: UnsafePointer[UInt64, MutAnyOrigin]):
+def keccak_f1600(state: Pointer[mut=True, UInt64, _, address_space=_]):
     comptime if _has_sha3_ext:
         _keccak_f1600_hw(state)
         return
     _keccak_f1600_scalar(state)
 
 
-def _keccak_f1600_scalar(state: UnsafePointer[UInt64, MutAnyOrigin]):
-    var a0 = state[0]
-    var a1 = state[1]
-    var a2 = state[2]
-    var a3 = state[3]
-    var a4 = state[4]
-    var a5 = state[5]
-    var a6 = state[6]
-    var a7 = state[7]
-    var a8 = state[8]
-    var a9 = state[9]
-    var a10 = state[10]
-    var a11 = state[11]
-    var a12 = state[12]
-    var a13 = state[13]
-    var a14 = state[14]
-    var a15 = state[15]
-    var a16 = state[16]
-    var a17 = state[17]
-    var a18 = state[18]
-    var a19 = state[19]
-    var a20 = state[20]
-    var a21 = state[21]
-    var a22 = state[22]
-    var a23 = state[23]
-    var a24 = state[24]
+def _keccak_f1600_scalar(state: Pointer[mut=True, UInt64, _, address_space=_]):
+    var a0 = state[unsafe_offset=0]
+    var a1 = state[unsafe_offset=1]
+    var a2 = state[unsafe_offset=2]
+    var a3 = state[unsafe_offset=3]
+    var a4 = state[unsafe_offset=4]
+    var a5 = state[unsafe_offset=5]
+    var a6 = state[unsafe_offset=6]
+    var a7 = state[unsafe_offset=7]
+    var a8 = state[unsafe_offset=8]
+    var a9 = state[unsafe_offset=9]
+    var a10 = state[unsafe_offset=10]
+    var a11 = state[unsafe_offset=11]
+    var a12 = state[unsafe_offset=12]
+    var a13 = state[unsafe_offset=13]
+    var a14 = state[unsafe_offset=14]
+    var a15 = state[unsafe_offset=15]
+    var a16 = state[unsafe_offset=16]
+    var a17 = state[unsafe_offset=17]
+    var a18 = state[unsafe_offset=18]
+    var a19 = state[unsafe_offset=19]
+    var a20 = state[unsafe_offset=20]
+    var a21 = state[unsafe_offset=21]
+    var a22 = state[unsafe_offset=22]
+    var a23 = state[unsafe_offset=23]
+    var a24 = state[unsafe_offset=24]
 
     comptime for round in range(24):
         var c0 = a0 ^ a5 ^ a10 ^ a15 ^ a20
@@ -307,31 +309,31 @@ def _keccak_f1600_scalar(state: UnsafePointer[UInt64, MutAnyOrigin]):
 
         a0 ^= KECCAK_RC[round]
 
-    state[0] = a0
-    state[1] = a1
-    state[2] = a2
-    state[3] = a3
-    state[4] = a4
-    state[5] = a5
-    state[6] = a6
-    state[7] = a7
-    state[8] = a8
-    state[9] = a9
-    state[10] = a10
-    state[11] = a11
-    state[12] = a12
-    state[13] = a13
-    state[14] = a14
-    state[15] = a15
-    state[16] = a16
-    state[17] = a17
-    state[18] = a18
-    state[19] = a19
-    state[20] = a20
-    state[21] = a21
-    state[22] = a22
-    state[23] = a23
-    state[24] = a24
+    state[unsafe_offset=0] = a0
+    state[unsafe_offset=1] = a1
+    state[unsafe_offset=2] = a2
+    state[unsafe_offset=3] = a3
+    state[unsafe_offset=4] = a4
+    state[unsafe_offset=5] = a5
+    state[unsafe_offset=6] = a6
+    state[unsafe_offset=7] = a7
+    state[unsafe_offset=8] = a8
+    state[unsafe_offset=9] = a9
+    state[unsafe_offset=10] = a10
+    state[unsafe_offset=11] = a11
+    state[unsafe_offset=12] = a12
+    state[unsafe_offset=13] = a13
+    state[unsafe_offset=14] = a14
+    state[unsafe_offset=15] = a15
+    state[unsafe_offset=16] = a16
+    state[unsafe_offset=17] = a17
+    state[unsafe_offset=18] = a18
+    state[unsafe_offset=19] = a19
+    state[unsafe_offset=20] = a20
+    state[unsafe_offset=21] = a21
+    state[unsafe_offset=22] = a22
+    state[unsafe_offset=23] = a23
+    state[unsafe_offset=24] = a24
 
 
 struct SHA3Context(Movable):
@@ -341,31 +343,35 @@ struct SHA3Context(Movable):
     var buffer_len: Int
 
     def __init__(out self, rate_bits: Int):
+        if not (0 < rate_bits <= 1344 and rate_bits % 64 == 0):
+            abort(
+                "SHA-3 rate must be a positive multiple of 64 no larger than 1344 bits"
+            )
         self.state = StackBuffer[UInt64, 25](fill=0)
         self.rate_bytes = rate_bits // 8
         self.buffer = StackBuffer[UInt8, 168](fill=0)
         self.buffer_len = 0
 
-    def __init__(out self, *, deinit take: Self):
-        self.state = take.state^
-        self.rate_bytes = take.rate_bytes
-        self.buffer = take.buffer^
-        self.buffer_len = take.buffer_len
+    def __init__(out self, *, deinit move: Self):
+        self.state = move.state^
+        self.rate_bytes = move.rate_bytes
+        self.buffer = move.buffer^
+        self.buffer_len = move.buffer_len
 
-    def __del__(deinit self):
+    def __deinit__(deinit self):
         var state_ptr = self.state.ptr()
         for i in range(25):
-            state_ptr.store[volatile=True](i, UInt64(0))
+            state_ptr.unsafe_store[volatile=True](i, UInt64(0))
         var buffer_ptr = self.buffer.ptr()
         for i in range(168):
-            buffer_ptr.store[volatile=True](i, UInt8(0))
+            buffer_ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
 @always_inline
-def sha3_absorb_block(state: UnsafePointer[UInt64, MutAnyOrigin], block: UnsafePointer[UInt8, ImmutAnyOrigin], rate_bytes: Int):
+def sha3_absorb_block(state: Pointer[mut=True, UInt64, _, address_space=_], block: Pointer[mut=False, UInt8, _, address_space=_], rate_bytes: Int):
     var full_lanes = rate_bytes // 8
     for i in range(full_lanes):
-        state[i] ^= (block + i * 8).bitcast[UInt64]().load[width=1, alignment=1]()
+        state[unsafe_offset=i] ^= block.unsafe_offset(i * 8).unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]()
     keccak_f1600(state)
 
 
@@ -376,44 +382,37 @@ def sha3_update(mut ctx: SHA3Context, data: Span[UInt8, ...]):
     if ctx.buffer_len > 0:
         var available = ctx.rate_bytes - ctx.buffer_len
         if total_len >= available:
-            memcpy(
-                dest=ctx.buffer.ptr() + ctx.buffer_len,
-                src=data.unsafe_ptr(),
-                count=available,
-            )
+            for j in range(available):
+                ctx.buffer[ctx.buffer_len + j] = data[j]
             sha3_absorb_block(ctx.state.ptr(), ctx.buffer.ptr(), ctx.rate_bytes)
             ctx.buffer_len = 0
             i += available
         else:
-            memcpy(
-                dest=ctx.buffer.ptr() + ctx.buffer_len,
-                src=data.unsafe_ptr(),
-                count=total_len,
-            )
+            for j in range(total_len):
+                ctx.buffer[ctx.buffer_len + j] = data[j]
             ctx.buffer_len += total_len
             return
 
     while i + ctx.rate_bytes <= total_len:
-        sha3_absorb_block(ctx.state.ptr(), data.unsafe_ptr() + i, ctx.rate_bytes)
+        sha3_absorb_block(ctx.state.ptr(), data.unsafe_ptr().unsafe_offset(i), ctx.rate_bytes)
         i += ctx.rate_bytes
 
     if i < total_len:
         var remaining = total_len - i
-        memcpy(
-            dest=ctx.buffer.ptr(),
-            src=data.unsafe_ptr() + i,
-            count=remaining,
-        )
+        for j in range(remaining):
+            ctx.buffer[j] = data[i + j]
         ctx.buffer_len = remaining
 
 
 def sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
+    if output_len_bytes < 0:
+        abort("SHA-3 output length cannot be negative")
     ctx.buffer[ctx.buffer_len] = 0x06
     ctx.buffer_len += 1
 
     var pad_len = ctx.rate_bytes - ctx.buffer_len
     if pad_len > 0:
-        memset_zero(ctx.buffer.ptr() + ctx.buffer_len, pad_len)
+        unsafe_memset_zero(ctx.buffer.ptr().unsafe_offset(ctx.buffer_len), pad_len)
         ctx.buffer_len = ctx.rate_bytes
 
     ctx.buffer[ctx.rate_bytes - 1] |= 0x80
@@ -429,9 +428,9 @@ def sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
         if output_len_bytes - offset < limit:
             limit = output_len_bytes - offset
 
-        memcpy(
-            dest=output.unsafe_ptr() + offset,
-            src=ctx.state.ptr().bitcast[UInt8](),
+        unsafe_memcpy(
+            dest=output.unsafe_ptr().unsafe_offset(offset),
+            src=ctx.state.ptr().unsafe_bitcast[UInt8](),
             count=limit,
         )
 
@@ -444,19 +443,21 @@ def sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
 
 @always_inline
 def sha3_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], output_len_bytes: Int):
+    if output_len_bytes < 0 or output_len_bytes > output.capacity():
+        abort("SHA-3 output length exceeds destination capacity")
     output.clear()
     ctx.buffer[ctx.buffer_len] = 0x06
     ctx.buffer_len += 1
 
     var pad_len = ctx.rate_bytes - ctx.buffer_len
     if pad_len > 0:
-        memset_zero(ctx.buffer.ptr() + ctx.buffer_len, pad_len)
+        unsafe_memset_zero(ctx.buffer.ptr().unsafe_offset(ctx.buffer_len), pad_len)
         ctx.buffer_len = ctx.rate_bytes
 
     ctx.buffer[ctx.rate_bytes - 1] |= 0x80
     sha3_absorb_block(ctx.state.ptr(), ctx.buffer.ptr(), ctx.rate_bytes)
 
-    output.set_len_unchecked(output_len_bytes)
+    output.set_len(output_len_bytes)
 
     var offset = 0
     while offset < output_len_bytes:
@@ -464,9 +465,9 @@ def sha3_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], o
         if output_len_bytes - offset < limit:
             limit = output_len_bytes - offset
 
-        memcpy(
-            dest=output.ptr() + offset,
-            src=ctx.state.ptr().bitcast[UInt8](),
+        unsafe_memcpy(
+            dest=output.ptr().unsafe_offset(offset),
+            src=ctx.state.ptr().unsafe_bitcast[UInt8](),
             count=limit,
         )
 
@@ -546,7 +547,7 @@ def shake_finalize(mut ctx: SHA3Context):
 
     var pad_len = ctx.rate_bytes - ctx.buffer_len
     if pad_len > 0:
-        memset_zero(ctx.buffer.ptr() + ctx.buffer_len, pad_len)
+        unsafe_memset_zero(ctx.buffer.ptr().unsafe_offset(ctx.buffer_len), pad_len)
         ctx.buffer_len = ctx.rate_bytes
 
     ctx.buffer[ctx.rate_bytes - 1] |= 0x80
@@ -556,8 +557,10 @@ def shake_finalize(mut ctx: SHA3Context):
 
 @always_inline
 def shake_squeeze_prefix_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], output_len: Int):
+    if output_len < 0 or output_len > output.capacity():
+        abort("SHAKE output length exceeds destination capacity")
     output.clear()
-    output.set_len_unchecked(output_len)
+    output.set_len(output_len)
 
     var offset = 0
     while offset < output_len:
@@ -565,9 +568,9 @@ def shake_squeeze_prefix_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt
         if output_len - offset < limit:
             limit = output_len - offset
 
-        memcpy(
-            dest=output.ptr() + offset,
-            src=ctx.state.ptr().bitcast[UInt8](),
+        unsafe_memcpy(
+            dest=output.ptr().unsafe_offset(offset),
+            src=ctx.state.ptr().unsafe_bitcast[UInt8](),
             count=limit,
         )
 
@@ -584,6 +587,8 @@ def shake_advance(mut ctx: SHA3Context):
 
 @always_inline
 def shake_final(mut ctx: SHA3Context, output_len: Int) -> List[UInt8]:
+    if output_len < 0:
+        abort("SHAKE output length cannot be negative")
     shake_finalize(ctx)
 
     var output = List[UInt8](capacity=output_len)
@@ -596,9 +601,9 @@ def shake_final(mut ctx: SHA3Context, output_len: Int) -> List[UInt8]:
         if output_len - offset < limit:
             limit = output_len - offset
 
-        memcpy(
-            dest=output.unsafe_ptr() + offset,
-            src=ctx.state.ptr().bitcast[UInt8](),
+        unsafe_memcpy(
+            dest=output.unsafe_ptr().unsafe_offset(offset),
+            src=ctx.state.ptr().unsafe_bitcast[UInt8](),
             count=limit,
         )
 
@@ -611,10 +616,12 @@ def shake_final(mut ctx: SHA3Context, output_len: Int) -> List[UInt8]:
 
 @always_inline
 def shake_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], output_len: Int):
+    if output_len < 0 or output_len > output.capacity():
+        abort("SHAKE output length exceeds destination capacity")
     output.clear()
     shake_finalize(ctx)
 
-    output.set_len_unchecked(output_len)
+    output.set_len(output_len)
 
     var offset = 0
     while offset < output_len:
@@ -622,9 +629,9 @@ def shake_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], 
         if output_len - offset < limit:
             limit = output_len - offset
 
-        memcpy(
-            dest=output.ptr() + offset,
-            src=ctx.state.ptr().bitcast[UInt8](),
+        unsafe_memcpy(
+            dest=output.ptr().unsafe_offset(offset),
+            src=ctx.state.ptr().unsafe_bitcast[UInt8](),
             count=limit,
         )
 

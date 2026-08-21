@@ -1,8 +1,7 @@
 from std.python import Python, PythonObject
 from std.collections import List
-from std.memory import alloc
-from std.memory.unsafe_pointer import UnsafePointer
-from std.builtin.type_aliases import MutUntrackedOrigin
+from std.memory.unsafe_pointer import Pointer
+from std.memory import Layout, alloc
 from thistle.sha2 import (
     bytes_to_hex,
     string_to_bytes,
@@ -34,7 +33,7 @@ from thistle.kcipher2 import KCipher2
 from thistle.pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
 from thistle.aes import (
     cpu_aes_encrypt, cpu_aes_ecb_kernel, cpu_aes_cbc_kernel, cpu_aes_ctr_kernel,
-    cpu_aes_xts_kernel, expand_key_128, expand_key_192, expand_key_256,
+    cpu_aes_xts_kernel, AESExpandedKey,
 )
 from thistle.aes_ni import aes_encrypt, has_aes_ni, has_x86_aes_ni, aes_gcm_encrypt, aes_gcm_decrypt
 from thistle.sha_ni import sha256ni_hash, has_sha_ni
@@ -87,10 +86,10 @@ def byte_to_hex(b: UInt8) -> String:
     )
 
 
-def ptr_to_hex(ptr: UnsafePointer[UInt8, MutAnyOrigin], count: Int) -> String:
+def ptr_to_hex(ptr: Pointer[mut=True, UInt8, _, address_space=_], count: Int) -> String:
     var s = String("")
     for j in range(count):
-        s += byte_to_hex(ptr.load(j))
+        s += byte_to_hex(ptr.unsafe_load(j))
     return s
 
 
@@ -104,13 +103,6 @@ def generate_blake3_input(length: Int) -> List[UInt8]:
 def list_to_simd32(lst: List[UInt8]) -> SIMD[DType.uint8, 32]:
     var result = SIMD[DType.uint8, 32](0)
     for i in range(min(len(lst), 32)):
-        result[i] = lst[i]
-    return result
-
-
-def list_to_simd12(lst: List[UInt8]) -> SIMD[DType.uint8, 12]:
-    var result = SIMD[DType.uint8, 12](0)
-    for i in range(min(len(lst), 12)):
         result[i] = lst[i]
     return result
 
@@ -222,8 +214,8 @@ def test_camellia(data: PythonObject, py: PythonObject) raises -> TestResult:
 
         var pt_bytes = hex_to_bytes(pt_hex)
         var ct_bytes = hex_to_bytes(ct_hex)
-        var pt_blk = pt_bytes.unsafe_ptr().load[width=16, alignment=1](0)
-        var ct_blk = ct_bytes.unsafe_ptr().load[width=16, alignment=1](0)
+        var pt_blk = pt_bytes.unsafe_ptr().unsafe_load[width=16, alignment=1](0)
+        var ct_blk = ct_bytes.unsafe_ptr().unsafe_load[width=16, alignment=1](0)
 
         var got_ct = bytes_to_hex(camellia_encrypt_block(cipher, pt_blk))
         if got_ct == ct_hex:
@@ -251,7 +243,7 @@ def test_camellia(data: PythonObject, py: PythonObject) raises -> TestResult:
         var expected = List[UInt8](capacity=nb * 16)
         for bi in range(nb):
             var one = camellia_encrypt_block(
-                cipher, buf.unsafe_ptr().load[width=16, alignment=1](bi * 16)
+                cipher, buf.unsafe_ptr().unsafe_load[width=16, alignment=1](bi * 16)
             )
             for j in range(16):
                 expected.append(one[j])
@@ -297,14 +289,18 @@ def test_camellia(data: PythonObject, py: PythonObject) raises -> TestResult:
                 ctr_blk[j] = UInt8(total & 0xFF)
                 carry = (carry >> 8) + (total >> 8)
             var ks_blk = camellia_encrypt_block(
-                cipher, ctr_blk.unsafe_ptr().load[width=16, alignment=1](0)
+                cipher, ctr_blk.unsafe_ptr().unsafe_load[width=16, alignment=1](0)
             )
             for j in range(16):
                 var idx = bi * 16 + j
                 if ctr_out[idx] != (msg[idx] ^ ks_blk[j]):
                     ctr_ok = False
         camellia_ctr_kernel(
-            ctr_out.unsafe_ptr(), ctr_out.unsafe_ptr(), cipher, ctr_nb, nonce.unsafe_ptr()
+            ctr_out.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin](),
+            ctr_out.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin](),
+            cipher,
+            ctr_nb,
+            nonce.unsafe_ptr(),
         )
         for i2 in range(ctr_nb * 16):
             if ctr_out[i2] != msg[i2]:
@@ -331,13 +327,17 @@ def test_camellia(data: PythonObject, py: PythonObject) raises -> TestResult:
         for j in range(16):
             prev[j] = nonce[j]
         for bi in range(cbc_nb):
-            var x = cbc_msg.unsafe_ptr().load[width=16, alignment=1](bi * 16) ^ prev
+            var x = cbc_msg.unsafe_ptr().unsafe_load[width=16, alignment=1](bi * 16) ^ prev
             prev = camellia_encrypt_block(cipher, x)
             for j in range(16):
                 if cbc_out[bi * 16 + j] != prev[j]:
                     cbc_ok = False
         camellia_cbc_decrypt_kernel(
-            cbc_out.unsafe_ptr(), cbc_out.unsafe_ptr(), cipher, cbc_nb, nonce.unsafe_ptr()
+            cbc_out.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin](),
+            cbc_out.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin](),
+            cipher,
+            cbc_nb,
+            nonce.unsafe_ptr(),
         )
         for i2 in range(cbc_nb * 16):
             if cbc_out[i2] != cbc_msg[i2]:
@@ -356,21 +356,22 @@ def test_chacha20(data: PythonObject, py: PythonObject) raises -> TestResult:
     for i in range(Int(py=data.__len__())):
         var v = data[i]
         var name = String(v["name"])
+        var nonce = hex_to_bytes(String(v["nonce"]))
         var cipher = ChaCha20(
             list_to_simd32(hex_to_bytes(String(v["key"]))),
-            list_to_simd12(hex_to_bytes(String(v["nonce"]))),
+            Span[UInt8, ...](nonce),
             UInt32(Int(py=v["counter"])),
         )
         var pt_bytes = hex_to_bytes(String(v["plaintext"]))
         var expected_ct = hex_to_bytes(String(v["ciphertext"]))
         if len(pt_bytes) == 0:
-            var null_ptr = UnsafePointer[
+            var null_ptr = Pointer[
                 UInt8, MutUntrackedOrigin
             ].unsafe_dangling()
             var out_span = Span[mut=True, UInt8, MutUntrackedOrigin](
-                ptr=null_ptr, length=0
+                unsafe_ptr=null_ptr, length=0
             )
-            cipher.encrypt_into(Span[UInt8, ...](ptr=null_ptr, length=0), out_span)
+            cipher.encrypt_into(Span[UInt8, ...](unsafe_ptr=null_ptr, length=0), out_span)
             if len(expected_ct) == 0:
                 passed += 1
             else:
@@ -379,15 +380,15 @@ def test_chacha20(data: PythonObject, py: PythonObject) raises -> TestResult:
                     "ChaCha20 " + name + ": empty plaintext test failed"
                 )
         else:
-            var ct_ptr = alloc[UInt8](len(pt_bytes))
+            var ct_ptr = alloc(Layout[UInt8](count=len(pt_bytes))).unsafe_leak()
             var ct_span = Span[mut=True, UInt8, MutUntrackedOrigin](
-                ptr=ct_ptr, length=len(pt_bytes)
+                unsafe_ptr=ct_ptr, length=len(pt_bytes)
             )
             cipher.encrypt_into(Span[UInt8, ...](pt_bytes), ct_span)
             var ok = len(pt_bytes) == len(expected_ct)
             if ok:
                 for j in range(len(pt_bytes)):
-                    if ct_ptr[j] != expected_ct[j]:
+                    if ct_ptr[unsafe_offset=j] != expected_ct[j]:
                         ok = False
                         break
             if ok:
@@ -403,7 +404,7 @@ def test_chacha20(data: PythonObject, py: PythonObject) raises -> TestResult:
                     + ptr_to_hex(ct_ptr, min(len(pt_bytes), 16))
                     + "..."
                 )
-            ct_ptr.free()
+            ct_ptr.unsafe_free()
     return TestResult(passed, failed, failures^)
 
 
@@ -605,11 +606,11 @@ def test_aes_cpu(data: PythonObject, py: PythonObject) raises -> TestResult:
         var pt_bytes = hex_to_bytes(String(v["plaintext"]))
         var expected_ct = String(v["ciphertext"])
         var rounds = 10 if len(key_bytes) == 16 else (12 if len(key_bytes) == 24 else 14)
-        var pt_ptr = alloc[UInt8](16)
+        var pt_ptr = alloc(Layout[UInt8](count=16)).unsafe_leak()
         for j in range(16):
-            pt_ptr.store(j, pt_bytes[j])
+            pt_ptr.unsafe_store(j, pt_bytes[j])
         var round_keys = _expand_aes_key(key_bytes)
-        cpu_aes_encrypt(pt_ptr, round_keys, rounds)
+        cpu_aes_encrypt(pt_ptr, round_keys.ptr(), rounds)
         var got = ptr_to_hex(pt_ptr, 16)
         if got == expected_ct:
             passed += 1
@@ -623,8 +624,7 @@ def test_aes_cpu(data: PythonObject, py: PythonObject) raises -> TestResult:
                 + ", got "
                 + got
             )
-        round_keys.free()
-        pt_ptr.free()
+        pt_ptr.unsafe_free()
     return TestResult(passed, failed, failures^)
 
 
@@ -643,11 +643,11 @@ def test_aes_ni(data: PythonObject, py: PythonObject) raises -> TestResult:
         var pt_bytes = hex_to_bytes(String(v["plaintext"]))
         var expected_ct = String(v["ciphertext"])
         var rounds = 10 if len(key_bytes) == 16 else (12 if len(key_bytes) == 24 else 14)
-        var pt_ptr = alloc[UInt8](16)
+        var pt_ptr = alloc(Layout[UInt8](count=16)).unsafe_leak()
         for j in range(16):
-            pt_ptr.store(j, pt_bytes[j])
+            pt_ptr.unsafe_store(j, pt_bytes[j])
         var round_keys = _expand_aes_key(key_bytes)
-        aes_encrypt(pt_ptr, round_keys, rounds)
+        aes_encrypt(pt_ptr, round_keys.ptr(), rounds)
         var got = ptr_to_hex(pt_ptr, 16)
         if got == expected_ct:
             passed += 1
@@ -661,8 +661,7 @@ def test_aes_ni(data: PythonObject, py: PythonObject) raises -> TestResult:
                 + ", got "
                 + got
             )
-        round_keys.free()
-        pt_ptr.free()
+        pt_ptr.unsafe_free()
     return TestResult(passed, failed, failures^)
 
 
@@ -778,18 +777,22 @@ def test_chacha20_poly1305(data: PythonObject, py: PythonObject, xchacha: Bool) 
             for _ in range(16):
                 out_tag.append(0)
 
-            var enc_matches = False
-            var dec_ok = False
+            var enc_matches: Bool
+            var dec_ok: Bool
             try:
                 if xchacha:
                     xchacha20_poly1305_encrypt(
                         Span[UInt8, ...](key), Span[UInt8, ...](iv), Span[UInt8, ...](aad),
-                        Span[UInt8, ...](msg), out_ct.unsafe_ptr(), out_tag.unsafe_ptr(),
+                        Span[UInt8, ...](msg),
+                        Span[mut=True, UInt8, ...](out_ct),
+                        Span[mut=True, UInt8, ...](out_tag),
                     )
                 else:
                     chacha20_poly1305_encrypt(
                         Span[UInt8, ...](key), Span[UInt8, ...](iv), Span[UInt8, ...](aad),
-                        Span[UInt8, ...](msg), out_ct.unsafe_ptr(), out_tag.unsafe_ptr(),
+                        Span[UInt8, ...](msg),
+                        Span[mut=True, UInt8, ...](out_ct),
+                        Span[mut=True, UInt8, ...](out_tag),
                     )
                 enc_matches = len(ct) == n and len(tag) == 16
                 for i in range(n):
@@ -806,12 +809,14 @@ def test_chacha20_poly1305(data: PythonObject, py: PythonObject, xchacha: Bool) 
                 if xchacha:
                     dec_ok = xchacha20_poly1305_decrypt(
                         Span[UInt8, ...](key), Span[UInt8, ...](iv), Span[UInt8, ...](aad),
-                        Span[UInt8, ...](ct), Span[UInt8, ...](tag), out_pt.unsafe_ptr(),
+                        Span[UInt8, ...](ct), Span[UInt8, ...](tag),
+                        Span[mut=True, UInt8, ...](out_pt),
                     )
                 else:
                     dec_ok = chacha20_poly1305_decrypt(
                         Span[UInt8, ...](key), Span[UInt8, ...](iv), Span[UInt8, ...](aad),
-                        Span[UInt8, ...](ct), Span[UInt8, ...](tag), out_pt.unsafe_ptr(),
+                        Span[UInt8, ...](ct), Span[UInt8, ...](tag),
+                        Span[mut=True, UInt8, ...](out_pt),
                     )
                 if dec_ok:
                     for i in range(len(ct)):
@@ -833,19 +838,8 @@ def test_chacha20_poly1305(data: PythonObject, py: PythonObject, xchacha: Bool) 
     return TestResult(passed, failed, failures^)
 
 
-def _expand_aes_key(key: List[UInt8]) raises -> UnsafePointer[UInt32, MutAnyOrigin]:
-    var kp = alloc[UInt8](len(key))
-    for i in range(len(key)):
-        kp[i] = key[i]
-    var rk: UnsafePointer[UInt32, MutAnyOrigin]
-    if len(key) == 16:
-        rk = expand_key_128(kp)
-    elif len(key) == 24:
-        rk = expand_key_192(kp)
-    else:
-        rk = expand_key_256(kp)
-    kp.free()
-    return rk
+def _expand_aes_key(key: List[UInt8]) raises -> AESExpandedKey:
+    return AESExpandedKey(Span[UInt8, ...](key))
 
 
 def test_aes_cpu_modes(data: PythonObject, py: PythonObject) raises -> TestResult:
@@ -876,11 +870,11 @@ def test_aes_cpu_modes(data: PythonObject, py: PythonObject) raises -> TestResul
                     ok = ok and bytes_to_hex(enc[1]) == bytes_to_hex(tag_exp)
             else:
                 var nblocks = n // 16
-                var ip = alloc[UInt8](n)
-                var op = alloc[UInt8](n)
+                var ip = alloc(Layout[UInt8](count=n)).unsafe_leak()
+                var op = alloc(Layout[UInt8](count=n)).unsafe_leak()
                 for j in range(n):
-                    ip[j] = pt[j]
-                    op[j] = 0
+                    ip[unsafe_offset=j] = pt[j]
+                    op[unsafe_offset=j] = 0
 
                 if "XTS" in mode:
                     var half = len(key) // 2
@@ -893,37 +887,42 @@ def test_aes_cpu_modes(data: PythonObject, py: PythonObject) raises -> TestResul
                     var rk2 = _expand_aes_key(k2)
                     var rounds = 10 if half == 16 else 14
                     var tweak = hex_to_bytes(String(tv["tweak"]))
-                    var twp = alloc[UInt8](16)
+                    var twp = alloc(Layout[UInt8](count=16)).unsafe_leak()
                     for j in range(16):
-                        twp[j] = tweak[j]
-                    cpu_aes_xts_kernel(ip, op, rk1, rk2, nblocks, twp, rounds)
-                    rk1.free()
-                    rk2.free()
-                    twp.free()
+                        twp[unsafe_offset=j] = tweak[j]
+                    cpu_aes_xts_kernel(
+                        ip, op, rk1.ptr(), rk2.ptr(), nblocks, twp, rounds
+                    )
+                    twp.unsafe_free()
                 else:
                     var rk = _expand_aes_key(key)
                     var rounds = 10 if len(key) == 16 else (12 if len(key) == 24 else 14)
                     if "CBC" in mode:
                         var iv = hex_to_bytes(String(tv["iv"]))
-                        var ivp = alloc[UInt8](16)
+                        var ivp = alloc(Layout[UInt8](count=16)).unsafe_leak()
                         for j in range(16):
-                            ivp[j] = iv[j]
-                        cpu_aes_cbc_kernel(ip, op, rk, nblocks, ivp, rounds)
-                        ivp.free()
+                            ivp[unsafe_offset=j] = iv[j]
+                        cpu_aes_cbc_kernel(
+                            ip, op, rk.ptr(), nblocks, ivp, rounds
+                        )
+                        ivp.unsafe_free()
                     elif "CTR" in mode:
                         var iv = hex_to_bytes(String(tv["iv"]))
-                        var ivp = alloc[UInt8](16)
+                        var ivp = alloc(Layout[UInt8](count=16)).unsafe_leak()
                         for j in range(16):
-                            ivp[j] = iv[j]
-                        cpu_aes_ctr_kernel(ip, op, rk, nblocks, ivp, rounds)
-                        ivp.free()
+                            ivp[unsafe_offset=j] = iv[j]
+                        cpu_aes_ctr_kernel(
+                            ip, op, rk.ptr(), nblocks, ivp, rounds
+                        )
+                        ivp.unsafe_free()
                     else:
-                        cpu_aes_ecb_kernel(ip, op, rk, nblocks, rounds)
-                    rk.free()
+                        cpu_aes_ecb_kernel(
+                            ip, op, rk.ptr(), nblocks, rounds
+                        )
 
                 ok = ptr_to_hex(op, n) == bytes_to_hex(ct_exp)
-                ip.free()
-                op.free()
+                ip.unsafe_free()
+                op.unsafe_free()
 
             if ok:
                 passed += 1

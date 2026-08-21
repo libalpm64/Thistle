@@ -6,6 +6,7 @@ from .p384_table import p384_base_table
 from .utils import u64_nonzero_choice, u64_zero_choice
 from .sha2 import sha384_hash
 from .pbkdf2 import hmac_sha384
+from std.utils import StaticTuple
 
 comptime P384_SIZE = 48
 comptime P384_POINT_SIZE = 97
@@ -15,10 +16,12 @@ comptime _N0 = UInt64(0x0000000100000001)  # -p^-1 mod 2^64
 
 
 struct U384(Copyable, ImplicitlyCopyable, Movable):
-    var limbs: InlineArray[UInt64, 6]
+    var limbs: StaticTuple[UInt64, 6]
 
     def __init__(out self):
-        self.limbs = InlineArray[UInt64, 6](fill=0)
+        self.limbs = StaticTuple[UInt64, 6]()
+        comptime for i in range(6):
+            self.limbs[i] = 0
 
     def __init__(
         out self,
@@ -29,7 +32,7 @@ struct U384(Copyable, ImplicitlyCopyable, Movable):
         l4: UInt64,
         l5: UInt64,
     ):
-        self.limbs = InlineArray[UInt64, 6](uninitialized=True)
+        self.limbs = StaticTuple[UInt64, 6]()
         self.limbs[0] = l0
         self.limbs[1] = l1
         self.limbs[2] = l2
@@ -396,11 +399,11 @@ def _from_be(bytes: Span[UInt8, ...]) -> U384:
     return out
 
 
-def _to_be(x: U384, output: UnsafePointer[UInt8, MutAnyOrigin]):
+def _to_be(x: U384, output: Pointer[mut=True, UInt8, _, address_space=_]):
     for i in range(6):
         var limb = x.limbs[5 - i]
         for k in range(8):
-            output[i * 8 + k] = UInt8((limb >> UInt64(56 - 8 * k)) & 0xFF)
+            output[unsafe_offset=i * 8 + k] = UInt8((limb >> UInt64(56 - 8 * k)) & 0xFF)
 
 
 struct P384Point(Copyable, ImplicitlyCopyable, Movable):
@@ -601,20 +604,20 @@ def _jacobian_to_affine(p: P384JacobianPoint) -> P384Point:
 
 def _scalar_mult(k: U384, p: P384Point) -> P384Point:
     var pm = P384Point(_to_mont(p.x), _to_mont(p.y), False)
-    var jac = InlineArray[P384JacobianPoint, 15](uninitialized=True)
+    var jac = InlineArray[P384JacobianPoint, 15](fill=P384JacobianPoint())
     jac[0] = P384JacobianPoint(pm.x, pm.y, _one_mont(), False)
     jac[1] = _jacobian_double_ct(jac[0])
     for i in range(2, 15):
         jac[i] = _jacobian_add_affine_non_equal_ct(jac[i - 1], pm)
 
-    var prefix = InlineArray[U384, 15](uninitialized=True)
+    var prefix = InlineArray[U384, 15](fill=U384())
     prefix[0] = jac[0].z
     for i in range(1, 15):
         prefix[i] = _mont_mul(prefix[i - 1], jac[i].z)
     var inv_acc = _inv_p(prefix[14])
 
-    var tx = InlineArray[U384, 15](uninitialized=True)
-    var ty = InlineArray[U384, 15](uninitialized=True)
+    var tx = InlineArray[U384, 15](fill=U384())
+    var ty = InlineArray[U384, 15](fill=U384())
     for jj in range(15):
         var j = 14 - jj
         var zinv = inv_acc
@@ -650,7 +653,7 @@ def _scalar_mult(k: U384, p: P384Point) -> P384Point:
 
 @always_inline
 def _base_table_entry(
-    tptr: UnsafePointer[UInt64, _], j: Int, d: UInt64
+    tptr: Pointer[UInt64, _], j: Int, d: UInt64
 ) -> P384Point:
     # Scan the whole window.
     var qx = U384()
@@ -658,8 +661,8 @@ def _base_table_entry(
     for t in range(1, 16):
         var hit = u64_zero_choice(UInt64(t) ^ d)
         var base = (j * 15 + (t - 1)) * 12
-        var ex = U384(tptr[base], tptr[base + 1], tptr[base + 2], tptr[base + 3], tptr[base + 4], tptr[base + 5])
-        var ey = U384(tptr[base + 6], tptr[base + 7], tptr[base + 8], tptr[base + 9], tptr[base + 10], tptr[base + 11])
+        var ex = U384(tptr[unsafe_offset=base], tptr[unsafe_offset=base + 1], tptr[unsafe_offset=base + 2], tptr[unsafe_offset=base + 3], tptr[unsafe_offset=base + 4], tptr[unsafe_offset=base + 5])
+        var ey = U384(tptr[unsafe_offset=base + 6], tptr[unsafe_offset=base + 7], tptr[unsafe_offset=base + 8], tptr[unsafe_offset=base + 9], tptr[unsafe_offset=base + 10], tptr[unsafe_offset=base + 11])
         qx = _select_u384(qx, ex, hit)
         qy = _select_u384(qy, ey, hit)
     return P384Point(qx, qy, False)
@@ -694,7 +697,7 @@ def _scalar_mult_base(k: U384) -> P384Point:
 def p384_decode_uncompressed(point: Span[UInt8, ...]) -> P384Point:
     if len(point) == 49 and (point[0] == 0x02 or point[0] == 0x03):
         var x = _from_be(
-            Span[UInt8, ...](ptr=point.unsafe_ptr() + 1, length=48)
+            Span[UInt8, ...](unsafe_ptr=point.unsafe_ptr().unsafe_offset(1), length=48)
         )
         if _cmp(x, _p()) >= 0:
             return P384Point()
@@ -713,8 +716,8 @@ def p384_decode_uncompressed(point: Span[UInt8, ...]) -> P384Point:
         return p
     if len(point) != P384_POINT_SIZE or point[0] != 0x04:
         return P384Point()
-    var x = _from_be(Span[UInt8, ...](ptr=point.unsafe_ptr() + 1, length=48))
-    var y = _from_be(Span[UInt8, ...](ptr=point.unsafe_ptr() + 49, length=48))
+    var x = _from_be(Span[UInt8, ...](unsafe_ptr=point.unsafe_ptr().unsafe_offset(1), length=48))
+    var y = _from_be(Span[UInt8, ...](unsafe_ptr=point.unsafe_ptr().unsafe_offset(49), length=48))
     var p = P384Point(x, y, False)
     if not _is_on_curve(p):
         return P384Point()
@@ -722,33 +725,34 @@ def p384_decode_uncompressed(point: Span[UInt8, ...]) -> P384Point:
 
 
 def p384_encode_uncompressed(
-    point: P384Point, output: UnsafePointer[UInt8, MutAnyOrigin]
+    point: P384Point, output: Span[mut=True, UInt8, ...]
 ) -> Bool:
-    if point.infinity or not _is_on_curve(point):
+    if len(output) < P384_POINT_SIZE or point.infinity or not _is_on_curve(point):
         return False
-    output[0] = 0x04
-    _to_be(point.x, output + 1)
-    _to_be(point.y, output + 49)
+    var out_ptr = output.unsafe_ptr()
+    out_ptr[unsafe_offset=0] = 0x04
+    _to_be(point.x, out_ptr.unsafe_offset(1))
+    _to_be(point.y, out_ptr.unsafe_offset(49))
     return True
 
 
 @no_inline
 def p384_public_key(
-    private_key: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]
+    private_key: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
 ) -> Bool:
-    if len(private_key) != 48:
+    if len(private_key) != 48 or len(output) < P384_POINT_SIZE:
         return False
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
-        var dp = d.limbs.unsafe_ptr()
+        var dp = Pointer(to=d.limbs[0]).unsafe_mut_cast[True]()
         for i in range(6):
-            dp.store[volatile=True](i, UInt64(0))
+            dp.unsafe_store[volatile=True](i, UInt64(0))
         return False
     var q = _scalar_mult_base(d)
     var ok = p384_encode_uncompressed(q, output)
-    var dp = d.limbs.unsafe_ptr()
+    var dp = Pointer(to=d.limbs[0]).unsafe_mut_cast[True]()
     for i in range(6):
-        dp.store[volatile=True](i, UInt64(0))
+        dp.unsafe_store[volatile=True](i, UInt64(0))
     return ok
 
 
@@ -756,29 +760,29 @@ def p384_public_key(
 def p384_ecdh(
     private_key: Span[UInt8, ...],
     public_key: Span[UInt8, ...],
-    output: UnsafePointer[UInt8, MutAnyOrigin],
+    output: Span[mut=True, UInt8, ...],
 ) -> Bool:
-    if len(private_key) != 48:
+    if len(private_key) != 48 or len(output) < P384_SIZE:
         return False
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
-        var dp = d.limbs.unsafe_ptr()
+        var dp = Pointer(to=d.limbs[0]).unsafe_mut_cast[True]()
         for i in range(6):
-            dp.store[volatile=True](i, UInt64(0))
+            dp.unsafe_store[volatile=True](i, UInt64(0))
         return False
     var q = p384_decode_uncompressed(public_key)
     if q.infinity:
-        var dp = d.limbs.unsafe_ptr()
+        var dp = Pointer(to=d.limbs[0]).unsafe_mut_cast[True]()
         for i in range(6):
-            dp.store[volatile=True](i, UInt64(0))
+            dp.unsafe_store[volatile=True](i, UInt64(0))
         return False
     var shared = _scalar_mult(d, q)
-    var dp = d.limbs.unsafe_ptr()
+    var dp = Pointer(to=d.limbs[0]).unsafe_mut_cast[True]()
     for i in range(6):
-        dp.store[volatile=True](i, UInt64(0))
+        dp.unsafe_store[volatile=True](i, UInt64(0))
     if shared.infinity:
         return False
-    _to_be(shared.x, output)
+    _to_be(shared.x, output.unsafe_ptr())
     return True
 
 
@@ -875,20 +879,20 @@ def _reduce_n(x: U384) -> U384:
 
 
 def _wipe_u384(mut x: U384):
-    var ptr = x.limbs.unsafe_ptr()
+    var ptr = Pointer(to=x.limbs[0]).unsafe_mut_cast[True]()
     for i in range(6):
-        ptr.store[volatile=True](i, UInt64(0))
+        ptr.unsafe_store[volatile=True](i, UInt64(0))
 
 
 def _wipe_list_u8(mut data: List[UInt8]):
     var ptr = data.unsafe_ptr()
     for i in range(len(data)):
-        ptr.store[volatile=True](i, UInt8(0))
+        ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
 def _rfc6979_p384(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int) -> U384:
     var h1 = _reduce_n(_from_be(digest))
-    var h1_bytes = InlineArray[UInt8, 48](uninitialized=True)
+    var h1_bytes = InlineArray[UInt8, 48](fill=0)
     _to_be(h1, h1_bytes.unsafe_ptr())
     var k = List[UInt8](length=48, fill=0)
     var v = List[UInt8](length=48, fill=1)
@@ -937,7 +941,7 @@ def _rfc6979_p384(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip:
                 _wipe_list_u8(seed)
                 var hp = h1_bytes.unsafe_ptr()
                 for i in range(48):
-                    hp.store[volatile=True](i, UInt8(0))
+                    hp.unsafe_store[volatile=True](i, UInt8(0))
                 _wipe_u384(h1)
                 return candidate
             accepted += 1
@@ -958,10 +962,14 @@ def _rfc6979_p384(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip:
 def p384_ecdsa_sign_digest(
     private_key: Span[UInt8, ...],
     digest: Span[UInt8, ...],
-    signature: UnsafePointer[UInt8, MutAnyOrigin],
+    signature: Span[mut=True, UInt8, ...],
 ) -> Bool:
-    if len(private_key) != 48 or len(digest) != 48:
+    if (
+        len(private_key) != 48 or len(digest) != 48
+        or len(signature) < P384_SIGNATURE_SIZE
+    ):
         return False
+    var signature_ptr = signature.unsafe_ptr()
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
         _wipe_u384(d)
@@ -987,8 +995,8 @@ def p384_ecdsa_sign_digest(
             _wipe_u384(total)
             retry += 1
             continue
-        _to_be(r, signature)
-        _to_be(s, signature + 48)
+        _to_be(r, signature_ptr)
+        _to_be(s, signature_ptr.unsafe_offset(48))
         _wipe_u384(d)
         _wipe_u384(z)
         _wipe_u384(k)
@@ -1001,10 +1009,14 @@ def p384_ecdsa_sign_digest(
 def p384_ecdsa_sign(
     private_key: Span[UInt8, ...],
     message: Span[UInt8, ...],
-    signature: UnsafePointer[UInt8, MutAnyOrigin],
+    signature: Span[mut=True, UInt8, ...],
 ) -> Bool:
+    if len(signature) < P384_SIGNATURE_SIZE:
+        return False
     var digest = sha384_hash(message)
-    var ok = p384_ecdsa_sign_digest(private_key, Span[UInt8, ...](digest), signature)
+    var ok = p384_ecdsa_sign_digest(
+        private_key, Span[UInt8, ...](digest), signature
+    )
     _wipe_list_u8(digest)
     return ok
 
@@ -1066,7 +1078,9 @@ def p384_ecdsa_sign_der(
 ) raises -> List[UInt8]:
     from .ecdsa_der import ecdsa_der_encode
     var raw = List[UInt8](unsafe_uninit_length=P384_SIGNATURE_SIZE)
-    if not p384_ecdsa_sign(private_key, message, raw.unsafe_ptr()):
+    if not p384_ecdsa_sign(
+        private_key, message, Span[mut=True, UInt8, ...](raw)
+    ):
         raise Error("P-384 ECDSA signing failed")
     return ecdsa_der_encode(Span[UInt8, ...](raw), P384_SIZE)
 
@@ -1089,7 +1103,10 @@ def p384_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
         var d = _from_be(Span[UInt8, ...](private_key))
         if not d.is_zero() and _cmp(d, _n()) < 0:
             var public_key = List[UInt8](unsafe_uninit_length=97)
-            if p384_public_key(Span[UInt8, ...](private_key), public_key.unsafe_ptr()):
+            if p384_public_key(
+                Span[UInt8, ...](private_key),
+                Span[mut=True, UInt8, ...](public_key),
+            ):
                 _wipe_u384(d)
                 return (private_key^, public_key^)
         _wipe_u384(d)

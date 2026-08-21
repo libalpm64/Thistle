@@ -1,5 +1,5 @@
 """
-Wycheproof Ed25519 test suite
+Wycheproof Ed25519 test suite.
 """
 
 from std.collections import List

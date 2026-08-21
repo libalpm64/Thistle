@@ -4,122 +4,125 @@ AES-GPU implementation
 
 from std.gpu import global_idx
 from std.memory import stack_allocation
-from std.memory.unsafe_pointer import UnsafePointer
+from std.memory.unsafe_pointer import Pointer
 from .aes import _ct_encrypt_blocks
 
 @always_inline
-def add_counter_offset(counter: UnsafePointer[UInt8, MutAnyOrigin], offset: Int) -> None:
+def add_counter_offset(counter: Pointer[mut=True, UInt8, _, address_space=_], offset: Int) -> None:
     var carry = offset
     for i in range(15, -1, -1):
         if carry == 0:
             break
-        var old = counter[i]
+        var old = counter[unsafe_offset=i]
         var addend = UInt8(carry & 0xff)
         var new_val = old + addend
-        counter[i] = new_val
+        counter[unsafe_offset=i] = new_val
         carry = carry >> 8
         if new_val < old:
             carry += 1
 
 @always_inline
 def _gcm_counter_from_j0(
-    j0: UnsafePointer[UInt8, MutAnyOrigin],
+    j0: Pointer[mut=True, UInt8, _, address_space=_],
     block_index: Int,
-    counter: UnsafePointer[UInt8, MutAnyOrigin],
+    counter: Pointer[mut=True, UInt8, _, address_space=_],
 ) -> None:
     for i in range(12):
-        counter[i] = j0[i]
+        counter[unsafe_offset=i] = j0[unsafe_offset=i]
     var base = (
-        (UInt32(j0[12]) << 24) | (UInt32(j0[13]) << 16)
-        | (UInt32(j0[14]) << 8) | UInt32(j0[15])
+        (UInt32(j0[unsafe_offset=12]) << 24) | (UInt32(j0[unsafe_offset=13]) << 16)
+        | (UInt32(j0[unsafe_offset=14]) << 8) | UInt32(j0[unsafe_offset=15])
     )
     var ctr = base + UInt32(1) + UInt32(block_index & 0xFFFFFFFF)
-    counter[12] = UInt8((ctr >> 24) & 0xFF)
-    counter[13] = UInt8((ctr >> 16) & 0xFF)
-    counter[14] = UInt8((ctr >> 8) & 0xFF)
-    counter[15] = UInt8(ctr & 0xFF)
+    counter[unsafe_offset=12] = UInt8((ctr >> 24) & 0xFF)
+    counter[unsafe_offset=13] = UInt8((ctr >> 16) & 0xFF)
+    counter[unsafe_offset=14] = UInt8((ctr >> 8) & 0xFF)
+    counter[unsafe_offset=15] = UInt8(ctr & 0xFF)
 
 @always_inline
 def aes_gpu_kernel_ecb(
-    input_data: UnsafePointer[UInt8, MutAnyOrigin],
-    output_data: UnsafePointer[UInt8, MutAnyOrigin],
-    skey: UnsafePointer[UInt64, MutAnyOrigin],
-    n: Int,
-    rounds: Int,
+    input_data: Pointer[mut=True, UInt8, MutUntrackedOrigin],
+    output_data: Pointer[mut=True, UInt8, MutUntrackedOrigin],
+    skey: Pointer[mut=True, UInt64, MutUntrackedOrigin],
+    n: Int32,
+    rounds: Int32,
 ) -> None:
     var tid = global_idx.x
     var base_block = Int(tid) * 4
-    if base_block >= n:
+    var num_blocks = Int(n)
+    if base_block >= num_blocks:
         return
     var buf = stack_allocation[64, UInt8]()
     for k in range(4):
         var b = base_block + k
-        if b >= n:
+        if b >= num_blocks:
             b = base_block
         for j in range(16):
-            buf[k * 16 + j] = input_data[b * 16 + j]
-    _ct_encrypt_blocks[1](buf, skey, rounds)
+            buf[unsafe_offset=k * 16 + j] = input_data[unsafe_offset=b * 16 + j]
+    _ct_encrypt_blocks[1](buf, skey, Int(rounds))
     for k in range(4):
         var blk = base_block + k
-        if blk < n:
+        if blk < num_blocks:
             for j in range(16):
-                output_data[blk * 16 + j] = buf[k * 16 + j]
+                output_data[unsafe_offset=blk * 16 + j] = buf[unsafe_offset=k * 16 + j]
 
 @always_inline
 def aes_gpu_kernel_ctr(
-    input_data: UnsafePointer[UInt8, MutAnyOrigin],
-    output_data: UnsafePointer[UInt8, MutAnyOrigin],
-    skey: UnsafePointer[UInt64, MutAnyOrigin],
-    n: Int,
-    nonce: UnsafePointer[UInt8, MutAnyOrigin],
-    rounds: Int,
+    input_data: Pointer[mut=True, UInt8, MutUntrackedOrigin],
+    output_data: Pointer[mut=True, UInt8, MutUntrackedOrigin],
+    skey: Pointer[mut=True, UInt64, MutUntrackedOrigin],
+    n: Int32,
+    nonce: Pointer[mut=True, UInt8, MutUntrackedOrigin],
+    rounds: Int32,
 ) -> None:
     var tid = global_idx.x
     var base_block = Int(tid) * 4
-    if base_block >= n:
+    var num_blocks = Int(n)
+    if base_block >= num_blocks:
         return
     var buf = stack_allocation[64, UInt8]()
     for k in range(4):
         var b = base_block + k
-        if b >= n:
+        if b >= num_blocks:
             b = base_block
-        var dst = buf + k * 16
+        var dst = buf.unsafe_offset(k * 16)
         for j in range(16):
-            dst[j] = nonce[j]
+            dst[unsafe_offset=j] = nonce[unsafe_offset=j]
         add_counter_offset(dst, b)
-    _ct_encrypt_blocks[1](buf, skey, rounds)
+    _ct_encrypt_blocks[1](buf, skey, Int(rounds))
     for k in range(4):
         var blk = base_block + k
-        if blk < n:
-            var bp = input_data + blk * 16
-            var op = output_data + blk * 16
+        if blk < num_blocks:
+            var bp = input_data.unsafe_offset(blk * 16)
+            var op = output_data.unsafe_offset(blk * 16)
             for j in range(16):
-                op[j] = bp[j] ^ buf[k * 16 + j]
+                op[unsafe_offset=j] = bp[unsafe_offset=j] ^ buf[unsafe_offset=k * 16 + j]
 
 @always_inline
 def aes_gpu_kernel_gcm_ctr(
-    input_data: UnsafePointer[UInt8, MutAnyOrigin],
-    output_data: UnsafePointer[UInt8, MutAnyOrigin],
-    skey: UnsafePointer[UInt64, MutAnyOrigin],
-    n: Int,
-    j0: UnsafePointer[UInt8, MutAnyOrigin],
-    rounds: Int,
+    input_data: Pointer[mut=True, UInt8, MutUntrackedOrigin],
+    output_data: Pointer[mut=True, UInt8, MutUntrackedOrigin],
+    skey: Pointer[mut=True, UInt64, MutUntrackedOrigin],
+    n: Int32,
+    j0: Pointer[mut=True, UInt8, MutUntrackedOrigin],
+    rounds: Int32,
 ) -> None:
     var tid = global_idx.x
     var base_block = Int(tid) * 4
-    if base_block >= n:
+    var num_blocks = Int(n)
+    if base_block >= num_blocks:
         return
     var buf = stack_allocation[64, UInt8]()
     for k in range(4):
         var b = base_block + k
-        if b >= n:
+        if b >= num_blocks:
             b = base_block
-        _gcm_counter_from_j0(j0, b, buf + k * 16)
-    _ct_encrypt_blocks[1](buf, skey, rounds)
+        _gcm_counter_from_j0(j0, b, buf.unsafe_offset(k * 16))
+    _ct_encrypt_blocks[1](buf, skey, Int(rounds))
     for k in range(4):
         var blk = base_block + k
-        if blk < n:
-            var bp = input_data + blk * 16
-            var op = output_data + blk * 16
+        if blk < num_blocks:
+            var bp = input_data.unsafe_offset(blk * 16)
+            var op = output_data.unsafe_offset(blk * 16)
             for j in range(16):
-                op[j] = bp[j] ^ buf[k * 16 + j]
+                op[unsafe_offset=j] = bp[unsafe_offset=j] ^ buf[unsafe_offset=k * 16 + j]

@@ -128,11 +128,11 @@ def run_case(
         # test-harness-only; the p256_ecdh API accepts raw SEC 1.
         public_key = extract_trailing_sec1_p256_public_key(public_der)
     var expected = hex_to_bytes(shared_hex)
-    var actual = StackInlineArray[UInt8, 32](uninitialized=True)
+    var actual = StackInlineArray[UInt8, 32](fill=0)
     var got = p256_ecdh(
         Span[UInt8, ...](private_key),
         Span[UInt8, ...](public_key),
-        actual.unsafe_ptr(),
+        Span[mut=True, UInt8, ...](unsafe_ptr=actual.unsafe_ptr(), length=32),
     )
     if is_valid and not got:
         print(

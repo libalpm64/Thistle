@@ -3,10 +3,11 @@ SHA-NI implementation In Mojo.
 """
 
 from std.sys import llvm_intrinsic, CompilationTarget, prefetch, PrefetchOptions
-from std.memory import UnsafePointer, bitcast
+from std.memory import Pointer, bitcast
 from .utils import StackBuffer
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
+from std.utils import StaticTuple
 from .sha2 import SHA256_IV, sha256_transform
 
 comptime SIMD128 = SIMD[DType.uint32, 4]
@@ -111,13 +112,13 @@ def byte_swap32(v: SIMD128) -> SIMD128:
 
 
 @always_inline("nodebug")
-def Load(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]) -> SIMD128:
-    return byte_swap32(ptr.bitcast[UInt32]().load[width=4, alignment=1]())
+def Load(ptr: Pointer[mut=False, UInt8, _, address_space=_]) -> SIMD128:
+    return byte_swap32(ptr.unsafe_bitcast[UInt32]().unsafe_load[width=4, alignment=1]())
 
 
 @always_inline("nodebug")
-def prefetch_next_block(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]):
-    prefetch[PrefetchOptions().for_read().high_locality().to_data_cache()](ptr + 64)
+def prefetch_next_block(ptr: Pointer[mut=False, UInt8, _, address_space=_]):
+    prefetch[PrefetchOptions().for_read().high_locality().to_data_cache()](ptr.unsafe_offset(64))
 
 
 def sha256ni_transform(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]) -> SIMD[DType.uint32, 8]:
@@ -139,11 +140,11 @@ def _sha256ni_transform_arm(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...
     var old_st0 = st0
     var old_st1 = st1
 
-    var w = InlineArray[SIMD128, 4](uninitialized=True)
+    var w = InlineArray[SIMD128, 4](fill=SIMD128(0))
     w[0] = Load(ptr)
-    w[1] = Load(ptr + 16)
-    w[2] = Load(ptr + 32)
-    w[3] = Load(ptr + 48)
+    w[1] = Load(ptr.unsafe_offset(16))
+    w[2] = Load(ptr.unsafe_offset(32))
+    w[3] = Load(ptr.unsafe_offset(48))
 
     comptime for i in range(16):
         var wk = w[i & 3] + SIMD128(SHA256_K[4 * i], SHA256_K[4 * i + 1], SHA256_K[4 * i + 2], SHA256_K[4 * i + 3])
@@ -177,11 +178,11 @@ def _sha256ni_transform_x86(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...
     
     # expand all 64 words to 16 simd registers
     var w0 = Load(ptr)
-    var w1 = Load(ptr + 16)
-    var w2 = Load(ptr + 32)
-    var w3 = Load(ptr + 48)
+    var w1 = Load(ptr.unsafe_offset(16))
+    var w2 = Load(ptr.unsafe_offset(32))
+    var w3 = Load(ptr.unsafe_offset(48))
     
-    var w = InlineArray[SIMD128, 16](uninitialized=True)
+    var w = InlineArray[SIMD128, 16](fill=SIMD128(0))
     w[0] = w0
     w[1] = w1
     w[2] = w2
@@ -227,7 +228,7 @@ def sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]:
 
     while i + 64 <= total_len:
         if i + 64 < total_len:
-            prefetch_next_block(data.unsafe_ptr() + i)
+            prefetch_next_block(data.unsafe_ptr().unsafe_offset(i))
         ctx.state = sha256ni_transform(ctx.state, data[i:i+64])
         ctx.count += 512
         i += 64
@@ -244,7 +245,7 @@ def sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     ctx.buffer_len += 1
 
     if ctx.buffer_len > 56:
-        ctx.state = sha256ni_transform(ctx.state, Span[UInt8, ...](ptr=ctx.buffer.ptr(), length=64))
+        ctx.state = sha256ni_transform(ctx.state, Span[UInt8, ...](unsafe_ptr=ctx.buffer.ptr(), length=64))
         ctx.buffer_len = 0
 
     while ctx.buffer_len < 56:
@@ -254,7 +255,7 @@ def sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     for k in range(8):
         ctx.buffer[56 + k] = UInt8(UInt64(bit_count >> UInt64(56 - k * 8)) & 0xFF)
 
-    ctx.state = sha256ni_transform(ctx.state, Span[UInt8, ...](ptr=ctx.buffer.ptr(), length=64))
+    ctx.state = sha256ni_transform(ctx.state, Span[UInt8, ...](unsafe_ptr=ctx.buffer.ptr(), length=64))
 
     var output = List[UInt8](capacity=32)
     for k in range(8):
@@ -271,7 +272,7 @@ def has_sha_ni() -> Bool:
 
 def sha256ni_transform_blocks(
     mut state: SIMD[DType.uint32, 8],
-    data: UnsafePointer[UInt8, ImmutAnyOrigin],
+    data: Pointer[mut=False, UInt8, _, address_space=_],
     nblocks: Int,
 ):
     comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86():
@@ -279,17 +280,17 @@ def sha256ni_transform_blocks(
         var st1 = SIMD128(state[4], state[5], state[6], state[7])
 
         for blk in range(nblocks):
-            var ptr = data + blk * 64
+            var ptr = data.unsafe_offset(blk * 64)
             if blk + 1 < nblocks:
                 prefetch_next_block(ptr)
             var old_st0 = st0
             var old_st1 = st1
 
-            var w = InlineArray[SIMD128, 4](uninitialized=True)
+            var w = InlineArray[SIMD128, 4](fill=SIMD128(0))
             w[0] = Load(ptr)
-            w[1] = Load(ptr + 16)
-            w[2] = Load(ptr + 32)
-            w[3] = Load(ptr + 48)
+            w[1] = Load(ptr.unsafe_offset(16))
+            w[2] = Load(ptr.unsafe_offset(32))
+            w[3] = Load(ptr.unsafe_offset(48))
 
             comptime for i in range(16):
                 var wk = w[i & 3] + SIMD128(SHA256_K[4 * i], SHA256_K[4 * i + 1], SHA256_K[4 * i + 2], SHA256_K[4 * i + 3])
@@ -312,13 +313,13 @@ def sha256ni_transform_blocks(
         return
 
     for blk in range(nblocks):
-        var span = Span[UInt8, ...](ptr=data + blk * 64, length=64)
+        var span = Span[UInt8, ...](unsafe_ptr=data.unsafe_offset(blk * 64), length=64)
         state = sha256ni_transform(state, span)
 
 
 comptime SIMD64x2 = SIMD[DType.uint64, 2]
 
-comptime SHA512NI_K = SIMD[DType.uint64, 80](
+comptime SHA512NI_K = StaticTuple[UInt64, 80](
     0x428A2F98D728AE22, 0x7137449123EF65CD, 0xB5C0FBCFEC4D3B2F, 0xE9B5DBA58189DBBC, 0x3956C25BF348B538,
     0x59F111F1B605D019, 0x923F82A4AF194F9B, 0xAB1C5ED5DA6D8118, 0xD807AA98A3030242, 0x12835B0145706FBE,
     0x243185BE4EE4B28C, 0x550C7DC3D5FFB4E2, 0x72BE5D74F27B896F, 0x80DEB1FE3B1696B1, 0x9BDC06A725C71235,
@@ -378,8 +379,8 @@ def byte_swap64(v: SIMD64x2) -> SIMD64x2:
 
 
 @always_inline("nodebug")
-def Load512(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]) -> SIMD64x2:
-    return byte_swap64(ptr.bitcast[UInt64]().load[width=2, alignment=1]())
+def Load512(ptr: Pointer[mut=False, UInt8, _, address_space=_]) -> SIMD64x2:
+    return byte_swap64(ptr.unsafe_bitcast[UInt64]().unsafe_load[width=2, alignment=1]())
 
 
 @always_inline("nodebug")
@@ -388,13 +389,13 @@ def _ext1(a: SIMD64x2, b: SIMD64x2) -> SIMD64x2:
 
 
 @always_inline("nodebug")
-def prefetch_next_block512(ptr: UnsafePointer[UInt8, ImmutAnyOrigin]):
-    prefetch[PrefetchOptions().for_read().high_locality().to_data_cache()](ptr + 128)
+def prefetch_next_block512(ptr: Pointer[mut=False, UInt8, _, address_space=_]):
+    prefetch[PrefetchOptions().for_read().high_locality().to_data_cache()](ptr.unsafe_offset(128))
 
 
 def sha512ni_transform_blocks(
     mut state: SIMD[DType.uint64, 8],
-    data: UnsafePointer[UInt8, ImmutAnyOrigin],
+    data: Pointer[mut=False, UInt8, _, address_space=_],
     nblocks: Int,
 ):
     var ab = SIMD64x2(state[0], state[1])
@@ -403,15 +404,15 @@ def sha512ni_transform_blocks(
     var gh = SIMD64x2(state[6], state[7])
 
     for blk in range(nblocks):
-        var block = data + blk * 128
+        var block = data.unsafe_offset(blk * 128)
         if blk + 1 < nblocks:
             prefetch_next_block512(block)
 
-        var w = InlineArray[SIMD64x2, 8](uninitialized=True)
+        var w = InlineArray[SIMD64x2, 8](fill=SIMD64x2(0))
         comptime for i in range(8):
-            w[i] = Load512(block + i * 16)
+            w[i] = Load512(block.unsafe_offset(i * 16))
 
-        var v = InlineArray[SIMD64x2, 4](uninitialized=True)
+        var v = InlineArray[SIMD64x2, 4](fill=SIMD64x2(0))
         v[0] = ab
         v[1] = cd
         v[2] = ef

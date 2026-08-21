@@ -3,8 +3,9 @@ RSASSA-PSS signature verification per RFC 8017
 """
 
 from std.collections import List, InlineArray
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.bit import rotate_bits_left, count_leading_zeros
+from std.utils import StaticTuple
 from .random import random_bytes
 from .sha2 import (
     sha224_hash, sha256_hash, sha384_hash, sha512_hash,
@@ -18,6 +19,14 @@ comptime SHA224: Int = 224
 comptime SHA256: Int = 256
 comptime SHA384: Int = 384
 comptime SHA512: Int = 512
+
+
+@always_inline
+def _bn_zero() -> StaticTuple[UInt64, _NL]:
+    var out = StaticTuple[UInt64, _NL]()
+    comptime for i in range(_NL):
+        out[i] = 0
+    return out
 
 
 def _sha1(data: Span[UInt8, ...]) -> InlineArray[UInt8, 20]:
@@ -39,7 +48,7 @@ def _sha1(data: Span[UInt8, ...]) -> InlineArray[UInt8, 20]:
     for i in range(7, -1, -1):
         padded.append(UInt8((bits >> UInt64(8 * i)) & 0xFF))
 
-    var w = InlineArray[UInt32, 80](uninitialized=True)
+    var w = InlineArray[UInt32, 80](fill=0)
     var off = 0
     while off < len(padded):
         for t in range(16):
@@ -83,8 +92,8 @@ def _sha1(data: Span[UInt8, ...]) -> InlineArray[UInt8, 20]:
         h4 += e
         off += 64
 
-    var out = InlineArray[UInt8, 20](uninitialized=True)
-    var hs = InlineArray[UInt32, 5](uninitialized=True)
+    var out = InlineArray[UInt8, 20](fill=0)
+    var hs = InlineArray[UInt32, 5](fill=0)
     hs[0] = h0
     hs[1] = h1
     hs[2] = h2
@@ -95,7 +104,7 @@ def _sha1(data: Span[UInt8, ...]) -> InlineArray[UInt8, 20]:
         out[4 * i + 1] = UInt8((hs[i] >> 16) & 0xFF)
         out[4 * i + 2] = UInt8((hs[i] >> 8) & 0xFF)
         out[4 * i + 3] = UInt8(hs[i] & 0xFF)
-    return out
+    return out^
 
 
 def _hash_len(alg: Int) raises -> Int:
@@ -112,7 +121,7 @@ def _hash_len(alg: Int) raises -> Int:
     raise Error("unsupported hash for RSA-PSS")
 
 
-def _hash_into(alg: Int, data: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]) raises -> Int:
+def _hash_into(alg: Int, data: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]) raises -> Int:
     if alg == SHA256:
         var ctx = SHA256Context()
         sha256_update(ctx, data)
@@ -126,7 +135,7 @@ def _hash_into(alg: Int, data: Span[UInt8, ...], output: UnsafePointer[UInt8, Mu
     if alg == SHA1:
         var d1 = _sha1(data)
         for i in range(20):
-            output[i] = d1[i]
+            output[unsafe_offset=i] = d1[i]
         return 20
     var d: List[UInt8]
     if alg == SHA224:
@@ -140,22 +149,22 @@ def _hash_into(alg: Int, data: Span[UInt8, ...], output: UnsafePointer[UInt8, Mu
     else:
         raise Error("unsupported hash for RSA-PSS")
     for i in range(len(d)):
-        output[i] = d[i]
+        output[unsafe_offset=i] = d[i]
     return len(d)
 
 
 def _mgf1(
     alg: Int,
-    seed: UnsafePointer[UInt8, _],
+    seed: Pointer[UInt8, _],
     seed_len: Int,
     mask_len: Int,
-    output: UnsafePointer[UInt8, MutAnyOrigin],
+    output: Pointer[mut=True, UInt8, _, address_space=_],
 ) raises:
     var h_len = _hash_len(alg)
     var block = InlineArray[UInt8, 128](fill=0)
     var digest = InlineArray[UInt8, 64](fill=0)
     for i in range(seed_len):
-        block[i] = seed[i]
+        block[i] = seed[unsafe_offset=i]
     var done = 0
     var counter: UInt32 = 0
     while done < mask_len:
@@ -165,14 +174,14 @@ def _mgf1(
         block[seed_len + 3] = UInt8(counter & 0xFF)
         _ = _hash_into(
             alg,
-            Span[UInt8, ...](ptr=block.unsafe_ptr(), length=seed_len + 4),
+            Span[UInt8, ...](unsafe_ptr=block.unsafe_ptr(), length=seed_len + 4),
             digest.unsafe_ptr(),
         )
         var take = mask_len - done
         if take > h_len:
             take = h_len
         for i in range(take):
-            output[done + i] = digest[i]
+            output[unsafe_offset=done + i] = digest[i]
         done += take
         counter += 1
 
@@ -183,7 +192,7 @@ def _emsa_pss_encode(
     sha: Int,
     mgf_sha: Int,
     em_bits: Int,
-    output: UnsafePointer[UInt8, MutAnyOrigin],
+    output: Pointer[mut=True, UInt8, _, address_space=_],
 ) raises -> Bool:
     var h_len = _hash_len(sha)
     _ = _hash_len(mgf_sha)
@@ -191,17 +200,17 @@ def _emsa_pss_encode(
     if em_len < h_len + 2 or len(salt) > em_len - h_len - 2:
         return False
 
-    var m_hash = InlineArray[UInt8, 64](uninitialized=True)
+    var m_hash = InlineArray[UInt8, 64](fill=0)
     _ = _hash_into(sha, message, m_hash.unsafe_ptr())
     var mprime = InlineArray[UInt8, 534](fill=0)
     for i in range(h_len):
         mprime[8 + i] = m_hash[i]
     for i in range(len(salt)):
         mprime[8 + h_len + i] = salt[i]
-    var h = InlineArray[UInt8, 64](uninitialized=True)
+    var h = InlineArray[UInt8, 64](fill=0)
     _ = _hash_into(
         sha,
-        Span[UInt8, ...](ptr=mprime.unsafe_ptr(), length=8 + h_len + len(salt)),
+        Span[UInt8, ...](unsafe_ptr=mprime.unsafe_ptr(), length=8 + h_len + len(salt)),
         h.unsafe_ptr(),
     )
 
@@ -211,18 +220,18 @@ def _emsa_pss_encode(
     db[ps_len] = 1
     for i in range(len(salt)):
         db[ps_len + 1 + i] = salt[i]
-    var mask = InlineArray[UInt8, 528](uninitialized=True)
+    var mask = InlineArray[UInt8, 528](fill=0)
     _mgf1(mgf_sha, h.unsafe_ptr(), h_len, db_len, mask.unsafe_ptr())
     for i in range(db_len):
-        output[i] = db[i] ^ mask[i]
-    output[0] &= UInt8(0xFF) >> UInt8(8 * em_len - em_bits)
+        output[unsafe_offset=i] = db[i] ^ mask[i]
+    output[unsafe_offset=0] &= UInt8(0xFF) >> UInt8(8 * em_len - em_bits)
     for i in range(h_len):
-        output[db_len + i] = h[i]
-    output[em_len - 1] = 0xBC
+        output[unsafe_offset=db_len + i] = h[i]
+    output[unsafe_offset=em_len - 1] = 0xBC
 
     var mp = mprime.unsafe_ptr()
     for i in range(8 + h_len + len(salt)):
-        mp.store[volatile=True](i, UInt8(0))
+        mp.unsafe_store[volatile=True](i, UInt8(0))
     return True
 
 
@@ -235,7 +244,7 @@ def _digest_info_prefix_len(alg: Int) raises -> Int:
 
 
 def _digest_info_prefix(
-    alg: Int, output: UnsafePointer[UInt8, MutAnyOrigin]
+    alg: Int, output: Pointer[mut=True, UInt8, _, address_space=_]
 ) raises:
     var hex: String
     if alg == SHA1:
@@ -256,11 +265,11 @@ def _digest_info_prefix(
         var lo = bytes[2 * i + 1]
         hi = hi - UInt8(48 if hi <= 57 else 87)
         lo = lo - UInt8(48 if lo <= 57 else 87)
-        output[i] = (hi << 4) | lo
+        output[unsafe_offset=i] = (hi << 4) | lo
 
 
 @always_inline
-def _bn_ge(a: InlineArray[UInt64, _NL], b: InlineArray[UInt64, _NL], k: Int) -> Bool:
+def _bn_ge(a: StaticTuple[UInt64, _NL], b: StaticTuple[UInt64, _NL], k: Int) -> Bool:
     for i in range(k - 1, -1, -1):
         if a[i] > b[i]:
             return True
@@ -271,8 +280,8 @@ def _bn_ge(a: InlineArray[UInt64, _NL], b: InlineArray[UInt64, _NL], k: Int) -> 
 
 @always_inline
 def _bn_ge_ct(
-    a: InlineArray[UInt64, _NL],
-    b: InlineArray[UInt64, _NL],
+    a: StaticTuple[UInt64, _NL],
+    b: StaticTuple[UInt64, _NL],
     k: Int,
 ) -> Bool:
     var borrow: UInt64 = 0
@@ -288,7 +297,7 @@ def _bn_ge_ct(
 
 
 @always_inline
-def _bn_sub(mut a: InlineArray[UInt64, _NL], b: InlineArray[UInt64, _NL], k: Int):
+def _bn_sub(mut a: StaticTuple[UInt64, _NL], b: StaticTuple[UInt64, _NL], k: Int):
     var borrow: UInt64 = 0
     for i in range(k):
         var d = (UInt128(1) << 64) + UInt128(a[i]) - UInt128(b[i]) - UInt128(borrow)
@@ -298,29 +307,29 @@ def _bn_sub(mut a: InlineArray[UInt64, _NL], b: InlineArray[UInt64, _NL], k: Int
 
 @always_inline
 def _bn_sub_copy(
-    a: InlineArray[UInt64, _NL], b: InlineArray[UInt64, _NL], k: Int
-) -> Tuple[InlineArray[UInt64, _NL], UInt64]:
+    a: StaticTuple[UInt64, _NL], b: StaticTuple[UInt64, _NL], k: Int
+) -> Tuple[StaticTuple[UInt64, _NL], UInt64]:
     var out = a
     var borrow: UInt64 = 0
     for i in range(k):
         var d = (UInt128(1) << 64) + UInt128(a[i]) - UInt128(b[i]) - UInt128(borrow)
         out[i] = d.cast[DType.uint64]()
         borrow = 1 - (d >> 64).cast[DType.uint64]()
-    return out^, borrow
+    return out, borrow
 
 
 @always_inline
 def _bn_select(
-    a: InlineArray[UInt64, _NL],
-    b: InlineArray[UInt64, _NL],
+    a: StaticTuple[UInt64, _NL],
+    b: StaticTuple[UInt64, _NL],
     choice: UInt64,
     k: Int,
-) -> InlineArray[UInt64, _NL]:
+) -> StaticTuple[UInt64, _NL]:
     var out = a
     var mask = UInt64(0) - (choice & UInt64(1))
     for i in range(k):
         out[i] = a[i] ^ (mask & (a[i] ^ b[i]))
-    return out^
+    return out
 
 
 @always_inline
@@ -329,7 +338,7 @@ def _nonzero_choice(x: UInt64) -> UInt64:
 
 
 @always_inline
-def _bn_dbl_mod(mut a: InlineArray[UInt64, _NL], n: InlineArray[UInt64, _NL], k: Int):
+def _bn_dbl_mod(mut a: StaticTuple[UInt64, _NL], n: StaticTuple[UInt64, _NL], k: Int):
     var carry: UInt64 = 0
     for i in range(k):
         var v = a[i]
@@ -343,12 +352,12 @@ def _bn_dbl_mod(mut a: InlineArray[UInt64, _NL], n: InlineArray[UInt64, _NL], k:
 
 @always_inline
 def _mont_mul_k[K: Int](
-    a: InlineArray[UInt64, _NL],
-    b: InlineArray[UInt64, _NL],
-    n: InlineArray[UInt64, _NL],
+    a: StaticTuple[UInt64, _NL],
+    b: StaticTuple[UInt64, _NL],
+    n: StaticTuple[UInt64, _NL],
     n0: UInt64,
-) -> InlineArray[UInt64, _NL]:
-    var t = InlineArray[UInt64, _NL](uninitialized=True)
+) -> StaticTuple[UInt64, _NL]:
+    var t = StaticTuple[UInt64, _NL]()
     comptime for z in range(K):
         t[z] = 0
     var t_hi: UInt64 = 0
@@ -403,13 +412,13 @@ def _mont_mul_k[K: Int](
 
 
 def _mont_mul_any(
-    a: InlineArray[UInt64, _NL],
-    b: InlineArray[UInt64, _NL],
-    n: InlineArray[UInt64, _NL],
+    a: StaticTuple[UInt64, _NL],
+    b: StaticTuple[UInt64, _NL],
+    n: StaticTuple[UInt64, _NL],
     n0: UInt64,
     k: Int,
-) -> InlineArray[UInt64, _NL]:
-    var t = InlineArray[UInt64, _NL](fill=0)
+) -> StaticTuple[UInt64, _NL]:
+    var t = _bn_zero()
     var t_hi: UInt64 = 0
     for i in range(k):
         var ai = a[i]
@@ -434,11 +443,11 @@ def _mont_mul_any(
 
 @always_inline
 def _mont_sqr_k[K: Int](
-    a: InlineArray[UInt64, _NL],
-    n: InlineArray[UInt64, _NL],
+    a: StaticTuple[UInt64, _NL],
+    n: StaticTuple[UInt64, _NL],
     n0: UInt64,
-) -> InlineArray[UInt64, _NL]:
-    var t = InlineArray[UInt64, 2 * _NL + 2](uninitialized=True)
+) -> StaticTuple[UInt64, _NL]:
+    var t = InlineArray[UInt64, 2 * _NL + 2](fill=0)
     comptime for z in range(2 * K + 1):
         t[z] = 0
 
@@ -479,7 +488,7 @@ def _mont_sqr_k[K: Int](
         t[i + K] = s2.cast[DType.uint64]()
         ehold = (s2 >> 64).cast[DType.uint64]()
 
-    var out = InlineArray[UInt64, _NL](uninitialized=True)
+    var out = StaticTuple[UInt64, _NL]()
     comptime for i in range(K):
         out[i] = t[K + i]
     var reduced, borrow = _bn_sub_copy(out, n, K)
@@ -489,11 +498,11 @@ def _mont_sqr_k[K: Int](
 
 @always_inline
 def _mont_sqr(
-    a: InlineArray[UInt64, _NL],
-    n: InlineArray[UInt64, _NL],
+    a: StaticTuple[UInt64, _NL],
+    n: StaticTuple[UInt64, _NL],
     n0: UInt64,
     k: Int,
-) -> InlineArray[UInt64, _NL]:
+) -> StaticTuple[UInt64, _NL]:
     if k == 16:
         return _mont_sqr_k[16](a, n, n0)
     if k == 32:
@@ -507,12 +516,12 @@ def _mont_sqr(
 
 @always_inline
 def _mont_mul(
-    a: InlineArray[UInt64, _NL],
-    b: InlineArray[UInt64, _NL],
-    n: InlineArray[UInt64, _NL],
+    a: StaticTuple[UInt64, _NL],
+    b: StaticTuple[UInt64, _NL],
+    n: StaticTuple[UInt64, _NL],
     n0: UInt64,
     k: Int,
-) -> InlineArray[UInt64, _NL]:
+) -> StaticTuple[UInt64, _NL]:
     if k == 16:
         return _mont_mul_k[16](a, b, n, n0)
     if k == 32:
@@ -525,13 +534,13 @@ def _mont_mul(
 
 
 struct RsaPublicKey:
-    var n: InlineArray[UInt64, _NL]
+    var n: StaticTuple[UInt64, _NL]
     var k: Int
     var nb: Int
     var mod_bits: Int
     var n0: UInt64
-    var rmod: InlineArray[UInt64, _NL]
-    var r2: InlineArray[UInt64, _NL]
+    var rmod: StaticTuple[UInt64, _NL]
+    var r2: StaticTuple[UInt64, _NL]
     var e: List[UInt8]
 
     def __init__(out self, modulus: Span[UInt8, ...], exponent: Span[UInt8, ...]) raises:
@@ -569,7 +578,7 @@ struct RsaPublicKey:
         self.k = (nb + 7) // 8
         var k = self.k
 
-        self.n = InlineArray[UInt64, _NL](fill=0)
+        self.n = _bn_zero()
         for i in range(nb):
             var byte = UInt64(modulus[lead + nb - 1 - i])
             self.n[i >> 3] |= byte << UInt64(8 * (i & 7))
@@ -589,7 +598,7 @@ struct RsaPublicKey:
             inv = inv * (2 - n0 * inv)
         self.n0 = UInt64(0) - inv
 
-        self.rmod = InlineArray[UInt64, _NL](fill=0)
+        self.rmod = _bn_zero()
         if (self.n[k - 1] >> 63) != 0:
             _bn_sub(self.rmod, self.n, k)
         else:
@@ -612,13 +621,13 @@ struct RsaPublicKey:
     def _public_op(
         self,
         sig: Span[UInt8, ...],
-        output: UnsafePointer[UInt8, MutAnyOrigin],
+        output: Pointer[mut=True, UInt8, _, address_space=_],
     ) raises -> Bool:
         var nb = self.nb
         var k = self.k
         if len(sig) != nb:
             return False
-        var s = InlineArray[UInt64, _NL](fill=0)
+        var s = _bn_zero()
         for i in range(nb):
             var byte = UInt64(sig[nb - 1 - i])
             s[i >> 3] |= byte << UInt64(8 * (i & 7))
@@ -642,12 +651,12 @@ struct RsaPublicKey:
         if not started:
             return False
 
-        var one = InlineArray[UInt64, _NL](fill=0)
+        var one = _bn_zero()
         one[0] = 1
         var m = _mont_mul(acc, one, self.n, self.n0, k)
         for i in range(nb):
             var limb = m[(nb - 1 - i) >> 3]
-            output[i] = UInt8((limb >> UInt64(8 * ((nb - 1 - i) & 7))) & 0xFF)
+            output[unsafe_offset=i] = UInt8((limb >> UInt64(8 * ((nb - 1 - i) & 7))) & 0xFF)
         return True
 
     def pss_verify(
@@ -669,29 +678,29 @@ struct RsaPublicKey:
         if em_len < h_len + 2 or salt_len > em_len - h_len - 2:
             return False
 
-        var em = InlineArray[UInt8, 528](uninitialized=True)
+        var em = InlineArray[UInt8, 528](fill=0)
         if not self._public_op(signature, em.unsafe_ptr()):
             return False
         for i in range(nb - em_len):
             if em[i] != 0:
                 return False
-        var ep = em.unsafe_ptr() + (nb - em_len)
+        var ep = em.unsafe_ptr().unsafe_offset((nb - em_len))
 
-        if ep[em_len - 1] != 0xBC:
+        if ep[unsafe_offset=em_len - 1] != 0xBC:
             return False
 
         var db_len = em_len - h_len - 1
-        var h_ptr = ep + db_len
+        var h_ptr = ep.unsafe_offset(db_len)
 
         var top_mask = UInt8(0xFF) >> UInt8(8 * em_len - em_bits)
-        if (ep[0] & ~top_mask) != 0:
+        if (ep[unsafe_offset=0] & ~top_mask) != 0:
             return False
 
-        var db_mask = InlineArray[UInt8, 528](uninitialized=True)
+        var db_mask = InlineArray[UInt8, 528](fill=0)
         _mgf1(mgf_sha, h_ptr, h_len, db_len, db_mask.unsafe_ptr())
-        var db = InlineArray[UInt8, 528](uninitialized=True)
+        var db = InlineArray[UInt8, 528](fill=0)
         for i in range(db_len):
-            db[i] = ep[i] ^ db_mask[i]
+            db[i] = ep[unsafe_offset=i] ^ db_mask[i]
         db[0] &= top_mask
 
         var ps_len = db_len - salt_len - 1
@@ -701,33 +710,44 @@ struct RsaPublicKey:
         if db[ps_len] != 0x01:
             return False
 
-        var m_hash = InlineArray[UInt8, 64](uninitialized=True)
+        var m_hash = InlineArray[UInt8, 64](fill=0)
         _ = _hash_into(sha, message, m_hash.unsafe_ptr())
 
-        var mprime = InlineArray[UInt8, 534](uninitialized=True)
+        var mprime = InlineArray[UInt8, 534](fill=0)
         for i in range(8):
             mprime[i] = 0
         for i in range(h_len):
             mprime[8 + i] = m_hash[i]
         for i in range(salt_len):
             mprime[8 + h_len + i] = db[ps_len + 1 + i]
-        var h2 = InlineArray[UInt8, 64](uninitialized=True)
+        var h2 = InlineArray[UInt8, 64](fill=0)
         _ = _hash_into(
             sha,
-            Span[UInt8, ...](ptr=mprime.unsafe_ptr(), length=8 + h_len + salt_len),
+            Span[UInt8, ...](unsafe_ptr=mprime.unsafe_ptr(), length=8 + h_len + salt_len),
             h2.unsafe_ptr(),
         )
 
         var diff: UInt8 = 0
         for i in range(h_len):
-            diff |= h2[i] ^ h_ptr[i]
+            diff |= h2[i] ^ h_ptr[unsafe_offset=i]
         return diff == 0
 
 
-def _wipe_bn(mut value: InlineArray[UInt64, _NL], k: Int):
-    var ptr = value.unsafe_ptr()
+def _wipe_bn(mut value: StaticTuple[UInt64, _NL], k: Int):
+    # StaticTuple indexing returns an element by value. Take the address of the
+    # aggregate itself so the volatile stores target the caller's tuple storage.
+    var ptr = Pointer(to=value).unsafe_bitcast[UInt64]()
     for i in range(k):
-        ptr.store[volatile=True](i, UInt64(0))
+        ptr.unsafe_store[volatile=True](i, UInt64(0))
+
+
+def _wipe_bn_table(
+    mut table: StaticTuple[StaticTuple[UInt64, _NL], 16], k: Int
+):
+    var ptr = Pointer(to=table).unsafe_bitcast[UInt64]()
+    for row in range(16):
+        for i in range(k):
+            ptr.unsafe_store[volatile=True](row * _NL + i, UInt64(0))
 
 
 struct RsaPrivateKey:
@@ -750,7 +770,7 @@ struct RsaPrivateKey:
         var d_len = len(private_exponent) - lead
         if d_len == 0 or d_len > self.public.nb:
             raise Error("invalid RSA private exponent")
-        var dbn = InlineArray[UInt64, _NL](fill=0)
+        var dbn = _bn_zero()
         for i in range(d_len):
             var byte = UInt64(private_exponent[lead + d_len - 1 - i])
             dbn[i >> 3] |= byte << UInt64(8 * (i & 7))
@@ -761,21 +781,21 @@ struct RsaPrivateKey:
             self.d[self.public.nb - d_len + i] = private_exponent[lead + i]
         _wipe_bn(dbn, self.public.k)
 
-    def __del__(deinit self):
+    def __deinit__(deinit self):
         var ptr = self.d.unsafe_ptr()
         for i in range(528):
-            ptr.store[volatile=True](i, UInt8(0))
+            ptr.unsafe_store[volatile=True](i, UInt8(0))
 
     def _private_op(
         self,
         encoded: Span[UInt8, ...],
-        signature: UnsafePointer[UInt8, MutAnyOrigin],
+        signature: Pointer[mut=True, UInt8, _, address_space=_],
     ) raises -> Bool:
         var nb = self.public.nb
         var k = self.public.k
         if len(encoded) != nb:
             return False
-        var input = InlineArray[UInt64, _NL](fill=0)
+        var input = _bn_zero()
         for i in range(nb):
             var byte = UInt64(encoded[nb - 1 - i])
             input[i >> 3] |= byte << UInt64(8 * (i & 7))
@@ -784,7 +804,7 @@ struct RsaPrivateKey:
             return False
 
         var base = _mont_mul(input, self.public.r2, self.public.n, self.public.n0, k)
-        var table = InlineArray[InlineArray[UInt64, _NL], 16](uninitialized=True)
+        var table = StaticTuple[StaticTuple[UInt64, _NL], 16]()
         table[0] = self.public.rmod
         table[1] = base
         for i in range(2, 16):
@@ -805,15 +825,15 @@ struct RsaPrivateKey:
                     selected = _bn_select(selected, table[i], hit, k)
                 acc = _mont_mul(acc, selected, self.public.n, self.public.n0, k)
 
-        var one = InlineArray[UInt64, _NL](fill=0)
+        var one = _bn_zero()
         one[0] = 1
         var result = _mont_mul(acc, one, self.public.n, self.public.n0, k)
         for i in range(nb):
             var limb = result[(nb - 1 - i) >> 3]
-            signature[i] = UInt8((limb >> UInt64(8 * ((nb - 1 - i) & 7))) & 0xFF)
+            signature[unsafe_offset=i] = UInt8((limb >> UInt64(8 * ((nb - 1 - i) & 7))) & 0xFF)
 
-        var recovered = InlineArray[UInt8, 528](uninitialized=True)
-        var sig_span = Span[UInt8, ...](ptr=signature, length=nb)
+        var recovered = InlineArray[UInt8, 528](fill=0)
+        var sig_span = Span[UInt8, ...](unsafe_ptr=signature, length=nb)
         var valid = self.public._public_op(sig_span, recovered.unsafe_ptr())
         var diff = UInt8(0)
         for i in range(nb):
@@ -821,14 +841,13 @@ struct RsaPrivateKey:
         valid = valid and diff == 0
         if not valid:
             for i in range(nb):
-                signature.store[volatile=True](i, UInt8(0))
+                signature.unsafe_store[volatile=True](i, UInt8(0))
 
         _wipe_bn(input, k)
         _wipe_bn(base, k)
         _wipe_bn(acc, k)
         _wipe_bn(result, k)
-        for i in range(16):
-            _wipe_bn(table[i], k)
+        _wipe_bn_table(table, k)
         return valid
 
     def pss_sign_with_salt(
@@ -837,23 +856,25 @@ struct RsaPrivateKey:
         salt: Span[UInt8, ...],
         sha: Int,
         mgf_sha: Int,
-        signature: UnsafePointer[UInt8, MutAnyOrigin],
+        signature: Span[mut=True, UInt8, ...],
     ) raises -> Bool:
+        if len(signature) < self.public.nb:
+            return False
         var em_bits = self.public.mod_bits - 1
         var em_len = (em_bits + 7) // 8
         var encoded = InlineArray[UInt8, 528](fill=0)
         if not _emsa_pss_encode(
             message, salt, sha, mgf_sha, em_bits,
-            encoded.unsafe_ptr() + (self.public.nb - em_len),
+            encoded.unsafe_ptr().unsafe_offset((self.public.nb - em_len)),
         ):
             return False
         var ok = self._private_op(
-            Span[UInt8, ...](ptr=encoded.unsafe_ptr(), length=self.public.nb),
-            signature,
+            Span[UInt8, ...](unsafe_ptr=encoded.unsafe_ptr(), length=self.public.nb),
+            signature.unsafe_ptr(),
         )
         var ep = encoded.unsafe_ptr()
         for i in range(self.public.nb):
-            ep.store[volatile=True](i, UInt8(0))
+            ep.unsafe_store[volatile=True](i, UInt8(0))
         return ok
 
     def pss_sign(
@@ -873,11 +894,12 @@ struct RsaPrivateKey:
         var salt = random_bytes(salt_len)
         var signature = List[UInt8](unsafe_uninit_length=self.public.nb)
         var ok = self.pss_sign_with_salt(
-            message, Span[UInt8, ...](salt), sha, mgf_sha, signature.unsafe_ptr()
+            message, Span[UInt8, ...](salt), sha, mgf_sha,
+            Span[mut=True, UInt8, ...](signature),
         )
         var salt_ptr = salt.unsafe_ptr()
         for i in range(len(salt)):
-            salt_ptr.store[volatile=True](i, UInt8(0))
+            salt_ptr.unsafe_store[volatile=True](i, UInt8(0))
         if not ok:
             raise Error("RSA-PSS signing failed")
         return signature^
@@ -885,8 +907,8 @@ struct RsaPrivateKey:
 
 def _bn_reduce_bytes(
     data: Span[UInt8, ...], key: RsaPublicKey
-) -> InlineArray[UInt64, _NL]:
-    var value = InlineArray[UInt64, _NL](fill=0)
+) -> StaticTuple[UInt64, _NL]:
+    var value = _bn_zero()
     for bi in range(len(data)):
         var byte = data[bi]
         for bit in range(7, -1, -1):
@@ -898,16 +920,16 @@ def _bn_reduce_bytes(
             var reduced, borrow = _bn_sub_copy(value, key.n, key.k)
             var take = carry | (borrow ^ UInt64(1))
             value = _bn_select(value, reduced, take, key.k)
-    return value^
+    return value
 
 
 def _private_pow(
     key: RsaPublicKey,
     exponent: InlineArray[UInt8, 528],
-    input: InlineArray[UInt64, _NL],
-) -> InlineArray[UInt64, _NL]:
+    input: StaticTuple[UInt64, _NL],
+) -> StaticTuple[UInt64, _NL]:
     var base = _mont_mul(input, key.r2, key.n, key.n0, key.k)
-    var table = InlineArray[InlineArray[UInt64, _NL], 16](uninitialized=True)
+    var table = StaticTuple[StaticTuple[UInt64, _NL], 16]()
     table[0] = key.rmod
     table[1] = base
     for i in range(2, 16):
@@ -926,21 +948,20 @@ def _private_pow(
                 var hit = _nonzero_choice(digit ^ UInt64(i)) ^ UInt64(1)
                 selected = _bn_select(selected, table[i], hit, key.k)
             acc = _mont_mul(acc, selected, key.n, key.n0, key.k)
-    var one = InlineArray[UInt64, _NL](fill=0)
+    var one = _bn_zero()
     one[0] = 1
     var result = _mont_mul(acc, one, key.n, key.n0, key.k)
     _wipe_bn(base, key.k)
     _wipe_bn(acc, key.k)
-    for i in range(16):
-        _wipe_bn(table[i], key.k)
-    return result^
+    _wipe_bn_table(table, key.k)
+    return result
 
 
 def _bn_mul_parts(
-    a: InlineArray[UInt64, _NL], a_len: Int,
-    b: InlineArray[UInt64, _NL], b_len: Int,
-) -> InlineArray[UInt64, _NL]:
-    var out = InlineArray[UInt64, _NL](fill=0)
+    a: StaticTuple[UInt64, _NL], a_len: Int,
+    b: StaticTuple[UInt64, _NL], b_len: Int,
+) -> StaticTuple[UInt64, _NL]:
+    var out = _bn_zero()
     for i in range(a_len):
         var carry = UInt64(0)
         for j in range(b_len):
@@ -948,11 +969,11 @@ def _bn_mul_parts(
             out[i + j] = product.cast[DType.uint64]()
             carry = (product >> 64).cast[DType.uint64]()
         out[i + b_len] = carry
-    return out^
+    return out
 
 
 def _bn_equal(
-    a: InlineArray[UInt64, _NL], b: InlineArray[UInt64, _NL], k: Int
+    a: StaticTuple[UInt64, _NL], b: StaticTuple[UInt64, _NL], k: Int
 ) -> Bool:
     var diff = UInt64(0)
     for i in range(k):
@@ -966,7 +987,7 @@ struct RsaCrtPrivateKey:
     var q: RsaPublicKey
     var dp: InlineArray[UInt8, 528]
     var dq: InlineArray[UInt8, 528]
-    var qinv: InlineArray[UInt64, _NL]
+    var qinv: StaticTuple[UInt64, _NL]
 
     def __init__(
         out self,
@@ -979,11 +1000,11 @@ struct RsaCrtPrivateKey:
         if self.public.mod_bits < 2048:
             raise Error("RSA signing requires a modulus of at least 2048 bits")
         var three = InlineArray[UInt8, 1](fill=3)
-        self.p = RsaPublicKey(prime1, Span[UInt8, ...](ptr=three.unsafe_ptr(), length=1))
-        self.q = RsaPublicKey(prime2, Span[UInt8, ...](ptr=three.unsafe_ptr(), length=1))
+        self.p = RsaPublicKey(prime1, Span[UInt8, ...](unsafe_ptr=three.unsafe_ptr(), length=1))
+        self.q = RsaPublicKey(prime2, Span[UInt8, ...](unsafe_ptr=three.unsafe_ptr(), length=1))
         self.dp = InlineArray[UInt8, 528](fill=0)
         self.dq = InlineArray[UInt8, 528](fill=0)
-        self.qinv = InlineArray[UInt64, _NL](fill=0)
+        self.qinv = _bn_zero()
         if self.p.k + self.q.k > _NL:
             raise Error("RSA CRT factors are too large")
 
@@ -1006,8 +1027,8 @@ struct RsaCrtPrivateKey:
             self.dp[self.p.nb - dp_len + i] = exponent1[dp_lead + i]
         for i in range(dq_len):
             self.dq[self.q.nb - dq_len + i] = exponent2[dq_lead + i]
-        var dp_bn = InlineArray[UInt64, _NL](fill=0)
-        var dq_bn = InlineArray[UInt64, _NL](fill=0)
+        var dp_bn = _bn_zero()
+        var dq_bn = _bn_zero()
         for i in range(self.p.nb):
             dp_bn[i >> 3] |= UInt64(self.dp[self.p.nb - 1 - i]) << UInt64(8 * (i & 7))
         for i in range(self.q.nb):
@@ -1038,7 +1059,7 @@ struct RsaCrtPrivateKey:
             var limb = self.q.n[(self.q.nb - 1 - i) >> 3]
             q_bytes[i] = UInt8((limb >> UInt64(8 * ((self.q.nb - 1 - i) & 7))) & 0xFF)
         var q_mod_p = _bn_reduce_bytes(
-            Span[UInt8, ...](ptr=q_bytes.unsafe_ptr(), length=self.q.nb), self.p
+            Span[UInt8, ...](unsafe_ptr=q_bytes.unsafe_ptr(), length=self.q.nb), self.p
         )
         var check = _mont_mul(
             _mont_mul(q_mod_p, self.p.r2, self.p.n, self.p.n0, self.p.k),
@@ -1049,19 +1070,19 @@ struct RsaCrtPrivateKey:
             coefficient_diff |= check[i]
         var qbp = q_bytes.unsafe_ptr()
         for i in range(self.q.nb):
-            qbp.store[volatile=True](i, UInt8(0))
+            qbp.unsafe_store[volatile=True](i, UInt8(0))
         _wipe_bn(product, self.public.k)
         _wipe_bn(q_mod_p, self.p.k)
         _wipe_bn(check, self.p.k)
         if coefficient_diff != 0:
             raise Error("invalid RSA CRT coefficient")
 
-    def __del__(deinit self):
+    def __deinit__(deinit self):
         var dpp = self.dp.unsafe_ptr()
         var dqp = self.dq.unsafe_ptr()
         for i in range(528):
-            dpp.store[volatile=True](i, UInt8(0))
-            dqp.store[volatile=True](i, UInt8(0))
+            dpp.unsafe_store[volatile=True](i, UInt8(0))
+            dqp.unsafe_store[volatile=True](i, UInt8(0))
         _wipe_bn(self.qinv, self.p.k)
         _wipe_bn(self.p.n, self.p.k)
         _wipe_bn(self.p.rmod, self.p.k)
@@ -1074,7 +1095,7 @@ struct RsaCrtPrivateKey:
 
     def _private_op(
         self, encoded: Span[UInt8, ...],
-        signature: UnsafePointer[UInt8, MutAnyOrigin],
+        signature: Pointer[mut=True, UInt8, _, address_space=_],
     ) raises -> Bool:
         if len(encoded) != self.public.nb:
             return False
@@ -1088,7 +1109,7 @@ struct RsaCrtPrivateKey:
             var limb = m2[(self.q.nb - 1 - i) >> 3]
             m2_bytes[i] = UInt8((limb >> UInt64(8 * ((self.q.nb - 1 - i) & 7))) & 0xFF)
         var m2_mod_p = _bn_reduce_bytes(
-            Span[UInt8, ...](ptr=m2_bytes.unsafe_ptr(), length=self.q.nb), self.p
+            Span[UInt8, ...](unsafe_ptr=m2_bytes.unsafe_ptr(), length=self.q.nb), self.p
         )
         var h, borrow = _bn_sub_copy(m1, m2_mod_p, self.p.k)
         var h_plus_p = h
@@ -1114,11 +1135,11 @@ struct RsaCrtPrivateKey:
             carry = (sum >> 64).cast[DType.uint64]()
         for i in range(self.public.nb):
             var limb = result[(self.public.nb - 1 - i) >> 3]
-            signature[i] = UInt8((limb >> UInt64(8 * ((self.public.nb - 1 - i) & 7))) & 0xFF)
+            signature[unsafe_offset=i] = UInt8((limb >> UInt64(8 * ((self.public.nb - 1 - i) & 7))) & 0xFF)
 
-        var recovered = InlineArray[UInt8, 528](uninitialized=True)
+        var recovered = InlineArray[UInt8, 528](fill=0)
         var valid = self.public._public_op(
-            Span[UInt8, ...](ptr=signature, length=self.public.nb), recovered.unsafe_ptr()
+            Span[UInt8, ...](unsafe_ptr=signature, length=self.public.nb), recovered.unsafe_ptr()
         )
         var diff = UInt8(0)
         for i in range(self.public.nb):
@@ -1126,7 +1147,7 @@ struct RsaCrtPrivateKey:
         valid = valid and diff == 0
         if not valid:
             for i in range(self.public.nb):
-                signature.store[volatile=True](i, UInt8(0))
+                signature.unsafe_store[volatile=True](i, UInt8(0))
 
         _wipe_bn(mp, self.p.k)
         _wipe_bn(mq, self.q.k)
@@ -1138,28 +1159,31 @@ struct RsaCrtPrivateKey:
         _wipe_bn(result, self.public.k)
         var m2p = m2_bytes.unsafe_ptr()
         for i in range(self.q.nb):
-            m2p.store[volatile=True](i, UInt8(0))
+            m2p.unsafe_store[volatile=True](i, UInt8(0))
         return valid
 
     def pss_sign_with_salt(
         self, message: Span[UInt8, ...], salt: Span[UInt8, ...],
         sha: Int, mgf_sha: Int,
-        signature: UnsafePointer[UInt8, MutAnyOrigin],
+        signature: Span[mut=True, UInt8, ...],
     ) raises -> Bool:
+        if len(signature) < self.public.nb:
+            return False
         var em_bits = self.public.mod_bits - 1
         var em_len = (em_bits + 7) // 8
         var encoded = InlineArray[UInt8, 528](fill=0)
         if not _emsa_pss_encode(
             message, salt, sha, mgf_sha, em_bits,
-            encoded.unsafe_ptr() + (self.public.nb - em_len),
+            encoded.unsafe_ptr().unsafe_offset((self.public.nb - em_len)),
         ):
             return False
         var ok = self._private_op(
-            Span[UInt8, ...](ptr=encoded.unsafe_ptr(), length=self.public.nb), signature
+            Span[UInt8, ...](unsafe_ptr=encoded.unsafe_ptr(), length=self.public.nb),
+            signature.unsafe_ptr(),
         )
         var ep = encoded.unsafe_ptr()
         for i in range(self.public.nb):
-            ep.store[volatile=True](i, UInt8(0))
+            ep.unsafe_store[volatile=True](i, UInt8(0))
         return ok
 
     def pss_sign(
@@ -1179,11 +1203,12 @@ struct RsaCrtPrivateKey:
         var salt = random_bytes(salt_len)
         var signature = List[UInt8](unsafe_uninit_length=self.public.nb)
         var ok = self.pss_sign_with_salt(
-            message, Span[UInt8, ...](salt), sha, mgf_sha, signature.unsafe_ptr()
+            message, Span[UInt8, ...](salt), sha, mgf_sha,
+            Span[mut=True, UInt8, ...](signature),
         )
         var salt_ptr = salt.unsafe_ptr()
         for i in range(len(salt)):
-            salt_ptr.store[volatile=True](i, UInt8(0))
+            salt_ptr.unsafe_store[volatile=True](i, UInt8(0))
         if not ok:
             raise Error("RSA-PSS signing failed")
         return signature^
@@ -1200,7 +1225,7 @@ def _pkcs1_v15_verify(
     if key.nb < t_len + 11:
         return False
 
-    var em = InlineArray[UInt8, 528](uninitialized=True)
+    var em = InlineArray[UInt8, 528](fill=0)
     if not key._public_op(signature, em.unsafe_ptr()):
         return False
 
@@ -1215,7 +1240,7 @@ def _pkcs1_v15_verify(
     for i in range(prefix_len):
         diff |= em[3 + ps_len + i] ^ prefix[i]
 
-    var digest = InlineArray[UInt8, 64](uninitialized=True)
+    var digest = InlineArray[UInt8, 64](fill=0)
     _ = _hash_into(sha, message, digest.unsafe_ptr())
     for i in range(h_len):
         diff |= em[3 + ps_len + prefix_len + i] ^ digest[i]
@@ -1251,7 +1276,7 @@ def rsa_pss_sign_with_salt(
     var key = RsaPrivateKey(modulus, exponent, private_exponent)
     var signature = List[UInt8](unsafe_uninit_length=key.public.nb)
     if not key.pss_sign_with_salt(
-        message, salt, sha, mgf_sha, signature.unsafe_ptr()
+        message, salt, sha, mgf_sha, Span[mut=True, UInt8, ...](signature)
     ):
         raise Error("RSA-PSS signing failed")
     return signature^
@@ -1282,7 +1307,7 @@ def rsa_pss_crt_sign_with_salt(
     )
     var signature = List[UInt8](unsafe_uninit_length=key.public.nb)
     if not key.pss_sign_with_salt(
-        message, salt, sha, mgf_sha, signature.unsafe_ptr()
+        message, salt, sha, mgf_sha, Span[mut=True, UInt8, ...](signature)
     ):
         raise Error("RSA-PSS signing failed")
     return signature^

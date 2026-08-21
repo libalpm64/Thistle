@@ -6,6 +6,7 @@ from .p256_table import p256_base_table
 from .utils import u64_nonzero_choice, u64_zero_choice
 from .sha2 import sha256_hash
 from .pbkdf2 import hmac_sha256
+from std.utils import StaticTuple
 
 comptime P256_SIZE = 32
 comptime P256_POINT_SIZE = 65
@@ -14,13 +15,15 @@ comptime _MASK64 = UInt128(0xFFFFFFFFFFFFFFFF)
 
 
 struct U256(Copyable, ImplicitlyCopyable, Movable):
-    var limbs: InlineArray[UInt64, 4]
+    var limbs: StaticTuple[UInt64, 4]
 
     def __init__(out self):
-        self.limbs = InlineArray[UInt64, 4](fill=0)
+        self.limbs = StaticTuple[UInt64, 4]()
+        comptime for i in range(4):
+            self.limbs[i] = 0
 
     def __init__(out self, l0: UInt64, l1: UInt64, l2: UInt64, l3: UInt64):
-        self.limbs = InlineArray[UInt64, 4](uninitialized=True)
+        self.limbs = StaticTuple[UInt64, 4]()
         self.limbs[0] = l0
         self.limbs[1] = l1
         self.limbs[2] = l2
@@ -451,11 +454,11 @@ def _from_be(bytes: Span[UInt8, ...]) -> U256:
     return out
 
 
-def _to_be(x: U256, output: UnsafePointer[UInt8, MutAnyOrigin]):
+def _to_be(x: U256, output: Pointer[mut=True, UInt8, _, address_space=_]):
     for i in range(4):
         var limb = x.limbs[3 - i]
         for k in range(8):
-            output[i * 8 + k] = UInt8((limb >> UInt64(56 - 8 * k)) & 0xFF)
+            output[unsafe_offset=i * 8 + k] = UInt8((limb >> UInt64(56 - 8 * k)) & 0xFF)
 
 
 struct P256Point(Copyable, ImplicitlyCopyable, Movable):
@@ -658,21 +661,21 @@ def _jacobian_to_affine(p: P256JacobianPoint) -> P256Point:
 def _scalar_mult(k: U256, p: P256Point) -> P256Point:
     # Fixed-window scan keeps scalar access constant-time.
     var pm = P256Point(_to_mont(p.x), _to_mont(p.y), False)
-    var jac = InlineArray[P256JacobianPoint, 15](uninitialized=True)
+    var jac = InlineArray[P256JacobianPoint, 15](fill=P256JacobianPoint())
     jac[0] = P256JacobianPoint(pm.x, pm.y, _one_mont(), False)
     jac[1] = _jacobian_double_ct(jac[0])
     for i in range(2, 15):
         jac[i] = _jacobian_add_affine_non_equal_ct(jac[i - 1], pm)
 
     # Normalize the table with one inversion.
-    var prefix = InlineArray[U256, 15](uninitialized=True)
+    var prefix = InlineArray[U256, 15](fill=U256())
     prefix[0] = jac[0].z
     for i in range(1, 15):
         prefix[i] = _mont_mul(prefix[i - 1], jac[i].z)
     var inv_acc = _inv_p(prefix[14])
 
-    var tx = InlineArray[U256, 15](uninitialized=True)
-    var ty = InlineArray[U256, 15](uninitialized=True)
+    var tx = InlineArray[U256, 15](fill=U256())
+    var ty = InlineArray[U256, 15](fill=U256())
     for jj in range(15):
         var j = 14 - jj
         var zinv = inv_acc
@@ -708,15 +711,15 @@ def _scalar_mult(k: U256, p: P256Point) -> P256Point:
 
 @always_inline
 def _base_table_entry(
-    tptr: UnsafePointer[UInt64, _], j: Int, d: UInt64
+    tptr: Pointer[UInt64, _], j: Int, d: UInt64
 ) -> P256Point:
     var qx = U256()
     var qy = U256()
     for t in range(1, 16):
         var hit = u64_zero_choice(UInt64(t) ^ d)
         var base = (j * 15 + (t - 1)) * 8
-        var ex = U256(tptr[base], tptr[base + 1], tptr[base + 2], tptr[base + 3])
-        var ey = U256(tptr[base + 4], tptr[base + 5], tptr[base + 6], tptr[base + 7])
+        var ex = U256(tptr[unsafe_offset=base], tptr[unsafe_offset=base + 1], tptr[unsafe_offset=base + 2], tptr[unsafe_offset=base + 3])
+        var ey = U256(tptr[unsafe_offset=base + 4], tptr[unsafe_offset=base + 5], tptr[unsafe_offset=base + 6], tptr[unsafe_offset=base + 7])
         qx = _select_u256(qx, ex, hit)
         qy = _select_u256(qy, ey, hit)
     return P256Point(qx, qy, False)
@@ -750,7 +753,7 @@ def _scalar_mult_base(k: U256) -> P256Point:
 def p256_decode_uncompressed(point: Span[UInt8, ...]) -> P256Point:
     if len(point) == 33 and (point[0] == 0x02 or point[0] == 0x03):
         var x = _from_be(
-            Span[UInt8, ...](ptr=point.unsafe_ptr() + 1, length=32)
+            Span[UInt8, ...](unsafe_ptr=point.unsafe_ptr().unsafe_offset(1), length=32)
         )
         if _cmp(x, _p()) >= 0:
             return P256Point()
@@ -769,8 +772,8 @@ def p256_decode_uncompressed(point: Span[UInt8, ...]) -> P256Point:
         return p
     if len(point) != P256_POINT_SIZE or point[0] != 0x04:
         return P256Point()
-    var x = _from_be(Span[UInt8, ...](ptr=point.unsafe_ptr() + 1, length=32))
-    var y = _from_be(Span[UInt8, ...](ptr=point.unsafe_ptr() + 33, length=32))
+    var x = _from_be(Span[UInt8, ...](unsafe_ptr=point.unsafe_ptr().unsafe_offset(1), length=32))
+    var y = _from_be(Span[UInt8, ...](unsafe_ptr=point.unsafe_ptr().unsafe_offset(33), length=32))
     var p = P256Point(x, y, False)
     if not _is_on_curve(p):
         return P256Point()
@@ -778,33 +781,34 @@ def p256_decode_uncompressed(point: Span[UInt8, ...]) -> P256Point:
 
 
 def p256_encode_uncompressed(
-    point: P256Point, output: UnsafePointer[UInt8, MutAnyOrigin]
+    point: P256Point, output: Span[mut=True, UInt8, ...]
 ) -> Bool:
-    if point.infinity or not _is_on_curve(point):
+    if len(output) < P256_POINT_SIZE or point.infinity or not _is_on_curve(point):
         return False
-    output[0] = 0x04
-    _to_be(point.x, output + 1)
-    _to_be(point.y, output + 33)
+    var out_ptr = output.unsafe_ptr()
+    out_ptr[unsafe_offset=0] = 0x04
+    _to_be(point.x, out_ptr.unsafe_offset(1))
+    _to_be(point.y, out_ptr.unsafe_offset(33))
     return True
 
 
 @no_inline
 def p256_public_key(
-    private_key: Span[UInt8, ...], output: UnsafePointer[UInt8, MutAnyOrigin]
+    private_key: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
 ) -> Bool:
-    if len(private_key) != 32:
+    if len(private_key) != 32 or len(output) < P256_POINT_SIZE:
         return False
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
-        var dp = d.limbs.unsafe_ptr()
+        var dp = Pointer(to=d.limbs[0]).unsafe_mut_cast[True]()
         for i in range(4):
-            dp.store[volatile=True](i, UInt64(0))
+            dp.unsafe_store[volatile=True](i, UInt64(0))
         return False
     var q = _scalar_mult_base(d)
     var ok = p256_encode_uncompressed(q, output)
-    var dp = d.limbs.unsafe_ptr()
+    var dp = Pointer(to=d.limbs[0]).unsafe_mut_cast[True]()
     for i in range(4):
-        dp.store[volatile=True](i, UInt64(0))
+        dp.unsafe_store[volatile=True](i, UInt64(0))
     return ok
 
 
@@ -812,29 +816,29 @@ def p256_public_key(
 def p256_ecdh(
     private_key: Span[UInt8, ...],
     public_key: Span[UInt8, ...],
-    output: UnsafePointer[UInt8, MutAnyOrigin],
+    output: Span[mut=True, UInt8, ...],
 ) -> Bool:
-    if len(private_key) != 32:
+    if len(private_key) != 32 or len(output) < P256_SIZE:
         return False
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
-        var dp = d.limbs.unsafe_ptr()
+        var dp = Pointer(to=d.limbs[0]).unsafe_mut_cast[True]()
         for i in range(4):
-            dp.store[volatile=True](i, UInt64(0))
+            dp.unsafe_store[volatile=True](i, UInt64(0))
         return False
     var q = p256_decode_uncompressed(public_key)
     if q.infinity:
-        var dp = d.limbs.unsafe_ptr()
+        var dp = Pointer(to=d.limbs[0]).unsafe_mut_cast[True]()
         for i in range(4):
-            dp.store[volatile=True](i, UInt64(0))
+            dp.unsafe_store[volatile=True](i, UInt64(0))
         return False
     var shared = _scalar_mult(d, q)
-    var dp = d.limbs.unsafe_ptr()
+    var dp = Pointer(to=d.limbs[0]).unsafe_mut_cast[True]()
     for i in range(4):
-        dp.store[volatile=True](i, UInt64(0))
+        dp.unsafe_store[volatile=True](i, UInt64(0))
     if shared.infinity:
         return False
-    _to_be(shared.x, output)
+    _to_be(shared.x, output.unsafe_ptr())
     return True
 
 
@@ -925,20 +929,20 @@ def _reduce_n(x: U256) -> U256:
 
 
 def _wipe_u256(mut x: U256):
-    var ptr = x.limbs.unsafe_ptr()
+    var ptr = Pointer(to=x.limbs[0]).unsafe_mut_cast[True]()
     for i in range(4):
-        ptr.store[volatile=True](i, UInt64(0))
+        ptr.unsafe_store[volatile=True](i, UInt64(0))
 
 
 def _wipe_list_u8(mut data: List[UInt8]):
     var ptr = data.unsafe_ptr()
     for i in range(len(data)):
-        ptr.store[volatile=True](i, UInt8(0))
+        ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
 def _rfc6979_p256(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int) -> U256:
     var h1 = _reduce_n(_from_be(digest))
-    var h1_bytes = InlineArray[UInt8, 32](uninitialized=True)
+    var h1_bytes = InlineArray[UInt8, 32](fill=0)
     _to_be(h1, h1_bytes.unsafe_ptr())
     var k = List[UInt8](length=32, fill=0)
     var v = List[UInt8](length=32, fill=1)
@@ -987,7 +991,7 @@ def _rfc6979_p256(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip:
                 _wipe_list_u8(seed)
                 var hp = h1_bytes.unsafe_ptr()
                 for i in range(32):
-                    hp.store[volatile=True](i, UInt8(0))
+                    hp.unsafe_store[volatile=True](i, UInt8(0))
                 _wipe_u256(h1)
                 return candidate
             accepted += 1
@@ -1008,10 +1012,14 @@ def _rfc6979_p256(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip:
 def p256_ecdsa_sign_digest(
     private_key: Span[UInt8, ...],
     digest: Span[UInt8, ...],
-    signature: UnsafePointer[UInt8, MutAnyOrigin],
+    signature: Span[mut=True, UInt8, ...],
 ) -> Bool:
-    if len(private_key) != 32 or len(digest) != 32:
+    if (
+        len(private_key) != 32 or len(digest) != 32
+        or len(signature) < P256_SIGNATURE_SIZE
+    ):
         return False
+    var signature_ptr = signature.unsafe_ptr()
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
         _wipe_u256(d)
@@ -1037,8 +1045,8 @@ def p256_ecdsa_sign_digest(
             _wipe_u256(total)
             retry += 1
             continue
-        _to_be(r, signature)
-        _to_be(s, signature + 32)
+        _to_be(r, signature_ptr)
+        _to_be(s, signature_ptr.unsafe_offset(32))
         _wipe_u256(d)
         _wipe_u256(z)
         _wipe_u256(k)
@@ -1051,10 +1059,14 @@ def p256_ecdsa_sign_digest(
 def p256_ecdsa_sign(
     private_key: Span[UInt8, ...],
     message: Span[UInt8, ...],
-    signature: UnsafePointer[UInt8, MutAnyOrigin],
+    signature: Span[mut=True, UInt8, ...],
 ) -> Bool:
+    if len(signature) < P256_SIGNATURE_SIZE:
+        return False
     var digest = sha256_hash(message)
-    var ok = p256_ecdsa_sign_digest(private_key, Span[UInt8, ...](digest), signature)
+    var ok = p256_ecdsa_sign_digest(
+        private_key, Span[UInt8, ...](digest), signature
+    )
     _wipe_list_u8(digest)
     return ok
 
@@ -1116,7 +1128,9 @@ def p256_ecdsa_sign_der(
 ) raises -> List[UInt8]:
     from .ecdsa_der import ecdsa_der_encode
     var raw = List[UInt8](unsafe_uninit_length=P256_SIGNATURE_SIZE)
-    if not p256_ecdsa_sign(private_key, message, raw.unsafe_ptr()):
+    if not p256_ecdsa_sign(
+        private_key, message, Span[mut=True, UInt8, ...](raw)
+    ):
         raise Error("P-256 ECDSA signing failed")
     return ecdsa_der_encode(Span[UInt8, ...](raw), P256_SIZE)
 
@@ -1139,7 +1153,10 @@ def p256_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
         var d = _from_be(Span[UInt8, ...](private_key))
         if not d.is_zero() and _cmp(d, _n()) < 0:
             var public_key = List[UInt8](unsafe_uninit_length=65)
-            if p256_public_key(Span[UInt8, ...](private_key), public_key.unsafe_ptr()):
+            if p256_public_key(
+                Span[UInt8, ...](private_key),
+                Span[mut=True, UInt8, ...](public_key),
+            ):
                 _wipe_u256(d)
                 return (private_key^, public_key^)
         _wipe_u256(d)
