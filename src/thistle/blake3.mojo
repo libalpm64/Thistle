@@ -270,6 +270,24 @@ struct Hasher:
         self.chunk_counter = 0
         self.blocks_compressed = 0
 
+    def __deinit__(deinit self):
+        var kp = Pointer(to=self.key).unsafe_mut_cast[True]().unsafe_bitcast[UInt8]()
+        for i in range(32):
+            kp.unsafe_store[volatile=True](i, UInt8(0))
+        var okp = Pointer(to=self.original_key).unsafe_mut_cast[True]().unsafe_bitcast[UInt8]()
+        for i in range(32):
+            okp.unsafe_store[volatile=True](i, UInt8(0))
+        var csp = self.cv_stack.unsafe_ptr().unsafe_bitcast[UInt8]()
+        for i in range(54 * 32):
+            csp.unsafe_store[volatile=True](i, UInt8(0))
+        var bp = self.buf.unsafe_ptr()
+        for i in range(64):
+            bp.unsafe_store[volatile=True](i, UInt8(0))
+        Pointer(to=self.stack_len).unsafe_mut_cast[True]().unsafe_store[volatile=True](0, 0)
+        Pointer(to=self.buf_len).unsafe_mut_cast[True]().unsafe_store[volatile=True](0, 0)
+        Pointer(to=self.chunk_counter).unsafe_mut_cast[True]().unsafe_store[volatile=True](0, UInt64(0))
+        Pointer(to=self.blocks_compressed).unsafe_mut_cast[True]().unsafe_store[volatile=True](0, 0)
+
     def update(mut self, input: Span[UInt8, ...]):
         var d = input
         while len(d) > 0:

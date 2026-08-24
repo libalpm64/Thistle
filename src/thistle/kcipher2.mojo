@@ -367,6 +367,13 @@ struct KCipher2:
         self.r2 = 0
         self._init(key, iv)
 
+    def __deinit__(deinit self):
+        # Take the address of the aggregate. A pointer to the first field only
+        # has that field's provenance and must not be indexed across the struct.
+        var p = Pointer(to=self).unsafe_bitcast[UInt32]()
+        for i in range(20):
+            p.unsafe_store[volatile=True](i, UInt32(0))
+
     def _key_expansion(
         mut self, key: SIMD[DType.uint32, 4], iv: SIMD[DType.uint32, 4]
     ) -> InlineArray[UInt32, 12]:

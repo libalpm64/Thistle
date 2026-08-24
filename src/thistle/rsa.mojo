@@ -681,20 +681,18 @@ struct RsaPublicKey:
         var em = InlineArray[UInt8, 528](fill=0)
         if not self._public_op(signature, em.unsafe_ptr()):
             return False
+        var pad_diff: UInt8 = 0
         for i in range(nb - em_len):
-            if em[i] != 0:
-                return False
+            pad_diff |= em[i]
         var ep = em.unsafe_ptr().unsafe_offset((nb - em_len))
 
-        if ep[unsafe_offset=em_len - 1] != 0xBC:
-            return False
+        pad_diff |= ep[unsafe_offset=em_len - 1] ^ UInt8(0xBC)
 
         var db_len = em_len - h_len - 1
         var h_ptr = ep.unsafe_offset(db_len)
 
         var top_mask = UInt8(0xFF) >> UInt8(8 * em_len - em_bits)
-        if (ep[unsafe_offset=0] & ~top_mask) != 0:
-            return False
+        pad_diff |= ep[unsafe_offset=0] & ~top_mask
 
         var db_mask = InlineArray[UInt8, 528](fill=0)
         _mgf1(mgf_sha, h_ptr, h_len, db_len, db_mask.unsafe_ptr())
@@ -705,9 +703,9 @@ struct RsaPublicKey:
 
         var ps_len = db_len - salt_len - 1
         for i in range(ps_len):
-            if db[i] != 0:
-                return False
-        if db[ps_len] != 0x01:
+            pad_diff |= db[i]
+        pad_diff |= db[ps_len] ^ UInt8(0x01)
+        if pad_diff != 0:
             return False
 
         var m_hash = InlineArray[UInt8, 64](fill=0)

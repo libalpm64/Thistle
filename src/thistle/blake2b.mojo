@@ -5,7 +5,7 @@ RFC 7693
 
 from std.collections import List
 from std.memory import Pointer, unsafe_memcpy, unsafe_memset_zero
-from .utils import bytes_to_hex, string_to_bytes
+from .utils import bytes_to_hex, string_to_bytes, volatile_wipe
 
 comptime BLAKE2B_IV = SIMD[DType.uint64, 8](
     0x6A09E667F3BCC908,
@@ -149,7 +149,7 @@ struct Blake2b(Movable):
         Pointer(to=self.h).unsafe_bitcast[UInt64]().unsafe_store[volatile=True](
             0, SIMD[DType.uint64, 8](0)
         )
-        unsafe_memset_zero(self.buffer.unsafe_ptr(), 16)
+        volatile_wipe(self.buffer.unsafe_ptr(), 16)
 
     @always_inline
     def _inc_counter(mut self):

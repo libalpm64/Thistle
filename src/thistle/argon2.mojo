@@ -13,11 +13,27 @@ comptime MASK32 = 0xFFFFFFFF
 
 @always_inline
 def zero_buffer(ptr: Pointer[mut=True, UInt8, _, address_space=_], len: Int):
-    unsafe_memset_zero(ptr, len)
+    var i = 0
+    while i + 16 <= len:
+        ptr.unsafe_store[width=16, volatile=True](
+            i, SIMD[DType.uint8, 16](0)
+        )
+        i += 16
+    while i < len:
+        ptr.unsafe_store[volatile=True](i, UInt8(0))
+        i += 1
 
 @always_inline
 def zero_buffer_u64(ptr: Pointer[mut=True, UInt64, _, address_space=_], len: Int):
-    unsafe_memset_zero(ptr, len)
+    var i = 0
+    while i + 8 <= len:
+        ptr.unsafe_store[width=8, volatile=True](
+            i, SIMD[DType.uint64, 8](0)
+        )
+        i += 8
+    while i < len:
+        ptr.unsafe_store[volatile=True](i, UInt64(0))
+        i += 1
 
 @always_inline
 def zero_and_free(ptr: Pointer[mut=True, UInt8, _, address_space=_], len: Int):
@@ -295,7 +311,7 @@ def _argon2_process_lane(
     var tmp_addr = alloc(Layout[UInt64](count=128)).unsafe_leak()
     var pool = MemoryPool(128)
     var has_addressing_block = False
-    unsafe_memset_zero(zero_u64, 128)
+    zero_buffer_u64(zero_u64, 128)
 
     for index in range(seg_start, seg_end):
         if t == 0 and index < 2:
@@ -311,7 +327,7 @@ def _argon2_process_lane(
             if not has_addressing_block or (
                 seg_offset % 128 == 0
             ):
-                unsafe_memset_zero(z_u64, 128)
+                zero_buffer_u64(z_u64, 128)
                 z_u64[unsafe_offset=0] = UInt64(t)
                 z_u64[unsafe_offset=1] = UInt64(lane)
                 z_u64[unsafe_offset=2] = UInt64(slice_idx)
@@ -568,7 +584,7 @@ struct Argon2id:
                 parallelize[process_lane](parallelism)
 
         var c_block = alloc(Layout[UInt64](count=128)).unsafe_leak()
-        unsafe_memset_zero(c_block, 128)
+        zero_buffer_u64(c_block, 128)
         for i in range(self.parallelism):
             var last_ptr = memory.unsafe_offset((i * q * 128 + (q - 1) * 128))
             for k in range(128):

@@ -24,7 +24,7 @@ from thistle.pbkdf2 import (
     pbkdf2_hmac_sha512,
 )
 from thistle.poly1305 import Poly1305
-from thistle.x25519 import x25519
+from thistle.x25519 import x25519, x25519_checked
 
 
 def main() raises:
@@ -90,6 +90,20 @@ def main() raises:
     if not rejected:
         raise Error("X25519 accepted an undersized destination")
 
+    var zero_point = List[UInt8](length=32, fill=0)
+    var x25519_output = List[UInt8](length=32, fill=0)
+    rejected = False
+    try:
+        x25519_checked(
+            Span[UInt8, ...](key32),
+            Span[UInt8, ...](zero_point),
+            Span[mut=True, UInt8, ...](x25519_output),
+        )
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("X25519 checked API accepted an all-zero shared secret")
+
     var input16 = List[UInt8](length=16, fill=0)
     rejected = False
     try:
@@ -137,6 +151,27 @@ def main() raises:
         nonce_affects_stream |= stream_a[i] != stream_b[i]
     if not nonce_affects_stream:
         raise Error("ChaCha20 ignored the final nonce byte")
+
+    # The final UInt32 counter value is valid once, but the reusable context
+    # must remember exhaustion so a later call cannot reuse counter zero.
+    var last_counter_cipher = ChaCha20(
+        chacha_key, Span[UInt8, ...](nonce_a), UInt32(0xFFFFFFFF)
+    )
+    var one_byte = List[UInt8](length=1, fill=0)
+    var one_byte_out = List[UInt8](length=1, fill=0)
+    var one_byte_out_span = Span[mut=True, UInt8, ...](one_byte_out)
+    last_counter_cipher.encrypt_into(
+        Span[UInt8, ...](one_byte), one_byte_out_span
+    )
+    rejected = False
+    try:
+        last_counter_cipher.encrypt_into(
+            Span[UInt8, ...](one_byte), one_byte_out_span
+        )
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("ChaCha20 reused its counter after exhaustion")
 
     var ed_private = List[UInt8](length=32, fill=1)
     var ed_public_short = List[UInt8](length=31, fill=0)

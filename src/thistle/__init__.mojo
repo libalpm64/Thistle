@@ -27,7 +27,7 @@ from .chacha20poly1305 import (
 )
 from .kcipher2 import KCipher2
 
-from .x25519 import x25519, x25519_public_key, x25519_keygen
+from .x25519 import x25519, x25519_checked, x25519_public_key, x25519_keygen
 from .ed25519 import ed25519_generate_public_key, ed25519_sign, ed25519_verify, Ed25519SigningKey
 from .p256 import (
     p256_public_key, p256_ecdh, p256_keygen,
@@ -79,4 +79,4 @@ from .random import random_bytes, random_fill
 
 from . import fips
 
-comptime VERSION = "1.0.4"
+comptime VERSION = "1.0.5"

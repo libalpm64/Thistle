@@ -183,15 +183,21 @@ def xchacha20_poly1305_encrypt(
         raise Error("XChaCha20-Poly1305 key must be 32 bytes")
     if len(nonce) != 24:
         raise Error("XChaCha20-Poly1305 nonce must be 24 bytes")
+    if len(ciphertext) < len(plaintext):
+        raise Error("XChaCha20-Poly1305 ciphertext output is too small")
+    if len(tag) < 16:
+        raise Error("XChaCha20-Poly1305 tag output is too small")
     var sub = _xchacha_subkey_nonce(key, nonce)
     var sp = sub.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
-    chacha20_poly1305_encrypt(
-        Span[UInt8, ...](unsafe_ptr=sp, length=32),
-        Span[UInt8, ...](unsafe_ptr=sp.unsafe_offset(32), length=12),
-        aad, plaintext, ciphertext, tag,
-    )
-    for i in range(44):
-        sp.unsafe_store[volatile=True](i, UInt8(0))
+    try:
+        chacha20_poly1305_encrypt(
+            Span[UInt8, ...](unsafe_ptr=sp, length=32),
+            Span[UInt8, ...](unsafe_ptr=sp.unsafe_offset(32), length=12),
+            aad, plaintext, ciphertext, tag,
+        )
+    finally:
+        for i in range(44):
+            sp.unsafe_store[volatile=True](i, UInt8(0))
 
 
 def xchacha20_poly1305_decrypt(
@@ -206,15 +212,20 @@ def xchacha20_poly1305_decrypt(
         raise Error("XChaCha20-Poly1305 key must be 32 bytes")
     if len(nonce) != 24:
         raise Error("XChaCha20-Poly1305 nonce must be 24 bytes")
+    if len(plaintext) < len(ciphertext):
+        raise Error("XChaCha20-Poly1305 plaintext output is too small")
     var sub = _xchacha_subkey_nonce(key, nonce)
     var sp = sub.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
-    var ok = chacha20_poly1305_decrypt(
-        Span[UInt8, ...](unsafe_ptr=sp, length=32),
-        Span[UInt8, ...](unsafe_ptr=sp.unsafe_offset(32), length=12),
-        aad, ciphertext, tag, plaintext,
-    )
-    for i in range(44):
-        sp.unsafe_store[volatile=True](i, UInt8(0))
+    var ok = False
+    try:
+        ok = chacha20_poly1305_decrypt(
+            Span[UInt8, ...](unsafe_ptr=sp, length=32),
+            Span[UInt8, ...](unsafe_ptr=sp.unsafe_offset(32), length=12),
+            aad, ciphertext, tag, plaintext,
+        )
+    finally:
+        for i in range(44):
+            sp.unsafe_store[volatile=True](i, UInt8(0))
     return ok
 
 

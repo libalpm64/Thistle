@@ -177,7 +177,14 @@ struct SHA256Context(Movable):
         self.buffer_len = move.buffer_len
 
     def __deinit__(deinit self):
-        unsafe_memset_zero(self.buffer.unsafe_ptr(), 64)
+        var buf_ptr = self.buffer.unsafe_ptr()
+        for i in range(64):
+            buf_ptr.unsafe_store[volatile=True](i, UInt8(0))
+        var state_ptr = Pointer(to=self.state).unsafe_bitcast[UInt32]().unsafe_mut_cast[True]()
+        for i in range(8):
+            state_ptr.unsafe_store[volatile=True](i, UInt32(0))
+        Pointer(to=self.count).unsafe_mut_cast[True]().unsafe_store[volatile=True](0, UInt64(0))
+        Pointer(to=self.buffer_len).unsafe_mut_cast[True]().unsafe_store[volatile=True](0, 0)
 
     def reset(mut self):
         self.state = SHA256_IV
@@ -325,30 +332,44 @@ def sha256_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     return sha256_final(ctx)
 
 
-def sha256_final_to_buffer(mut ctx: SHA256Context, output: Pointer[mut=True, UInt8, _, address_space=_]):
+@always_inline
+def _sha256_pad_byte(mut ctx: SHA256Context, pad_byte: UInt8, bitlen: UInt64):
     var buf_ptr = ctx.buffer.unsafe_ptr()
-    var bit_count = ctx.count + UInt64(ctx.buffer_len) * 8
-
-    ctx.buffer[ctx.buffer_len] = 0x80
+    ctx.buffer[ctx.buffer_len] = pad_byte
     ctx.buffer_len += 1
-
     if ctx.buffer_len > 56:
         unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 64 - ctx.buffer_len)
-        ctx.state = sha256_transform(
-            ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=64)
-        )
+        ctx.state = sha256_transform(ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=64))
         ctx.buffer_len = 0
-
     unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 56 - ctx.buffer_len)
     ctx.buffer_len = 56
-
     for i in range(8):
-        ctx.buffer[56 + i] = UInt8(UInt64(bit_count >> UInt64(56 - i * 8)) & 0xFF)
+        ctx.buffer[56 + i] = UInt8(UInt64(bitlen >> UInt64(56 - i * 8)) & 0xFF)
+    ctx.state = sha256_transform(ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=64))
 
-    ctx.state = sha256_transform(
-        ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=64)
-    )
 
+@always_inline
+def _sha256_output(ctx: SHA256Context, output_len: Int) -> List[UInt8]:
+    var output = List[UInt8](capacity=output_len)
+    var words_needed = (output_len + 3) // 4
+    for i in range(words_needed):
+        var word = ctx.state[i]
+        var bytes_in_word = 4
+        if i == words_needed - 1:
+            bytes_in_word = output_len - i * 4
+        for j in range(bytes_in_word):
+            output.append(UInt8(UInt32(word >> UInt32(24 - j * 8)) & 0xFF))
+    return output^
+
+
+@always_inline
+def _sha256_pad(mut ctx: SHA256Context, bitlen: UInt64):
+    _sha256_pad_byte(ctx, 0x80, bitlen)
+
+
+def sha256_final_to_buffer(mut ctx: SHA256Context, output: Pointer[mut=True, UInt8, _, address_space=_]):
+    var bitlen = ctx.count + UInt64(ctx.buffer_len) * 8
+    _sha256_pad(ctx, bitlen)
     for i in range(8):
         (output.unsafe_offset(i * 4)).unsafe_bitcast[UInt32]().unsafe_store[alignment=1](byte_swap(ctx.state[i]))
 
@@ -382,7 +403,15 @@ struct SHA512Context(Movable):
         self.buffer_len = move.buffer_len
 
     def __deinit__(deinit self):
-        unsafe_memset_zero(self.buffer.unsafe_ptr(), 128)
+        var buf_ptr = self.buffer.unsafe_ptr()
+        for i in range(128):
+            buf_ptr.unsafe_store[volatile=True](i, UInt8(0))
+        var state_ptr = Pointer(to=self.state).unsafe_bitcast[UInt64]().unsafe_mut_cast[True]()
+        for i in range(8):
+            state_ptr.unsafe_store[volatile=True](i, UInt64(0))
+        Pointer(to=self.count_high).unsafe_mut_cast[True]().unsafe_store[volatile=True](0, UInt64(0))
+        Pointer(to=self.count_low).unsafe_mut_cast[True]().unsafe_store[volatile=True](0, UInt64(0))
+        Pointer(to=self.buffer_len).unsafe_mut_cast[True]().unsafe_store[volatile=True](0, 0)
 
     def wipe(mut self):
         Pointer(to=self.state).unsafe_bitcast[UInt64]().unsafe_store[volatile=True](
@@ -555,72 +584,56 @@ def sha512_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     return sha512_final(ctx)
 
 
-def sha512_final_to_buffer(mut ctx: SHA512Context, output: Pointer[mut=True, UInt8, _, address_space=_]):
+@always_inline
+def _sha512_pad_byte(mut ctx: SHA512Context, pad_byte: UInt8, low: UInt64, high: UInt64):
     var buf_ptr = ctx.buffer.unsafe_ptr()
-    var final_low = ctx.count_low + UInt64(ctx.buffer_len) * 8
-    var final_high = ctx.count_high
-    if final_low < ctx.count_low:
-        final_high += 1
-
-    ctx.buffer[ctx.buffer_len] = 0x80
+    ctx.buffer[ctx.buffer_len] = pad_byte
     ctx.buffer_len += 1
-
     if ctx.buffer_len > 112:
         unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 128 - ctx.buffer_len)
-        ctx.state = sha512_transform(
-            ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=128)
-        )
+        ctx.state = sha512_transform(ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=128))
         ctx.buffer_len = 0
-
     unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 112 - ctx.buffer_len)
     ctx.buffer_len = 112
-
     for i in range(8):
-        ctx.buffer[112 + i] = UInt8(UInt64(final_high >> UInt64(56 - i * 8)) & 0xFF)
+        ctx.buffer[112 + i] = UInt8(UInt64(high >> UInt64(56 - i * 8)) & 0xFF)
     for i in range(8):
-        ctx.buffer[120 + i] = UInt8(UInt64(final_low >> UInt64(56 - i * 8)) & 0xFF)
+        ctx.buffer[120 + i] = UInt8(UInt64(low >> UInt64(56 - i * 8)) & 0xFF)
+    ctx.state = sha512_transform(ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=128))
 
-    ctx.state = sha512_transform(
-        ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=128)
-    )
 
+@always_inline
+def _sha512_output(ctx: SHA512Context, output_len: Int) -> List[UInt8]:
+    var output = List[UInt8](capacity=output_len)
+    var words_needed = (output_len + 7) // 8
+    for i in range(words_needed):
+        var word = ctx.state[i]
+        var bytes_in_word = 8
+        if i == words_needed - 1:
+            bytes_in_word = output_len - i * 8
+        for j in range(bytes_in_word):
+            output.append(UInt8(UInt64(word >> UInt64(56 - j * 8)) & 0xFF))
+    return output^
+
+
+@always_inline
+def _sha512_pad(mut ctx: SHA512Context, low: UInt64, high: UInt64):
+    _sha512_pad_byte(ctx, 0x80, low, high)
+
+
+def sha512_final_to_buffer(mut ctx: SHA512Context, output: Pointer[mut=True, UInt8, _, address_space=_]):
+    var low = ctx.count_low + UInt64(ctx.buffer_len) * 8
+    var high = ctx.count_high
+    if low < ctx.count_low:
+        high += 1
+    _sha512_pad(ctx, low, high)
     for i in range(8):
         (output.unsafe_offset(i * 8)).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](byte_swap(ctx.state[i]))
 
 def sha256_final_with_len(mut ctx: SHA256Context, output_len: Int) -> List[UInt8]:
-    var buf_ptr = ctx.buffer.unsafe_ptr()
     var bit_count = ctx.count + UInt64(ctx.buffer_len) * 8
-
-    ctx.buffer[ctx.buffer_len] = 0x80
-    ctx.buffer_len += 1
-
-    if ctx.buffer_len > 56:
-        unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 64 - ctx.buffer_len)
-        ctx.state = sha256_transform(
-            ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=64)
-        )
-        ctx.buffer_len = 0
-
-    unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 56 - ctx.buffer_len)
-    ctx.buffer_len = 56
-
-    for i in range(8):
-        ctx.buffer[56 + i] = UInt8(UInt64(bit_count >> UInt64(56 - i * 8)) & 0xFF)
-
-    ctx.state = sha256_transform(
-        ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=64)
-    )
-
-    var output = List[UInt8](capacity=output_len)
-    var words_needed = (output_len + 3) // 4
-    for i in range(words_needed):
-        var word = ctx.state[i]
-        var bytes_in_word = 4
-        if i == words_needed - 1:
-            bytes_in_word = output_len - i * 4
-        for j in range(bytes_in_word):
-            output.append(UInt8(UInt32(word >> UInt32(24 - j * 8)) & 0xFF))
-    return output^
+    _sha256_pad(ctx, bit_count)
+    return _sha256_output(ctx, output_len)
 
 
 def sha224_hash(data: Span[UInt8, ...]) -> List[UInt8]:
@@ -644,38 +657,10 @@ def padding_bit(n: Int) -> UInt8:
 def sha256_final_partial(
     mut ctx: SHA256Context, final_octet: UInt8, final_bit_count: Int, output_len: Int
 ) -> List[UInt8]:
-    var buf_ptr = ctx.buffer.unsafe_ptr()
     var bit_count = ctx.count + UInt64(ctx.buffer_len) * 8 + UInt64(final_bit_count)
-    ctx.buffer[ctx.buffer_len] = (final_octet & high_bits_mask(final_bit_count)) | padding_bit(final_bit_count)
-    ctx.buffer_len += 1
-
-    if ctx.buffer_len > 56:
-        unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 64 - ctx.buffer_len)
-        ctx.state = sha256_transform(
-            ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=64)
-        )
-        ctx.buffer_len = 0
-
-    unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 56 - ctx.buffer_len)
-    ctx.buffer_len = 56
-
-    for i in range(8):
-        ctx.buffer[56 + i] = UInt8(UInt64(bit_count >> UInt64(56 - i * 8)) & 0xFF)
-
-    ctx.state = sha256_transform(
-        ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=64)
-    )
-
-    var output = List[UInt8](capacity=output_len)
-    var words_needed = (output_len + 3) // 4
-    for i in range(words_needed):
-        var word = ctx.state[i]
-        var bytes_in_word = 4
-        if i == words_needed - 1:
-            bytes_in_word = output_len - i * 4
-        for j in range(bytes_in_word):
-            output.append(UInt8(UInt32(word >> UInt32(24 - j * 8)) & 0xFF))
-    return output^
+    var pad = (final_octet & high_bits_mask(final_bit_count)) | padding_bit(final_bit_count)
+    _sha256_pad_byte(ctx, pad, bit_count)
+    return _sha256_output(ctx, output_len)
 
 
 def sha224_hash_bits(data: Span[UInt8, ...], bit_len: Int) -> List[UInt8]:
@@ -701,44 +686,12 @@ def sha256_hash_bits(data: Span[UInt8, ...], bit_len: Int) -> List[UInt8]:
 
 
 def sha512_final_with_len(mut ctx: SHA512Context, output_len: Int) -> List[UInt8]:
-    var buf_ptr = ctx.buffer.unsafe_ptr()
-    var final_low = ctx.count_low + UInt64(ctx.buffer_len) * 8
-    var final_high = ctx.count_high
-    if final_low < ctx.count_low:
-        final_high += 1
-
-    ctx.buffer[ctx.buffer_len] = 0x80
-    ctx.buffer_len += 1
-
-    if ctx.buffer_len > 112:
-        unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 128 - ctx.buffer_len)
-        ctx.state = sha512_transform(
-            ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=128)
-        )
-        ctx.buffer_len = 0
-
-    unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 112 - ctx.buffer_len)
-    ctx.buffer_len = 112
-
-    for i in range(8):
-        ctx.buffer[112 + i] = UInt8(UInt64(final_high >> UInt64(56 - i * 8)) & 0xFF)
-    for i in range(8):
-        ctx.buffer[120 + i] = UInt8(UInt64(final_low >> UInt64(56 - i * 8)) & 0xFF)
-
-    ctx.state = sha512_transform(
-        ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=128)
-    )
-
-    var output = List[UInt8](capacity=output_len)
-    var words_needed = (output_len + 7) // 8
-    for i in range(words_needed):
-        var word = ctx.state[i]
-        var bytes_in_word = 8
-        if i == words_needed - 1:
-            bytes_in_word = output_len - i * 8
-        for j in range(bytes_in_word):
-            output.append(UInt8(UInt64(word >> UInt64(56 - j * 8)) & 0xFF))
-    return output^
+    var low = ctx.count_low + UInt64(ctx.buffer_len) * 8
+    var high = ctx.count_high
+    if low < ctx.count_low:
+        high += 1
+    _sha512_pad(ctx, low, high)
+    return _sha512_output(ctx, output_len)
 
 
 def sha384_hash(data: Span[UInt8, ...]) -> List[UInt8]:
@@ -750,43 +703,13 @@ def sha384_hash(data: Span[UInt8, ...]) -> List[UInt8]:
 def sha512_final_partial(
     mut ctx: SHA512Context, final_octet: UInt8, final_bit_count: Int, output_len: Int
 ) -> List[UInt8]:
-    var buf_ptr = ctx.buffer.unsafe_ptr()
-    var final_low = ctx.count_low + UInt64(ctx.buffer_len) * 8 + UInt64(final_bit_count)
-    var final_high = ctx.count_high
-    if final_low < ctx.count_low:
-        final_high += 1
-    ctx.buffer[ctx.buffer_len] = (final_octet & high_bits_mask(final_bit_count)) | padding_bit(final_bit_count)
-    ctx.buffer_len += 1
-
-    if ctx.buffer_len > 112:
-        unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 128 - ctx.buffer_len)
-        ctx.state = sha512_transform(
-            ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=128)
-        )
-        ctx.buffer_len = 0
-
-    unsafe_memset_zero(buf_ptr.unsafe_offset(ctx.buffer_len), 112 - ctx.buffer_len)
-    ctx.buffer_len = 112
-
-    for i in range(8):
-        ctx.buffer[112 + i] = UInt8(UInt64(final_high >> UInt64(56 - i * 8)) & 0xFF)
-    for i in range(8):
-        ctx.buffer[120 + i] = UInt8(UInt64(final_low >> UInt64(56 - i * 8)) & 0xFF)
-
-    ctx.state = sha512_transform(
-        ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=128)
-    )
-
-    var output = List[UInt8](capacity=output_len)
-    var words_needed = (output_len + 7) // 8
-    for i in range(words_needed):
-        var word = ctx.state[i]
-        var bytes_in_word = 8
-        if i == words_needed - 1:
-            bytes_in_word = output_len - i * 8
-        for j in range(bytes_in_word):
-            output.append(UInt8(UInt64(word >> UInt64(56 - j * 8)) & 0xFF))
-    return output^
+    var low = ctx.count_low + UInt64(ctx.buffer_len) * 8 + UInt64(final_bit_count)
+    var high = ctx.count_high
+    if low < ctx.count_low:
+        high += 1
+    var pad = (final_octet & high_bits_mask(final_bit_count)) | padding_bit(final_bit_count)
+    _sha512_pad_byte(ctx, pad, low, high)
+    return _sha512_output(ctx, output_len)
 
 
 def sha384_hash_bits(data: Span[UInt8, ...], bit_len: Int) -> List[UInt8]:

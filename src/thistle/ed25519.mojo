@@ -961,7 +961,7 @@ def ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], sign
     var Q = _double_scalar_mult_vartime(k_bytes_span, edwards_negate(A), S_bytes_span)
     var Q_enc = InlineArray[UInt8, 32](fill=0)
     edwards_encode_into(Q, Q_enc.unsafe_ptr())
+    var diff: UInt8 = 0
     for i in range(32):
-        if Q_enc[i] != R_enc[i]:
-            return False
-    return True
+        diff |= Q_enc[i] ^ R_enc[i]
+    return diff == 0

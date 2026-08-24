@@ -5,7 +5,7 @@ AES CPU implementation
 from std.bit import byte_swap
 from std.memory import unsafe_memset_zero
 from std.utils import StaticTuple
-from .utils import StackBuffer
+from .utils import StackBuffer, volatile_wipe
 
 comptime ROUNDS_128: Int = 10
 
@@ -38,6 +38,7 @@ def cpu_aes_encrypt(
 ) -> None:
     var skey = cpu_aes_ct_skey(round_keys, rounds)
     _ct_encrypt1(pt_bytes, skey, rounds)
+    volatile_wipe(skey.unsafe_ptr(), len(skey))
 
 @always_inline
 def cpu_aes_ecb_kernel(
@@ -61,6 +62,8 @@ def cpu_aes_ecb_kernel(
         for j in range(n * 16):
             output_ptr[unsafe_offset=i * 16 + j] = sp[unsafe_offset=j]
         i += n
+    volatile_wipe(skey.unsafe_ptr(), len(skey))
+    volatile_wipe(sp, 256)
 
 @always_inline
 def cpu_aes_cbc_kernel(
@@ -93,6 +96,7 @@ def cpu_aes_cbc_kernel(
             prev_block[j] = out_ptr.unsafe_load(j)
 
         i += 1
+    volatile_wipe(skey.unsafe_ptr(), len(skey))
 
 @always_inline
 def _ctr_write_block(
@@ -137,6 +141,8 @@ def cpu_aes_ctr_kernel(
             for j in range(16):
                 out_block.unsafe_store(j, in_block.unsafe_load(j) ^ kp.unsafe_load(k * 16 + j))
         i += n
+    volatile_wipe(skey.unsafe_ptr(), len(skey))
+    volatile_wipe(kp, 256)
 
 @always_inline
 def cpu_xts_mul_alpha_inplace(tweak_ptr: Pointer[mut=True, UInt8, _, address_space=_]) -> None:
@@ -184,6 +190,9 @@ def cpu_aes_xts_kernel(
 
         cpu_xts_mul_alpha_inplace(wp)
         i += 1
+    volatile_wipe(skey1.unsafe_ptr(), len(skey1))
+    volatile_wipe(skey2.unsafe_ptr(), len(skey2))
+    volatile_wipe(wp, 16)
 
 @always_inline
 def sub_word(w: UInt32) -> UInt32:
@@ -285,7 +294,9 @@ struct AESExpandedKey(Movable):
             raise Error("AES keys must contain exactly 16, 24, or 32 bytes")
 
     def __deinit__(deinit self):
-        unsafe_memset_zero(self._round_keys.ptr(), 60)
+        var rk_ptr = self._round_keys.ptr()
+        for i in range(60):
+            rk_ptr.unsafe_store[volatile=True](i, UInt32(0))
 
     @always_inline
     def ptr[
@@ -330,8 +341,12 @@ struct AESKey:
         expand_key_128_into(self._data.ptr(), self._round_keys.ptr())
     
     def __deinit__(deinit self):
-        unsafe_memset_zero(self._data.ptr(), 16)
-        unsafe_memset_zero(self._round_keys.ptr(), 44)
+        var data_ptr = self._data.ptr()
+        for i in range(16):
+            data_ptr.unsafe_store[volatile=True](i, UInt8(0))
+        var rk_ptr2 = self._round_keys.ptr()
+        for i in range(44):
+            rk_ptr2.unsafe_store[volatile=True](i, UInt32(0))
 
     def round_keys[
         origin: Origin, address_space: AddressSpace, //
@@ -741,3 +756,5 @@ def cpu_aes_ct_encrypt(
     cpu_aes_ct_encrypt4(bp, skey, rounds)
     for i in range(16):
         pt_bytes[unsafe_offset=i] = bp[unsafe_offset=i]
+    volatile_wipe(skey.unsafe_ptr(), len(skey))
+    volatile_wipe(bp, 64)
