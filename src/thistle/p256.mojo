@@ -103,7 +103,7 @@ def _one_mont() -> U256:
 
 @always_inline
 def _cmp(a: U256, b: U256) -> Int:
-    return ws_cmp(Limbs[4](a.limbs), Limbs[4](b.limbs))
+    return ws_cmp(a, b)
 
 
 @always_inline
@@ -113,44 +113,22 @@ def _eq(a: U256, b: U256) -> Bool:
 
 @always_inline
 def _sub_raw(a: U256, b: U256) -> Tuple[U256, UInt64]:
-    var al = Limbs[4](a.limbs)
-    var bl = Limbs[4](b.limbs)
-    var res, borrow = ws_sub_raw(al, bl)
-    var out = U256()
-    out.limbs = res.limbs
-    return out, borrow
+    return ws_sub_raw(a, b)
 
 
 @always_inline
 def _add_raw(a: U256, b: U256) -> Tuple[U256, UInt64]:
-    var al = Limbs[4](a.limbs)
-    var bl = Limbs[4](b.limbs)
-    var res, carry = ws_add_raw(al, bl)
-    var out = U256()
-    out.limbs = res.limbs
-    return out, carry
+    return ws_add_raw(a, b)
 
 
 @always_inline
 def _add_mod(a: U256, b: U256, m: U256) -> U256:
-    var al = Limbs[4](a.limbs)
-    var bl = Limbs[4](b.limbs)
-    var ml = Limbs[4](m.limbs)
-    var res = ws_add_mod(al, bl, ml)
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_add_mod(a, b, m)
 
 
 @always_inline
 def _sub_mod(a: U256, b: U256, m: U256) -> U256:
-    var al = Limbs[4](a.limbs)
-    var bl = Limbs[4](b.limbs)
-    var ml = Limbs[4](m.limbs)
-    var res = ws_sub_mod(al, bl, ml)
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_sub_mod(a, b, m)
 
 
 @always_inline
@@ -175,51 +153,27 @@ def _mont_final_sub(
 
 @always_inline
 def _mont_mul(a: U256, b: U256) -> U256:
-    var al = Limbs[4](a.limbs)
-    var bl = Limbs[4](b.limbs)
-    var pl = Limbs[4](_p().limbs)
-    var res = ws_mont_mul[4, _N0](al, bl, pl)
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_mont_mul[4, _N0](a, b, _p())
 
 
 @always_inline
 def _mont_sqr(a: U256) -> U256:
-    return _mont_mul(a, a)
+    return ws_mont_sqr[4, _N0](a, _p())
 
 
 @always_inline
 def _to_mont(x: U256) -> U256:
-    var xl = Limbs[4](x.limbs)
-    var rr = Limbs[4](_rr().limbs)
-    var pl = Limbs[4](_p().limbs)
-    var res = ws_to_mont[4, _N0](xl, rr, pl)
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_to_mont[4, _N0](x, _rr(), _p())
 
 
 @always_inline
 def _from_mont(x: U256) -> U256:
-    var xl = Limbs[4](x.limbs)
-    var pl = Limbs[4](_p().limbs)
-    var res = ws_from_mont[4, _N0](xl, pl)
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_from_mont[4, _N0](x, _p())
 
 
 @always_inline
 def _mul_mod(a: U256, b: U256, m: U256) -> U256:
-    var al = Limbs[4](a.limbs)
-    var bl = Limbs[4](b.limbs)
-    var ml = Limbs[4](m.limbs)
-    var rr = Limbs[4](_rr().limbs)
-    var res = ws_mul_mod[4, _N0](al, bl, ml, rr)
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_mul_mod[4, _N0](a, b, m, _rr())
 
 
 @always_inline
@@ -228,27 +182,16 @@ def _square_mod(a: U256, m: U256) -> U256:
 
 
 def _pow_mod(base_in: U256, exponent: U256) -> U256:
-    var al = Limbs[4](base_in.limbs)
-    var bl = Limbs[4](exponent.limbs)
-    var res = ws_pow_mod[4, _N0](al, bl, Limbs[4](_rr().limbs), Limbs[4](_p().limbs))
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_pow_mod[4, _N0](base_in, exponent, _rr(), _p())
 
 
 @always_inline
 def _sqn_p(x: U256, n: Int) -> U256:
-    var res = ws_sqn[4, _N0](Limbs[4](x.limbs), n, Limbs[4](_p().limbs))
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_sqn[4, _N0](x, n, _p())
 
 
 def _inv_p(x: U256) -> U256:
-    var res = ws_inv_p[4, _N0](Limbs[4](x.limbs), Limbs[4](_p().limbs), Limbs[4](_rr().limbs))
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_inv_p[4, _N0](x, _p(), _rr())
 
 
 def _sqrt_p(x: U256) -> U256:
@@ -256,14 +199,11 @@ def _sqrt_p(x: U256) -> U256:
 
 
 def _from_be(bytes: Span[UInt8, ...]) -> U256:
-    var res = ws_from_be[4](bytes)
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_from_be[4](bytes)
 
 
 def _to_be(x: U256, output: Pointer[mut=True, UInt8, _, address_space=_]):
-    ws_to_be(Limbs[4](x.limbs), output)
+    ws_to_be(x, output)
 
 
 struct P256Point(Copyable, ImplicitlyCopyable, Movable):
@@ -329,76 +269,68 @@ struct P256JacobianPoint(Copyable, ImplicitlyCopyable, Movable):
 
 @always_inline
 def _select_u256(a: U256, b: U256, choice: UInt64) -> U256:
-    var al = Limbs[4](a.limbs)
-    var bl = Limbs[4](b.limbs)
-    var res = ws_select(al, bl, choice)
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_select(a, b, choice)
 
 
 @always_inline
 def _u256_zero_choice(x: U256) -> UInt64:
-    return ws_zero_choice(Limbs[4](x.limbs))
+    return ws_zero_choice(x)
 
 
 @always_inline
 def _jacobian_infinity() -> P256JacobianPoint:
-    var res = ws_jacobian_infinity(Limbs[4](_one_mont().limbs))
-    return P256JacobianPoint(U256(res.x.limbs), U256(res.y.limbs), U256(res.z.limbs), res.infinity)
+    var res = ws_jacobian_infinity(_one_mont())
+    return P256JacobianPoint(res.x, res.y, res.z, res.infinity)
 
 
 @always_inline
 def _select_jacobian_ct(
     a: P256JacobianPoint, b: P256JacobianPoint, choice: UInt64
 ) -> P256JacobianPoint:
-    var ga = JacobianPoint[4](Limbs[4](a.x.limbs), Limbs[4](a.y.limbs), Limbs[4](a.z.limbs), a.infinity)
-    var gb = JacobianPoint[4](Limbs[4](b.x.limbs), Limbs[4](b.y.limbs), Limbs[4](b.z.limbs), b.infinity)
+    # P256JacobianPoint and JacobianPoint[4] have same layout (U256==Limbs[4])
+    var ga = JacobianPoint[4](a.x, a.y, a.z, a.infinity)
+    var gb = JacobianPoint[4](b.x, b.y, b.z, b.infinity)
     var res = ws_select_jacobian_ct(ga, gb, choice)
-    return P256JacobianPoint(U256(res.x.limbs), U256(res.y.limbs), U256(res.z.limbs), res.infinity)
+    return P256JacobianPoint(res.x, res.y, res.z, res.infinity)
 
 
 @always_inline
 def _mul_small_mod(x: U256, c: UInt64) -> U256:
-    var res = ws_mul_small_mod(Limbs[4](x.limbs), c, Limbs[4](_p().limbs))
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_mul_small_mod(x, c, _p())
 
 
 def _is_on_curve(point: P256Point) -> Bool:
-    var gp = Point[4](Limbs[4](point.x.limbs), Limbs[4](point.y.limbs), point.infinity)
-    return ws_is_on_curve[4, _N0](gp, Limbs[4](_p().limbs), Limbs[4](_a().limbs), Limbs[4](_b().limbs), Limbs[4](_rr().limbs))
+    var gp = Point[4](point.x, point.y, point.infinity)
+    return ws_is_on_curve[4, _N0](gp, _p(), _a(), _b(), _rr())
 
 
 @always_inline
 def _jacobian_double_ct(p: P256JacobianPoint) -> P256JacobianPoint:
-    var gp = JacobianPoint[4](Limbs[4](p.x.limbs), Limbs[4](p.y.limbs), Limbs[4](p.z.limbs), p.infinity)
-    var res = ws_jacobian_double_ct[4, _N0](gp, Limbs[4](_p().limbs), Limbs[4](_rr().limbs))
-    return P256JacobianPoint(U256(res.x.limbs), U256(res.y.limbs), U256(res.z.limbs), res.infinity)
+    var gp = JacobianPoint[4](p.x, p.y, p.z, p.infinity)
+    var res = ws_jacobian_double_ct[4, _N0](gp, _p(), _rr())
+    return P256JacobianPoint(res.x, res.y, res.z, res.infinity)
 
 
 @always_inline
 def _jacobian_add_affine_non_equal_ct(
     p: P256JacobianPoint, q: P256Point
 ) -> P256JacobianPoint:
-    var gp = JacobianPoint[4](Limbs[4](p.x.limbs), Limbs[4](p.y.limbs), Limbs[4](p.z.limbs), p.infinity)
-    var gq = Point[4](Limbs[4](q.x.limbs), Limbs[4](q.y.limbs), q.infinity)
-    var res = ws_jacobian_add_affine[4, _N0](gp, gq, Limbs[4](_p().limbs), Limbs[4](_rr().limbs), Limbs[4](_one_mont().limbs))
-    return P256JacobianPoint(U256(res.x.limbs), U256(res.y.limbs), U256(res.z.limbs), res.infinity)
+    var gp = JacobianPoint[4](p.x, p.y, p.z, p.infinity)
+    var gq = Point[4](q.x, q.y, q.infinity)
+    var res = ws_jacobian_add_affine[4, _N0](gp, gq, _p(), _rr(), _one_mont())
+    return P256JacobianPoint(res.x, res.y, res.z, res.infinity)
 
 
 def _jacobian_to_affine(p: P256JacobianPoint) -> P256Point:
-    var gp = JacobianPoint[4](Limbs[4](p.x.limbs), Limbs[4](p.y.limbs), Limbs[4](p.z.limbs), p.infinity)
-    var res = ws_jacobian_to_affine[4, _N0](gp, Limbs[4](_p().limbs), Limbs[4](_rr().limbs))
-    return P256Point(U256(res.x.limbs), U256(res.y.limbs), res.infinity)
+    var gp = JacobianPoint[4](p.x, p.y, p.z, p.infinity)
+    var res = ws_jacobian_to_affine[4, _N0](gp, _p(), _rr())
+    return P256Point(res.x, res.y, res.infinity)
 
 
 def _scalar_mult(k: U256, p: P256Point) -> P256Point:
-    var kl = Limbs[4](k.limbs)
-    var pl = Point[4](Limbs[4](p.x.limbs), Limbs[4](p.y.limbs), p.infinity)
-    var res = ws_scalar_mult[4, _N0](kl, pl, Limbs[4](_p().limbs), Limbs[4](_rr().limbs), Limbs[4](_one_mont().limbs))
-    return P256Point(U256(res.x.limbs), U256(res.y.limbs), res.infinity)
+    var pl = Point[4](p.x, p.y, p.infinity)
+    var res = ws_scalar_mult[4, _N0](k, pl, _p(), _rr(), _one_mont())
+    return P256Point(res.x, res.y, res.infinity)
 
 
 @always_inline
@@ -406,15 +338,14 @@ def _base_table_entry(
     tptr: Pointer[UInt64, _], j: Int, d: UInt64
 ) -> P256Point:
     var res = ws_base_table_entry[4](tptr, j, d)
-    return P256Point(U256(res.x.limbs), U256(res.y.limbs), res.infinity)
+    return P256Point(res.x, res.y, res.infinity)
 
 
 def _scalar_mult_base(k: U256) -> P256Point:
     var table = p256_base_table()
     var tptr = table.unsafe_ptr()
-    var kl = Limbs[4](k.limbs)
-    var res = ws_scalar_mult_base[4, _N0](tptr, kl, Limbs[4](_p().limbs), Limbs[4](_rr().limbs), Limbs[4](_one_mont().limbs))
-    return P256Point(U256(res.x.limbs), U256(res.y.limbs), res.infinity)
+    var res = ws_scalar_mult_base[4, _N0](tptr, k, _p(), _rr(), _one_mont())
+    return P256Point(res.x, res.y, res.infinity)
 
 
 def p256_decode_uncompressed(point: Span[UInt8, ...]) -> P256Point:
@@ -538,49 +469,31 @@ def _n_minus_2() -> U256:
 
 @always_inline
 def _n_mont_mul(a: U256, b: U256) -> U256:
-    var res = ws_mont_mul[4, _ORDER_N0](Limbs[4](a.limbs), Limbs[4](b.limbs), Limbs[4](_n().limbs))
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_mont_mul[4, _ORDER_N0](a, b, _n())
 
 
 @always_inline
 def _n_to_mont(x: U256) -> U256:
-    var res = ws_to_mont[4, _ORDER_N0](Limbs[4](x.limbs), Limbs[4](_n_rr().limbs), Limbs[4](_n().limbs))
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_to_mont[4, _ORDER_N0](x, _n_rr(), _n())
 
 
 @always_inline
 def _n_from_mont(x: U256) -> U256:
-    var res = ws_from_mont[4, _ORDER_N0](Limbs[4](x.limbs), Limbs[4](_n().limbs))
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_from_mont[4, _ORDER_N0](x, _n())
 
 
 @always_inline
 def _n_mul(a: U256, b: U256) -> U256:
-    var res = ws_mont_mul[4, _ORDER_N0](ws_to_mont[4, _ORDER_N0](Limbs[4](a.limbs), Limbs[4](_n_rr().limbs), Limbs[4](_n().limbs)), Limbs[4](b.limbs), Limbs[4](_n().limbs))
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_mont_mul[4, _ORDER_N0](ws_to_mont[4, _ORDER_N0](a, _n_rr(), _n()), b, _n())
 
 
 def _n_inv(x: U256) -> U256:
-    var res = ws_mod_inv_ct[4, _ORDER_N0](Limbs[4](x.limbs), Limbs[4](_n().limbs), Limbs[4](_n_rr().limbs), Limbs[4](_n_minus_2().limbs), Limbs[4](_n_one_mont().limbs))
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_mod_inv_ct[4, _ORDER_N0](x, _n(), _n_rr(), _n_minus_2(), _n_one_mont())
 
 
 @always_inline
 def _reduce_n(x: U256) -> U256:
-    var res = ws_reduce_mod(Limbs[4](x.limbs), Limbs[4](_n().limbs))
-    var out = U256()
-    out.limbs = res.limbs
-    return out
+    return ws_reduce_mod(x, _n())
 
 
 def _wipe_u256(mut x: U256):
@@ -596,7 +509,7 @@ def _wipe_list_u8(mut data: List[UInt8]):
 
 
 def _rfc6979_p256(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int) -> U256:
-    return ws_rfc6979[4](private_key, digest, skip, Limbs[4](_n().limbs))
+    return ws_rfc6979[4](private_key, digest, skip, _n())
 
 
 def p256_ecdsa_sign_digest(
@@ -662,10 +575,10 @@ def p256_ecdsa_sign(
 
 
 def _p256_add_public(a: P256Point, b: P256Point) -> P256Point:
-    var ga = Point[4](Limbs[4](a.x.limbs), Limbs[4](a.y.limbs), a.infinity)
-    var gb = Point[4](Limbs[4](b.x.limbs), Limbs[4](b.y.limbs), b.infinity)
-    var res = ws_point_add[4, _N0](ga, gb, Limbs[4](_p().limbs), Limbs[4](_rr().limbs), Limbs[4](_one_mont().limbs))
-    return P256Point(U256(res.x.limbs), U256(res.y.limbs), res.infinity)
+    var ga = Point[4](a.x, a.y, a.infinity)
+    var gb = Point[4](b.x, b.y, b.infinity)
+    var res = ws_point_add[4, _N0](ga, gb, _p(), _rr(), _one_mont())
+    return P256Point(res.x, res.y, res.infinity)
 
 
 def p256_ecdsa_verify_digest(

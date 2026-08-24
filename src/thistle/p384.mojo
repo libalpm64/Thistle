@@ -119,7 +119,7 @@ def _one_mont() -> U384:
 
 @always_inline
 def _cmp(a: U384, b: U384) -> Int:
-    return ws_cmp(Limbs[6](a.limbs), Limbs[6](b.limbs))
+    return ws_cmp(a, b)
 
 
 @always_inline
@@ -129,44 +129,22 @@ def _eq(a: U384, b: U384) -> Bool:
 
 @always_inline
 def _sub_raw(a: U384, b: U384) -> Tuple[U384, UInt64]:
-    var al = Limbs[6](a.limbs)
-    var bl = Limbs[6](b.limbs)
-    var res, borrow = ws_sub_raw(al, bl)
-    var out = U384()
-    out.limbs = res.limbs
-    return out, borrow
+    return ws_sub_raw(a, b)
 
 
 @always_inline
 def _add_raw(a: U384, b: U384) -> Tuple[U384, UInt64]:
-    var al = Limbs[6](a.limbs)
-    var bl = Limbs[6](b.limbs)
-    var res, carry = ws_add_raw(al, bl)
-    var out = U384()
-    out.limbs = res.limbs
-    return out, carry
+    return ws_add_raw(a, b)
 
 
 @always_inline
 def _add_mod(a: U384, b: U384, m: U384) -> U384:
-    var al = Limbs[6](a.limbs)
-    var bl = Limbs[6](b.limbs)
-    var ml = Limbs[6](m.limbs)
-    var res = ws_add_mod(al, bl, ml)
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_add_mod(a, b, m)
 
 
 @always_inline
 def _sub_mod(a: U384, b: U384, m: U384) -> U384:
-    var al = Limbs[6](a.limbs)
-    var bl = Limbs[6](b.limbs)
-    var ml = Limbs[6](m.limbs)
-    var res = ws_sub_mod(al, bl, ml)
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_sub_mod(a, b, m)
 
 
 @always_inline
@@ -181,51 +159,27 @@ def _sub_mod(a: U384, b: U384) -> U384:
 
 @always_inline
 def _mont_mul(a: U384, b: U384) -> U384:
-    var al = Limbs[6](a.limbs)
-    var bl = Limbs[6](b.limbs)
-    var pl = Limbs[6](_p().limbs)
-    var res = ws_mont_mul[6, _N0](al, bl, pl)
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_mont_mul[6, _N0](a, b, _p())
 
 
 @always_inline
 def _mont_sqr(a: U384) -> U384:
-    return _mont_mul(a, a)
+    return ws_mont_sqr[6, _N0](a, _p())
 
 
 @always_inline
 def _to_mont(x: U384) -> U384:
-    var xl = Limbs[6](x.limbs)
-    var rr = Limbs[6](_rr().limbs)
-    var pl = Limbs[6](_p().limbs)
-    var res = ws_to_mont[6, _N0](xl, rr, pl)
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_to_mont[6, _N0](x, _rr(), _p())
 
 
 @always_inline
 def _from_mont(x: U384) -> U384:
-    var xl = Limbs[6](x.limbs)
-    var pl = Limbs[6](_p().limbs)
-    var res = ws_from_mont[6, _N0](xl, pl)
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_from_mont[6, _N0](x, _p())
 
 
 @always_inline
 def _mul_mod(a: U384, b: U384, m: U384) -> U384:
-    var al = Limbs[6](a.limbs)
-    var bl = Limbs[6](b.limbs)
-    var ml = Limbs[6](m.limbs)
-    var rr = Limbs[6](_rr().limbs)
-    var res = ws_mul_mod[6, _N0](al, bl, ml, rr)
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_mul_mod[6, _N0](a, b, m, _rr())
 
 
 @always_inline
@@ -234,27 +188,16 @@ def _square_mod(a: U384, m: U384) -> U384:
 
 
 def _pow_mod(base_in: U384, exponent: U384) -> U384:
-    var al = Limbs[6](base_in.limbs)
-    var bl = Limbs[6](exponent.limbs)
-    var res = ws_pow_mod[6, _N0](al, bl, Limbs[6](_rr().limbs), Limbs[6](_p().limbs))
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_pow_mod[6, _N0](base_in, exponent, _rr(), _p())
 
 
 @always_inline
 def _sqn_p(x: U384, n: Int) -> U384:
-    var res = ws_sqn[6, _N0](Limbs[6](x.limbs), n, Limbs[6](_p().limbs))
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_sqn[6, _N0](x, n, _p())
 
 
 def _inv_p(x: U384) -> U384:
-    var res = ws_inv_p[6, _N0](Limbs[6](x.limbs), Limbs[6](_p().limbs), Limbs[6](_rr().limbs))
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_inv_p[6, _N0](x, _p(), _rr())
 
 
 def _sqrt_p(x: U384) -> U384:
@@ -262,14 +205,11 @@ def _sqrt_p(x: U384) -> U384:
 
 
 def _from_be(bytes: Span[UInt8, ...]) -> U384:
-    var res = ws_from_be[6](bytes)
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_from_be[6](bytes)
 
 
 def _to_be(x: U384, output: Pointer[mut=True, UInt8, _, address_space=_]):
-    ws_to_be(Limbs[6](x.limbs), output)
+    ws_to_be(x, output)
 
 
 struct P384Point(Copyable, ImplicitlyCopyable, Movable):
@@ -335,76 +275,67 @@ struct P384JacobianPoint(Copyable, ImplicitlyCopyable, Movable):
 
 @always_inline
 def _select_u384(a: U384, b: U384, choice: UInt64) -> U384:
-    var al = Limbs[6](a.limbs)
-    var bl = Limbs[6](b.limbs)
-    var res = ws_select(al, bl, choice)
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_select(a, b, choice)
 
 
 @always_inline
 def _u384_zero_choice(x: U384) -> UInt64:
-    return ws_zero_choice(Limbs[6](x.limbs))
+    return ws_zero_choice(x)
 
 
 @always_inline
 def _jacobian_infinity() -> P384JacobianPoint:
-    var res = ws_jacobian_infinity(Limbs[6](_one_mont().limbs))
-    return P384JacobianPoint(U384(res.x.limbs), U384(res.y.limbs), U384(res.z.limbs), res.infinity)
+    var res = ws_jacobian_infinity(_one_mont())
+    return P384JacobianPoint(res.x, res.y, res.z, res.infinity)
 
 
 @always_inline
 def _select_jacobian_ct(
     a: P384JacobianPoint, b: P384JacobianPoint, choice: UInt64
 ) -> P384JacobianPoint:
-    var ga = JacobianPoint[6](Limbs[6](a.x.limbs), Limbs[6](a.y.limbs), Limbs[6](a.z.limbs), a.infinity)
-    var gb = JacobianPoint[6](Limbs[6](b.x.limbs), Limbs[6](b.y.limbs), Limbs[6](b.z.limbs), b.infinity)
+    var ga = JacobianPoint[6](a.x, a.y, a.z, a.infinity)
+    var gb = JacobianPoint[6](b.x, b.y, b.z, b.infinity)
     var res = ws_select_jacobian_ct(ga, gb, choice)
-    return P384JacobianPoint(U384(res.x.limbs), U384(res.y.limbs), U384(res.z.limbs), res.infinity)
+    return P384JacobianPoint(res.x, res.y, res.z, res.infinity)
 
 
 @always_inline
 def _mul_small_mod(x: U384, c: UInt64) -> U384:
-    var res = ws_mul_small_mod(Limbs[6](x.limbs), c, Limbs[6](_p().limbs))
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_mul_small_mod(x, c, _p())
 
 
 def _is_on_curve(point: P384Point) -> Bool:
-    var gp = Point[6](Limbs[6](point.x.limbs), Limbs[6](point.y.limbs), point.infinity)
-    return ws_is_on_curve[6, _N0](gp, Limbs[6](_p().limbs), Limbs[6](_a().limbs), Limbs[6](_b().limbs), Limbs[6](_rr().limbs))
+    var gp = Point[6](point.x, point.y, point.infinity)
+    return ws_is_on_curve[6, _N0](gp, _p(), _a(), _b(), _rr())
 
 
 @always_inline
 def _jacobian_double_ct(p: P384JacobianPoint) -> P384JacobianPoint:
-    var gp = JacobianPoint[6](Limbs[6](p.x.limbs), Limbs[6](p.y.limbs), Limbs[6](p.z.limbs), p.infinity)
-    var res = ws_jacobian_double_ct[6, _N0](gp, Limbs[6](_p().limbs), Limbs[6](_rr().limbs))
-    return P384JacobianPoint(U384(res.x.limbs), U384(res.y.limbs), U384(res.z.limbs), res.infinity)
+    var gp = JacobianPoint[6](p.x, p.y, p.z, p.infinity)
+    var res = ws_jacobian_double_ct[6, _N0](gp, _p(), _rr())
+    return P384JacobianPoint(res.x, res.y, res.z, res.infinity)
 
 
 @always_inline
 def _jacobian_add_affine_non_equal_ct(
     p: P384JacobianPoint, q: P384Point
 ) -> P384JacobianPoint:
-    var gp = JacobianPoint[6](Limbs[6](p.x.limbs), Limbs[6](p.y.limbs), Limbs[6](p.z.limbs), p.infinity)
-    var gq = Point[6](Limbs[6](q.x.limbs), Limbs[6](q.y.limbs), q.infinity)
-    var res = ws_jacobian_add_affine[6, _N0](gp, gq, Limbs[6](_p().limbs), Limbs[6](_rr().limbs), Limbs[6](_one_mont().limbs))
-    return P384JacobianPoint(U384(res.x.limbs), U384(res.y.limbs), U384(res.z.limbs), res.infinity)
+    var gp = JacobianPoint[6](p.x, p.y, p.z, p.infinity)
+    var gq = Point[6](q.x, q.y, q.infinity)
+    var res = ws_jacobian_add_affine[6, _N0](gp, gq, _p(), _rr(), _one_mont())
+    return P384JacobianPoint(res.x, res.y, res.z, res.infinity)
 
 
 def _jacobian_to_affine(p: P384JacobianPoint) -> P384Point:
-    var gp = JacobianPoint[6](Limbs[6](p.x.limbs), Limbs[6](p.y.limbs), Limbs[6](p.z.limbs), p.infinity)
-    var res = ws_jacobian_to_affine[6, _N0](gp, Limbs[6](_p().limbs), Limbs[6](_rr().limbs))
-    return P384Point(U384(res.x.limbs), U384(res.y.limbs), res.infinity)
+    var gp = JacobianPoint[6](p.x, p.y, p.z, p.infinity)
+    var res = ws_jacobian_to_affine[6, _N0](gp, _p(), _rr())
+    return P384Point(res.x, res.y, res.infinity)
 
 
 def _scalar_mult(k: U384, p: P384Point) -> P384Point:
-    var kl = Limbs[6](k.limbs)
-    var pl = Point[6](Limbs[6](p.x.limbs), Limbs[6](p.y.limbs), p.infinity)
-    var res = ws_scalar_mult[6, _N0](kl, pl, Limbs[6](_p().limbs), Limbs[6](_rr().limbs), Limbs[6](_one_mont().limbs))
-    return P384Point(U384(res.x.limbs), U384(res.y.limbs), res.infinity)
+    var pl = Point[6](p.x, p.y, p.infinity)
+    var res = ws_scalar_mult[6, _N0](k, pl, _p(), _rr(), _one_mont())
+    return P384Point(res.x, res.y, res.infinity)
 
 
 @always_inline
@@ -412,15 +343,14 @@ def _base_table_entry(
     tptr: Pointer[UInt64, _], j: Int, d: UInt64
 ) -> P384Point:
     var res = ws_base_table_entry[6](tptr, j, d)
-    return P384Point(U384(res.x.limbs), U384(res.y.limbs), res.infinity)
+    return P384Point(res.x, res.y, res.infinity)
 
 
 def _scalar_mult_base(k: U384) -> P384Point:
     var table = p384_base_table()
     var tptr = table.unsafe_ptr()
-    var kl = Limbs[6](k.limbs)
-    var res = ws_scalar_mult_base[6, _N0](tptr, kl, Limbs[6](_p().limbs), Limbs[6](_rr().limbs), Limbs[6](_one_mont().limbs))
-    return P384Point(U384(res.x.limbs), U384(res.y.limbs), res.infinity)
+    var res = ws_scalar_mult_base[6, _N0](tptr, k, _p(), _rr(), _one_mont())
+    return P384Point(res.x, res.y, res.infinity)
 
 
 def p384_decode_uncompressed(point: Span[UInt8, ...]) -> P384Point:
@@ -550,49 +480,31 @@ def _n_minus_2() -> U384:
 
 @always_inline
 def _n_mont_mul(a: U384, b: U384) -> U384:
-    var res = ws_mont_mul[6, _ORDER_N0](Limbs[6](a.limbs), Limbs[6](b.limbs), Limbs[6](_n().limbs))
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_mont_mul[6, _ORDER_N0](a, b, _n())
 
 
 @always_inline
 def _n_to_mont(x: U384) -> U384:
-    var res = ws_to_mont[6, _ORDER_N0](Limbs[6](x.limbs), Limbs[6](_n_rr().limbs), Limbs[6](_n().limbs))
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_to_mont[6, _ORDER_N0](x, _n_rr(), _n())
 
 
 @always_inline
 def _n_from_mont(x: U384) -> U384:
-    var res = ws_from_mont[6, _ORDER_N0](Limbs[6](x.limbs), Limbs[6](_n().limbs))
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_from_mont[6, _ORDER_N0](x, _n())
 
 
 @always_inline
 def _n_mul(a: U384, b: U384) -> U384:
-    var res = ws_mont_mul[6, _ORDER_N0](ws_to_mont[6, _ORDER_N0](Limbs[6](a.limbs), Limbs[6](_n_rr().limbs), Limbs[6](_n().limbs)), Limbs[6](b.limbs), Limbs[6](_n().limbs))
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_mont_mul[6, _ORDER_N0](ws_to_mont[6, _ORDER_N0](a, _n_rr(), _n()), b, _n())
 
 
 def _n_inv(x: U384) -> U384:
-    var res = ws_mod_inv_ct[6, _ORDER_N0](Limbs[6](x.limbs), Limbs[6](_n().limbs), Limbs[6](_n_rr().limbs), Limbs[6](_n_minus_2().limbs), Limbs[6](_n_one_mont().limbs))
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_mod_inv_ct[6, _ORDER_N0](x, _n(), _n_rr(), _n_minus_2(), _n_one_mont())
 
 
 @always_inline
 def _reduce_n(x: U384) -> U384:
-    var res = ws_reduce_mod(Limbs[6](x.limbs), Limbs[6](_n().limbs))
-    var out = U384()
-    out.limbs = res.limbs
-    return out
+    return ws_reduce_mod(x, _n())
 
 
 def _wipe_u384(mut x: U384):
@@ -608,7 +520,7 @@ def _wipe_list_u8(mut data: List[UInt8]):
 
 
 def _rfc6979_p384(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int) -> U384:
-    return ws_rfc6979[6](private_key, digest, skip, Limbs[6](_n().limbs))
+    return ws_rfc6979[6](private_key, digest, skip, _n())
 
 
 def p384_ecdsa_sign_digest(
@@ -674,10 +586,10 @@ def p384_ecdsa_sign(
 
 
 def _p384_add_public(a: P384Point, b: P384Point) -> P384Point:
-    var ga = Point[6](Limbs[6](a.x.limbs), Limbs[6](a.y.limbs), a.infinity)
-    var gb = Point[6](Limbs[6](b.x.limbs), Limbs[6](b.y.limbs), b.infinity)
-    var res = ws_point_add[6, _N0](ga, gb, Limbs[6](_p().limbs), Limbs[6](_rr().limbs), Limbs[6](_one_mont().limbs))
-    return P384Point(U384(res.x.limbs), U384(res.y.limbs), res.infinity)
+    var ga = Point[6](a.x, a.y, a.infinity)
+    var gb = Point[6](b.x, b.y, b.infinity)
+    var res = ws_point_add[6, _N0](ga, gb, _p(), _rr(), _one_mont())
+    return P384Point(res.x, res.y, res.infinity)
 
 
 def p384_ecdsa_verify_digest(

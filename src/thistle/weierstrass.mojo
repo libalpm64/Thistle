@@ -524,6 +524,12 @@ def select_jacobian_ct[N: Int](a: JacobianPoint[N], b: JacobianPoint[N], choice:
 
 @always_inline
 def pow_mod[N: Int, N0: UInt64](base_in: Limbs[N], exponent: Limbs[N], rr: Limbs[N], p: Limbs[N]) -> Limbs[N]:
+    """Modular exponentiation. Exponent must be public.
+
+    Branches on exponent.bit(i) and is not constant-time. The only caller
+    today is _sqrt_p via the public _sqrt_exp() constant. For secret
+    exponents use mod_inv_ct (constant-time select()).
+    """
     var one = Limbs[N].zero()
     one.limbs[0] = 1
     var res = to_mont[N, N0](one, rr, p)
@@ -707,6 +713,14 @@ def scalar_mult_base[N: Int, N0: UInt64](tptr: Pointer[UInt64, _], k: Limbs[N], 
     return jacobian_to_affine[N, N0](acc, mod, rr)
 
 
+@always_inline
+def _hmac[N: Int](key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
+    if N == 4:
+        return hmac_sha256(key, data)
+    else:
+        return hmac_sha384(key, data)
+
+
 def rfc6979[N: Int](private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int, n: Limbs[N]) -> Limbs[N]:
     var h1 = reduce_mod(from_be[N](digest), n)
     var h1_bytes = InlineArray[UInt8, N * 8](fill=0)
@@ -723,16 +737,10 @@ def rfc6979[N: Int](private_key: Span[UInt8, ...], digest: Span[UInt8, ...], ski
         seed.append(h1_bytes[i])
     var next_k: List[UInt8]
     var next_v: List[UInt8]
-    if N == 4:
-        next_k = hmac_sha256(Span[UInt8, ...](k), Span[UInt8, ...](seed))
-    else:
-        next_k = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](seed))
+    next_k = _hmac[N](Span[UInt8, ...](k), Span[UInt8, ...](seed))
     volatile_wipe(k.unsafe_ptr(), len(k))
     k = next_k^
-    if N == 4:
-        next_v = hmac_sha256(Span[UInt8, ...](k), Span[UInt8, ...](v))
-    else:
-        next_v = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](v))
+    next_v = _hmac[N](Span[UInt8, ...](k), Span[UInt8, ...](v))
     volatile_wipe(v.unsafe_ptr(), len(v))
     v = next_v^
     volatile_wipe(seed.unsafe_ptr(), len(seed))
@@ -744,24 +752,15 @@ def rfc6979[N: Int](private_key: Span[UInt8, ...], digest: Span[UInt8, ...], ski
         seed.append(private_key[i])
     for i in range(N * 8):
         seed.append(h1_bytes[i])
-    if N == 4:
-        next_k = hmac_sha256(Span[UInt8, ...](k), Span[UInt8, ...](seed))
-    else:
-        next_k = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](seed))
+    next_k = _hmac[N](Span[UInt8, ...](k), Span[UInt8, ...](seed))
     volatile_wipe(k.unsafe_ptr(), len(k))
     k = next_k^
-    if N == 4:
-        next_v = hmac_sha256(Span[UInt8, ...](k), Span[UInt8, ...](v))
-    else:
-        next_v = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](v))
+    next_v = _hmac[N](Span[UInt8, ...](k), Span[UInt8, ...](v))
     volatile_wipe(v.unsafe_ptr(), len(v))
     v = next_v^
     var accepted = 0
     while True:
-        if N == 4:
-            next_v = hmac_sha256(Span[UInt8, ...](k), Span[UInt8, ...](v))
-        else:
-            next_v = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](v))
+        next_v = _hmac[N](Span[UInt8, ...](k), Span[UInt8, ...](v))
         volatile_wipe(v.unsafe_ptr(), len(v))
         v = next_v^
         var candidate = from_be[N](Span[UInt8, ...](v))
@@ -788,16 +787,10 @@ def rfc6979[N: Int](private_key: Span[UInt8, ...], digest: Span[UInt8, ...], ski
         for i in range(N * 8):
             seed.append(v[i])
         seed.append(0)
-        if N == 4:
-            next_k = hmac_sha256(Span[UInt8, ...](k), Span[UInt8, ...](seed))
-        else:
-            next_k = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](seed))
+        next_k = _hmac[N](Span[UInt8, ...](k), Span[UInt8, ...](seed))
         volatile_wipe(k.unsafe_ptr(), len(k))
         k = next_k^
-        if N == 4:
-            next_v = hmac_sha256(Span[UInt8, ...](k), Span[UInt8, ...](v))
-        else:
-            next_v = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](v))
+        next_v = _hmac[N](Span[UInt8, ...](k), Span[UInt8, ...](v))
         volatile_wipe(v.unsafe_ptr(), len(v))
         v = next_v^
 

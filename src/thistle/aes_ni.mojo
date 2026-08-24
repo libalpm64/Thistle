@@ -507,6 +507,8 @@ def aes_gcm_ctr_kernel(
         abort("AES round count must be 10, 12, or 14")
     if num_blocks < 0:
         abort("AES-GCM block count cannot be negative")
+    if num_blocks > 0xFFFFFFFE:
+        abort("AES-GCM block count exceeds 2^32-2 limit")
     comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
         _hw_gcm_ctr_kernel(input_ptr, output_ptr, round_keys, num_blocks, j0_ptr, rounds)
     else:
