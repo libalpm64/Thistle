@@ -7,57 +7,14 @@ from .utils import u64_nonzero_choice, u64_zero_choice
 from .sha2 import sha384_hash
 from .pbkdf2 import hmac_sha384
 from std.utils import StaticTuple
+from .weierstrass import Limbs, U384, Point, JacobianPoint, cmp as ws_cmp, sub_raw as ws_sub_raw, add_raw as ws_add_raw, select as ws_select, zero_choice as ws_zero_choice, add_mod as ws_add_mod, sub_mod as ws_sub_mod, from_be as ws_from_be, to_be as ws_to_be, mont_mul as ws_mont_mul, mont_sqr as ws_mont_sqr, to_mont as ws_to_mont, from_mont as ws_from_mont, mul_mod as ws_mul_mod, square_mod as ws_square_mod, is_on_curve as ws_is_on_curve, mul_small_mod as ws_mul_small_mod, jacobian_double_ct as ws_jacobian_double_ct, jacobian_infinity as ws_jacobian_infinity, select_jacobian_ct as ws_select_jacobian_ct, jacobian_add_affine_non_equal_ct as ws_jacobian_add_affine, pow_mod as ws_pow_mod, sqn as ws_sqn, inv_p as ws_inv_p, jacobian_to_affine as ws_jacobian_to_affine, scalar_mult as ws_scalar_mult, base_table_entry as ws_base_table_entry, scalar_mult_base as ws_scalar_mult_base, mod_inv_ct as ws_mod_inv_ct, reduce_mod as ws_reduce_mod, point_add as ws_point_add, rfc6979 as ws_rfc6979
 
 comptime P384_SIZE = 48
 comptime P384_POINT_SIZE = 97
 comptime P384_SIGNATURE_SIZE = 96
 comptime _MASK64 = UInt128(0xFFFFFFFFFFFFFFFF)
 comptime _N0 = UInt64(0x0000000100000001)  # -p^-1 mod 2^64
-
-
-struct U384(Copyable, ImplicitlyCopyable, Movable):
-    var limbs: StaticTuple[UInt64, 6]
-
-    def __init__(out self):
-        self.limbs = StaticTuple[UInt64, 6]()
-        comptime for i in range(6):
-            self.limbs[i] = 0
-
-    def __init__(
-        out self,
-        l0: UInt64,
-        l1: UInt64,
-        l2: UInt64,
-        l3: UInt64,
-        l4: UInt64,
-        l5: UInt64,
-    ):
-        self.limbs = StaticTuple[UInt64, 6]()
-        self.limbs[0] = l0
-        self.limbs[1] = l1
-        self.limbs[2] = l2
-        self.limbs[3] = l3
-        self.limbs[4] = l4
-        self.limbs[5] = l5
-
-    def __copyinit__(out self, copy: Self):
-        self.limbs = copy.limbs
-
-    def __moveinit__(out self, deinit take: Self):
-        self.limbs = take.limbs^
-
-    @staticmethod
-    def one() -> U384:
-        return U384(1, 0, 0, 0, 0, 0)
-
-    def is_zero(self) -> Bool:
-        for i in range(6):
-            if self.limbs[i] != 0:
-                return False
-        return True
-
-    def bit(self, i: Int) -> UInt64:
-        return (self.limbs[i // 64] >> UInt64(i % 64)) & 1
+comptime _ORDER_N0 = UInt64(0x6ED46089E88FDC45)
 
 
 def _p() -> U384:
@@ -162,13 +119,7 @@ def _one_mont() -> U384:
 
 @always_inline
 def _cmp(a: U384, b: U384) -> Int:
-    comptime for j in range(6):
-        var i = 5 - j
-        if a.limbs[i] > b.limbs[i]:
-            return 1
-        if a.limbs[i] < b.limbs[i]:
-            return -1
-    return 0
+    return ws_cmp(Limbs[6](a.limbs), Limbs[6](b.limbs))
 
 
 @always_inline
@@ -178,39 +129,44 @@ def _eq(a: U384, b: U384) -> Bool:
 
 @always_inline
 def _sub_raw(a: U384, b: U384) -> Tuple[U384, UInt64]:
+    var al = Limbs[6](a.limbs)
+    var bl = Limbs[6](b.limbs)
+    var res, borrow = ws_sub_raw(al, bl)
     var out = U384()
-    var borrow: UInt64 = 0
-    comptime for i in range(6):
-        var d = UInt128(a.limbs[i]) - UInt128(b.limbs[i]) - UInt128(borrow)
-        out.limbs[i] = UInt64(d & _MASK64)
-        borrow = UInt64((d >> UInt128(64)) & UInt128(1))
+    out.limbs = res.limbs
     return out, borrow
 
 
 @always_inline
 def _add_raw(a: U384, b: U384) -> Tuple[U384, UInt64]:
+    var al = Limbs[6](a.limbs)
+    var bl = Limbs[6](b.limbs)
+    var res, carry = ws_add_raw(al, bl)
     var out = U384()
-    var carry: UInt64 = 0
-    comptime for i in range(6):
-        var s = UInt128(a.limbs[i]) + UInt128(b.limbs[i]) + UInt128(carry)
-        out.limbs[i] = UInt64(s & _MASK64)
-        carry = UInt64(s >> UInt128(64))
+    out.limbs = res.limbs
     return out, carry
 
 
 @always_inline
 def _add_mod(a: U384, b: U384, m: U384) -> U384:
-    var sum, carry = _add_raw(a, b)
-    var d, borrow = _sub_raw(sum, m)
-    var take_d = (carry | (borrow ^ UInt64(1))) & UInt64(1)
-    return _select_u384(sum, d, take_d)
+    var al = Limbs[6](a.limbs)
+    var bl = Limbs[6](b.limbs)
+    var ml = Limbs[6](m.limbs)
+    var res = ws_add_mod(al, bl, ml)
+    var out = U384()
+    out.limbs = res.limbs
+    return out
 
 
 @always_inline
 def _sub_mod(a: U384, b: U384, m: U384) -> U384:
-    var diff, borrow = _sub_raw(a, b)
-    var diff_plus_m, _ = _add_raw(diff, m)
-    return _select_u384(diff, diff_plus_m, borrow)
+    var al = Limbs[6](a.limbs)
+    var bl = Limbs[6](b.limbs)
+    var ml = Limbs[6](m.limbs)
+    var res = ws_sub_mod(al, bl, ml)
+    var out = U384()
+    out.limbs = res.limbs
+    return out
 
 
 @always_inline
@@ -225,118 +181,51 @@ def _sub_mod(a: U384, b: U384) -> U384:
 
 @always_inline
 def _mont_mul(a: U384, b: U384) -> U384:
-    var acc = InlineArray[UInt64, 8](fill=0)
-    var pmod = _p()
-
-    comptime for i in range(6):
-        var bi = b.limbs[i]
-        var carry = UInt64(0)
-        comptime for j in range(6):
-            var t = (
-                UInt128(a.limbs[j]) * UInt128(bi)
-                + UInt128(acc[j])
-                + UInt128(carry)
-            )
-            acc[j] = UInt64(t & _MASK64)
-            carry = UInt64(t >> UInt128(64))
-        var s = UInt128(acc[6]) + UInt128(carry)
-        acc[6] = UInt64(s & _MASK64)
-        acc[7] += UInt64(s >> UInt128(64))
-
-        var m = acc[0] * _N0
-        var t0 = UInt128(acc[0]) + UInt128(m) * UInt128(pmod.limbs[0])
-        var c = UInt64(t0 >> UInt128(64))
-        comptime for j in range(1, 6):
-            var t = (
-                UInt128(m) * UInt128(pmod.limbs[j])
-                + UInt128(acc[j])
-                + UInt128(c)
-            )
-            acc[j - 1] = UInt64(t & _MASK64)
-            c = UInt64(t >> UInt128(64))
-        s = UInt128(acc[6]) + UInt128(c)
-        acc[5] = UInt64(s & _MASK64)
-        acc[6] = acc[7] + UInt64(s >> UInt128(64))
-        acc[7] = 0
-
-    var out = U384(acc[0], acc[1], acc[2], acc[3], acc[4], acc[5])
-    var d, borrow = _sub_raw(out, pmod)
-    var take_d = (acc[6] | (borrow ^ UInt64(1))) & UInt64(1)
-    return _select_u384(out, d, take_d)
+    var al = Limbs[6](a.limbs)
+    var bl = Limbs[6](b.limbs)
+    var pl = Limbs[6](_p().limbs)
+    var res = ws_mont_mul[6, _N0](al, bl, pl)
+    var out = U384()
+    out.limbs = res.limbs
+    return out
 
 
 @always_inline
 def _mont_sqr(a: U384) -> U384:
-    var acc = InlineArray[UInt64, 13](fill=0)
-
-    comptime for i in range(6):
-        comptime for j in range(i + 1, 6):
-            comptime k = i + j
-            var product = UInt128(a.limbs[i]) * UInt128(a.limbs[j])
-            var s = UInt128(acc[k]) + (product & _MASK64)
-            acc[k] = UInt64(s & _MASK64)
-            var carry = UInt64(product >> UInt128(64)) + UInt64(
-                s >> UInt128(64)
-            )
-            comptime for q in range(k + 1, 12):
-                s = UInt128(acc[q]) + UInt128(carry)
-                acc[q] = UInt64(s & _MASK64)
-                carry = UInt64(s >> UInt128(64))
-            acc[12] += carry
-
-    var bit_carry = UInt64(0)
-    comptime for i in range(13):
-        var next_carry = acc[i] >> UInt64(63)
-        acc[i] = (acc[i] << UInt64(1)) | bit_carry
-        bit_carry = next_carry
-
-    comptime for i in range(6):
-        comptime k = 2 * i
-        var product = UInt128(a.limbs[i]) * UInt128(a.limbs[i])
-        var s = UInt128(acc[k]) + (product & _MASK64)
-        acc[k] = UInt64(s & _MASK64)
-        var carry = UInt64(product >> UInt128(64)) + UInt64(s >> UInt128(64))
-        comptime for q in range(k + 1, 13):
-            s = UInt128(acc[q]) + UInt128(carry)
-            acc[q] = UInt64(s & _MASK64)
-            carry = UInt64(s >> UInt128(64))
-
-    var pmod = _p()
-    comptime for i in range(6):
-        var m = acc[i] * _N0
-        var carry = UInt64(0)
-        comptime for j in range(6):
-            var s = (
-                UInt128(m) * UInt128(pmod.limbs[j])
-                + UInt128(acc[i + j])
-                + UInt128(carry)
-            )
-            acc[i + j] = UInt64(s & _MASK64)
-            carry = UInt64(s >> UInt128(64))
-        comptime for q in range(i + 6, 13):
-            var s = UInt128(acc[q]) + UInt128(carry)
-            acc[q] = UInt64(s & _MASK64)
-            carry = UInt64(s >> UInt128(64))
-
-    var out = U384(acc[6], acc[7], acc[8], acc[9], acc[10], acc[11])
-    var d, borrow = _sub_raw(out, pmod)
-    var take_d = (acc[12] | (borrow ^ UInt64(1))) & UInt64(1)
-    return _select_u384(out, d, take_d)
+    return _mont_mul(a, a)
 
 
 @always_inline
 def _to_mont(x: U384) -> U384:
-    return _mont_mul(x, _rr())
+    var xl = Limbs[6](x.limbs)
+    var rr = Limbs[6](_rr().limbs)
+    var pl = Limbs[6](_p().limbs)
+    var res = ws_to_mont[6, _N0](xl, rr, pl)
+    var out = U384()
+    out.limbs = res.limbs
+    return out
 
 
 @always_inline
 def _from_mont(x: U384) -> U384:
-    return _mont_mul(x, U384.one())
+    var xl = Limbs[6](x.limbs)
+    var pl = Limbs[6](_p().limbs)
+    var res = ws_from_mont[6, _N0](xl, pl)
+    var out = U384()
+    out.limbs = res.limbs
+    return out
 
 
 @always_inline
 def _mul_mod(a: U384, b: U384, m: U384) -> U384:
-    return _mont_mul(_to_mont(a), b)
+    var al = Limbs[6](a.limbs)
+    var bl = Limbs[6](b.limbs)
+    var ml = Limbs[6](m.limbs)
+    var rr = Limbs[6](_rr().limbs)
+    var res = ws_mul_mod[6, _N0](al, bl, ml, rr)
+    var out = U384()
+    out.limbs = res.limbs
+    return out
 
 
 @always_inline
@@ -345,43 +234,27 @@ def _square_mod(a: U384, m: U384) -> U384:
 
 
 def _pow_mod(base_in: U384, exponent: U384) -> U384:
-    var result = _one_mont()
-    var base = _to_mont(base_in)
-    for i in range(384):
-        if exponent.bit(i) != 0:
-            result = _mont_mul(result, base)
-        base = _mont_sqr(base)
-    return _from_mont(result)
+    var al = Limbs[6](base_in.limbs)
+    var bl = Limbs[6](exponent.limbs)
+    var res = ws_pow_mod[6, _N0](al, bl, Limbs[6](_rr().limbs), Limbs[6](_p().limbs))
+    var out = U384()
+    out.limbs = res.limbs
+    return out
 
 
 @always_inline
 def _sqn_p(x: U384, n: Int) -> U384:
-    var r = x
-    for _ in range(n):
-        r = _mont_sqr(r)
-    return r
+    var res = ws_sqn[6, _N0](Limbs[6](x.limbs), n, Limbs[6](_p().limbs))
+    var out = U384()
+    out.limbs = res.limbs
+    return out
 
 
 def _inv_p(x: U384) -> U384:
-    # Fermat inversion in the Montgomery domain.
-    var x2 = _mont_mul(_mont_sqr(x), x)
-    var x3 = _mont_mul(_mont_sqr(x2), x)
-    var x6 = _mont_mul(_sqn_p(x3, 3), x3)
-    var x12 = _mont_mul(_sqn_p(x6, 6), x6)
-    var x15 = _mont_mul(_sqn_p(x12, 3), x3)
-    var x30 = _mont_mul(_sqn_p(x15, 15), x15)
-    var x32 = _mont_mul(_sqn_p(x30, 2), x2)
-    var x60 = _mont_mul(_sqn_p(x30, 30), x30)
-    var x120 = _mont_mul(_sqn_p(x60, 60), x60)
-    var x240 = _mont_mul(_sqn_p(x120, 120), x120)
-    var x255 = _mont_mul(_sqn_p(x240, 15), x15)
-
-    var t = _sqn_p(x255, 1)
-    t = _mont_mul(_sqn_p(t, 32), x32)
-    t = _sqn_p(t, 64)
-    t = _mont_mul(_sqn_p(t, 30), x30)
-    t = _mont_mul(_sqn_p(t, 2), x)
-    return t
+    var res = ws_inv_p[6, _N0](Limbs[6](x.limbs), Limbs[6](_p().limbs), Limbs[6](_rr().limbs))
+    var out = U384()
+    out.limbs = res.limbs
+    return out
 
 
 def _sqrt_p(x: U384) -> U384:
@@ -389,21 +262,14 @@ def _sqrt_p(x: U384) -> U384:
 
 
 def _from_be(bytes: Span[UInt8, ...]) -> U384:
+    var res = ws_from_be[6](bytes)
     var out = U384()
-    for i in range(6):
-        var off = 40 - i * 8
-        var v: UInt64 = 0
-        for k in range(8):
-            v = (v << 8) | UInt64(bytes[off + k])
-        out.limbs[i] = v
+    out.limbs = res.limbs
     return out
 
 
 def _to_be(x: U384, output: Pointer[mut=True, UInt8, _, address_space=_]):
-    for i in range(6):
-        var limb = x.limbs[5 - i]
-        for k in range(8):
-            output[unsafe_offset=i * 8 + k] = UInt8((limb >> UInt64(56 - 8 * k)) & 0xFF)
+    ws_to_be(Limbs[6](x.limbs), output)
 
 
 struct P384Point(Copyable, ImplicitlyCopyable, Movable):
@@ -469,229 +335,92 @@ struct P384JacobianPoint(Copyable, ImplicitlyCopyable, Movable):
 
 @always_inline
 def _select_u384(a: U384, b: U384, choice: UInt64) -> U384:
-    var mask = UInt64(0) - choice
+    var al = Limbs[6](a.limbs)
+    var bl = Limbs[6](b.limbs)
+    var res = ws_select(al, bl, choice)
     var out = U384()
-    comptime for i in range(6):
-        out.limbs[i] = a.limbs[i] ^ (mask & (a.limbs[i] ^ b.limbs[i]))
+    out.limbs = res.limbs
     return out
 
 
 @always_inline
 def _u384_zero_choice(x: U384) -> UInt64:
-    var acc: UInt64 = 0
-    comptime for i in range(6):
-        acc |= x.limbs[i]
-    return u64_zero_choice(acc)
+    return ws_zero_choice(Limbs[6](x.limbs))
 
 
 @always_inline
 def _jacobian_infinity() -> P384JacobianPoint:
-    return P384JacobianPoint(U384(), _one_mont(), U384(), False)
+    var res = ws_jacobian_infinity(Limbs[6](_one_mont().limbs))
+    return P384JacobianPoint(U384(res.x.limbs), U384(res.y.limbs), U384(res.z.limbs), res.infinity)
 
 
 @always_inline
 def _select_jacobian_ct(
     a: P384JacobianPoint, b: P384JacobianPoint, choice: UInt64
 ) -> P384JacobianPoint:
-    return P384JacobianPoint(
-        _select_u384(a.x, b.x, choice),
-        _select_u384(a.y, b.y, choice),
-        _select_u384(a.z, b.z, choice),
-        False,
-    )
+    var ga = JacobianPoint[6](Limbs[6](a.x.limbs), Limbs[6](a.y.limbs), Limbs[6](a.z.limbs), a.infinity)
+    var gb = JacobianPoint[6](Limbs[6](b.x.limbs), Limbs[6](b.y.limbs), Limbs[6](b.z.limbs), b.infinity)
+    var res = ws_select_jacobian_ct(ga, gb, choice)
+    return P384JacobianPoint(U384(res.x.limbs), U384(res.y.limbs), U384(res.z.limbs), res.infinity)
 
 
 @always_inline
 def _mul_small_mod(x: U384, c: UInt64) -> U384:
-    if c == 2:
-        return _add_mod(x, x, _p())
-    if c == 3:
-        return _add_mod(_add_mod(x, x, _p()), x, _p())
-    if c == 4:
-        var x2 = _add_mod(x, x, _p())
-        return _add_mod(x2, x2, _p())
-    if c == 8:
-        var x2 = _add_mod(x, x, _p())
-        var x4 = _add_mod(x2, x2, _p())
-        return _add_mod(x4, x4, _p())
+    var res = ws_mul_small_mod(Limbs[6](x.limbs), c, Limbs[6](_p().limbs))
     var out = U384()
-    for _ in range(c):
-        out = _add_mod(out, x, _p())
+    out.limbs = res.limbs
     return out
 
 
 def _is_on_curve(point: P384Point) -> Bool:
-    if point.infinity:
-        return False
-    if _cmp(point.x, _p()) >= 0 or _cmp(point.y, _p()) >= 0:
-        return False
-    var yy = _square_mod(point.y, _p())
-    var xx = _square_mod(point.x, _p())
-    var xxx = _mul_mod(xx, point.x, _p())
-    var ax = _mul_mod(_a(), point.x, _p())
-    var rhs = _add_mod(_add_mod(xxx, ax, _p()), _b(), _p())
-    return _eq(yy, rhs)
+    var gp = Point[6](Limbs[6](point.x.limbs), Limbs[6](point.y.limbs), point.infinity)
+    return ws_is_on_curve[6, _N0](gp, Limbs[6](_p().limbs), Limbs[6](_a().limbs), Limbs[6](_b().limbs), Limbs[6](_rr().limbs))
 
 
 @always_inline
 def _jacobian_double_ct(p: P384JacobianPoint) -> P384JacobianPoint:
-    var delta = _mont_sqr(p.z)
-    var gamma = _mont_sqr(p.y)
-    var beta = _mont_mul(p.x, gamma)
-    var alpha = _mul_small_mod(
-        _mont_mul(_sub_mod(p.x, delta), _add_mod(p.x, delta)),
-        3,
-    )
-    var x3 = _sub_mod(_mont_sqr(alpha), _mul_small_mod(beta, 8))
-    var z3 = _sub_mod(
-        _sub_mod(_mont_sqr(_add_mod(p.y, p.z)), gamma),
-        delta,
-        _p(),
-    )
-    var y3 = _sub_mod(
-        _mont_mul(alpha, _sub_mod(_mul_small_mod(beta, 4), x3)),
-        _mul_small_mod(_mont_sqr(gamma), 8),
-        _p(),
-    )
-    return P384JacobianPoint(x3, y3, z3, False)
+    var gp = JacobianPoint[6](Limbs[6](p.x.limbs), Limbs[6](p.y.limbs), Limbs[6](p.z.limbs), p.infinity)
+    var res = ws_jacobian_double_ct[6, _N0](gp, Limbs[6](_p().limbs), Limbs[6](_rr().limbs))
+    return P384JacobianPoint(U384(res.x.limbs), U384(res.y.limbs), U384(res.z.limbs), res.infinity)
 
 
 @always_inline
 def _jacobian_add_affine_non_equal_ct(
     p: P384JacobianPoint, q: P384Point
 ) -> P384JacobianPoint:
-    # Scalar multiplication adds distinct non-opposite multiples.
-    var z1z1 = _mont_sqr(p.z)
-    var u2 = _mont_mul(q.x, z1z1)
-    var s2 = _mont_mul(q.y, _mont_mul(p.z, z1z1))
-    var h = _sub_mod(u2, p.x)
-    var r = _mul_small_mod(_sub_mod(s2, p.y), 2)
-
-    var i = _mont_sqr(_mul_small_mod(h, 2))
-    var j = _mont_mul(h, i)
-    var v = _mont_mul(p.x, i)
-    var x3 = _sub_mod(_sub_mod(_mont_sqr(r), j), _mul_small_mod(v, 2), _p())
-    var y3 = _sub_mod(
-        _mont_mul(r, _sub_mod(v, x3)),
-        _mul_small_mod(_mont_mul(p.y, j), 2),
-        _p(),
-    )
-    var hh = _mont_sqr(h)
-    var z3 = _sub_mod(
-        _sub_mod(_mont_sqr(_add_mod(p.z, h)), z1z1),
-        hh,
-        _p(),
-    )
-    var generic = P384JacobianPoint(x3, y3, z3, False)
-
-    var q_as_jac = P384JacobianPoint(q.x, q.y, _one_mont(), False)
-    var p_is_inf = _u384_zero_choice(p.z)
-    return _select_jacobian_ct(generic, q_as_jac, p_is_inf)
+    var gp = JacobianPoint[6](Limbs[6](p.x.limbs), Limbs[6](p.y.limbs), Limbs[6](p.z.limbs), p.infinity)
+    var gq = Point[6](Limbs[6](q.x.limbs), Limbs[6](q.y.limbs), q.infinity)
+    var res = ws_jacobian_add_affine[6, _N0](gp, gq, Limbs[6](_p().limbs), Limbs[6](_rr().limbs), Limbs[6](_one_mont().limbs))
+    return P384JacobianPoint(U384(res.x.limbs), U384(res.y.limbs), U384(res.z.limbs), res.infinity)
 
 
 def _jacobian_to_affine(p: P384JacobianPoint) -> P384Point:
-    if p.infinity or p.z.is_zero():
-        return P384Point()
-    var zinv = _inv_p(p.z)
-    var zinv2 = _mont_sqr(zinv)
-    var zinv3 = _mont_mul(zinv2, zinv)
-    return P384Point(
-        _from_mont(_mont_mul(p.x, zinv2)),
-        _from_mont(_mont_mul(p.y, zinv3)),
-        False,
-    )
+    var gp = JacobianPoint[6](Limbs[6](p.x.limbs), Limbs[6](p.y.limbs), Limbs[6](p.z.limbs), p.infinity)
+    var res = ws_jacobian_to_affine[6, _N0](gp, Limbs[6](_p().limbs), Limbs[6](_rr().limbs))
+    return P384Point(U384(res.x.limbs), U384(res.y.limbs), res.infinity)
 
 
 def _scalar_mult(k: U384, p: P384Point) -> P384Point:
-    var pm = P384Point(_to_mont(p.x), _to_mont(p.y), False)
-    var jac = InlineArray[P384JacobianPoint, 15](fill=P384JacobianPoint())
-    jac[0] = P384JacobianPoint(pm.x, pm.y, _one_mont(), False)
-    jac[1] = _jacobian_double_ct(jac[0])
-    for i in range(2, 15):
-        jac[i] = _jacobian_add_affine_non_equal_ct(jac[i - 1], pm)
-
-    var prefix = InlineArray[U384, 15](fill=U384())
-    prefix[0] = jac[0].z
-    for i in range(1, 15):
-        prefix[i] = _mont_mul(prefix[i - 1], jac[i].z)
-    var inv_acc = _inv_p(prefix[14])
-
-    var tx = InlineArray[U384, 15](fill=U384())
-    var ty = InlineArray[U384, 15](fill=U384())
-    for jj in range(15):
-        var j = 14 - jj
-        var zinv = inv_acc
-        if j > 0:
-            zinv = _mont_mul(inv_acc, prefix[j - 1])
-            inv_acc = _mont_mul(inv_acc, jac[j].z)
-        var zinv2 = _mont_sqr(zinv)
-        tx[j] = _mont_mul(jac[j].x, zinv2)
-        ty[j] = _mont_mul(jac[j].y, _mont_mul(zinv2, zinv))
-
-    var acc = _jacobian_infinity()
-    for w in range(95, -1, -1):
-        if w != 95:
-            acc = _jacobian_double_ct(acc)
-            acc = _jacobian_double_ct(acc)
-            acc = _jacobian_double_ct(acc)
-            acc = _jacobian_double_ct(acc)
-
-        var d = (k.limbs[w >> 4] >> UInt64(4 * (w & 15))) & UInt64(0xF)
-        var qx = tx[0]
-        var qy = ty[0]
-        for i in range(1, 15):
-            var hit = u64_zero_choice(UInt64(i + 1) ^ d)
-            qx = _select_u384(qx, tx[i], hit)
-            qy = _select_u384(qy, ty[i], hit)
-
-        var added = _jacobian_add_affine_non_equal_ct(
-            acc, P384Point(qx, qy, False)
-        )
-        acc = _select_jacobian_ct(acc, added, u64_nonzero_choice(d))
-    return _jacobian_to_affine(acc)
+    var kl = Limbs[6](k.limbs)
+    var pl = Point[6](Limbs[6](p.x.limbs), Limbs[6](p.y.limbs), p.infinity)
+    var res = ws_scalar_mult[6, _N0](kl, pl, Limbs[6](_p().limbs), Limbs[6](_rr().limbs), Limbs[6](_one_mont().limbs))
+    return P384Point(U384(res.x.limbs), U384(res.y.limbs), res.infinity)
 
 
 @always_inline
 def _base_table_entry(
     tptr: Pointer[UInt64, _], j: Int, d: UInt64
 ) -> P384Point:
-    # Scan the whole window.
-    var qx = U384()
-    var qy = U384()
-    for t in range(1, 16):
-        var hit = u64_zero_choice(UInt64(t) ^ d)
-        var base = (j * 15 + (t - 1)) * 12
-        var ex = U384(tptr[unsafe_offset=base], tptr[unsafe_offset=base + 1], tptr[unsafe_offset=base + 2], tptr[unsafe_offset=base + 3], tptr[unsafe_offset=base + 4], tptr[unsafe_offset=base + 5])
-        var ey = U384(tptr[unsafe_offset=base + 6], tptr[unsafe_offset=base + 7], tptr[unsafe_offset=base + 8], tptr[unsafe_offset=base + 9], tptr[unsafe_offset=base + 10], tptr[unsafe_offset=base + 11])
-        qx = _select_u384(qx, ex, hit)
-        qy = _select_u384(qy, ey, hit)
-    return P384Point(qx, qy, False)
+    var res = ws_base_table_entry[6](tptr, j, d)
+    return P384Point(U384(res.x.limbs), U384(res.y.limbs), res.infinity)
 
 
 def _scalar_mult_base(k: U384) -> P384Point:
-    # Split odd and even radix-16 digits.
     var table = p384_base_table()
     var tptr = table.unsafe_ptr()
-
-    var acc = _jacobian_infinity()
-    for i in range(1, 96, 2):
-        var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
-        var q = _base_table_entry(tptr, i >> 1, d)
-        var added = _jacobian_add_affine_non_equal_ct(acc, q)
-        acc = _select_jacobian_ct(acc, added, u64_nonzero_choice(d))
-
-    acc = _jacobian_double_ct(acc)
-    acc = _jacobian_double_ct(acc)
-    acc = _jacobian_double_ct(acc)
-    acc = _jacobian_double_ct(acc)
-
-    for i in range(0, 96, 2):
-        var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
-        var q = _base_table_entry(tptr, i >> 1, d)
-        var added = _jacobian_add_affine_non_equal_ct(acc, q)
-        acc = _select_jacobian_ct(acc, added, u64_nonzero_choice(d))
-
-    return _jacobian_to_affine(acc)
+    var kl = Limbs[6](k.limbs)
+    var res = ws_scalar_mult_base[6, _N0](tptr, kl, Limbs[6](_p().limbs), Limbs[6](_rr().limbs), Limbs[6](_one_mont().limbs))
+    return P384Point(U384(res.x.limbs), U384(res.y.limbs), res.infinity)
 
 
 def p384_decode_uncompressed(point: Span[UInt8, ...]) -> P384Point:
@@ -744,13 +473,13 @@ def p384_public_key(
         return False
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
-        var dp = Pointer(to=d.limbs[0]).unsafe_mut_cast[True]()
+        var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
         for i in range(6):
             dp.unsafe_store[volatile=True](i, UInt64(0))
         return False
     var q = _scalar_mult_base(d)
     var ok = p384_encode_uncompressed(q, output)
-    var dp = Pointer(to=d.limbs[0]).unsafe_mut_cast[True]()
+    var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
     for i in range(6):
         dp.unsafe_store[volatile=True](i, UInt64(0))
     return ok
@@ -766,18 +495,18 @@ def p384_ecdh(
         return False
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
-        var dp = Pointer(to=d.limbs[0]).unsafe_mut_cast[True]()
+        var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
         for i in range(6):
             dp.unsafe_store[volatile=True](i, UInt64(0))
         return False
     var q = p384_decode_uncompressed(public_key)
     if q.infinity:
-        var dp = Pointer(to=d.limbs[0]).unsafe_mut_cast[True]()
+        var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
         for i in range(6):
             dp.unsafe_store[volatile=True](i, UInt64(0))
         return False
     var shared = _scalar_mult(d, q)
-    var dp = Pointer(to=d.limbs[0]).unsafe_mut_cast[True]()
+    var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
     for i in range(6):
         dp.unsafe_store[volatile=True](i, UInt64(0))
     if shared.infinity:
@@ -821,65 +550,53 @@ def _n_minus_2() -> U384:
 
 @always_inline
 def _n_mont_mul(a: U384, b: U384) -> U384:
-    comptime n0 = UInt64(0x6ED46089E88FDC45)
-    var n = _n()
-    var t = U384()
-    var t_hi = UInt64(0)
-    comptime for i in range(6):
-        var ai = a.limbs[i]
-        var s = UInt128(ai) * UInt128(b.limbs[0]) + UInt128(t.limbs[0])
-        var m = s.cast[DType.uint64]() * n0
-        var q = UInt128(m) * UInt128(n.limbs[0]) + UInt128(s.cast[DType.uint64]())
-        var ca = s >> 64
-        var cb = q >> 64
-        comptime for j in range(1, 6):
-            var u = UInt128(ai) * UInt128(b.limbs[j]) + UInt128(t.limbs[j]) + ca
-            ca = u >> 64
-            var v = UInt128(m) * UInt128(n.limbs[j]) + UInt128(u.cast[DType.uint64]()) + cb
-            t.limbs[j - 1] = v.cast[DType.uint64]()
-            cb = v >> 64
-        var w = UInt128(t_hi) + ca + cb
-        t.limbs[5] = w.cast[DType.uint64]()
-        t_hi = (w >> 64).cast[DType.uint64]()
-    var reduced, borrow = _sub_raw(t, n)
-    var take = u64_nonzero_choice(t_hi) | (borrow ^ UInt64(1))
-    return _select_u384(t, reduced, take & UInt64(1))
+    var res = ws_mont_mul[6, _ORDER_N0](Limbs[6](a.limbs), Limbs[6](b.limbs), Limbs[6](_n().limbs))
+    var out = U384()
+    out.limbs = res.limbs
+    return out
 
 
 @always_inline
 def _n_to_mont(x: U384) -> U384:
-    return _n_mont_mul(x, _n_rr())
+    var res = ws_to_mont[6, _ORDER_N0](Limbs[6](x.limbs), Limbs[6](_n_rr().limbs), Limbs[6](_n().limbs))
+    var out = U384()
+    out.limbs = res.limbs
+    return out
 
 
 @always_inline
 def _n_from_mont(x: U384) -> U384:
-    return _n_mont_mul(x, U384.one())
+    var res = ws_from_mont[6, _ORDER_N0](Limbs[6](x.limbs), Limbs[6](_n().limbs))
+    var out = U384()
+    out.limbs = res.limbs
+    return out
 
 
 @always_inline
 def _n_mul(a: U384, b: U384) -> U384:
-    return _n_mont_mul(_n_to_mont(a), b)
+    var res = ws_mont_mul[6, _ORDER_N0](ws_to_mont[6, _ORDER_N0](Limbs[6](a.limbs), Limbs[6](_n_rr().limbs), Limbs[6](_n().limbs)), Limbs[6](b.limbs), Limbs[6](_n().limbs))
+    var out = U384()
+    out.limbs = res.limbs
+    return out
 
 
 def _n_inv(x: U384) -> U384:
-    var result = _n_one_mont()
-    var base = _n_to_mont(x)
-    var exponent = _n_minus_2()
-    for i in range(383, -1, -1):
-        result = _n_mont_mul(result, result)
-        var product = _n_mont_mul(result, base)
-        result = _select_u384(result, product, exponent.bit(i))
-    return _n_from_mont(result)
+    var res = ws_mod_inv_ct[6, _ORDER_N0](Limbs[6](x.limbs), Limbs[6](_n().limbs), Limbs[6](_n_rr().limbs), Limbs[6](_n_minus_2().limbs), Limbs[6](_n_one_mont().limbs))
+    var out = U384()
+    out.limbs = res.limbs
+    return out
 
 
 @always_inline
 def _reduce_n(x: U384) -> U384:
-    var reduced, borrow = _sub_raw(x, _n())
-    return _select_u384(reduced, x, borrow)
+    var res = ws_reduce_mod(Limbs[6](x.limbs), Limbs[6](_n().limbs))
+    var out = U384()
+    out.limbs = res.limbs
+    return out
 
 
 def _wipe_u384(mut x: U384):
-    var ptr = Pointer(to=x.limbs[0]).unsafe_mut_cast[True]()
+    var ptr = Pointer(to=x).unsafe_bitcast[UInt64]()
     for i in range(6):
         ptr.unsafe_store[volatile=True](i, UInt64(0))
 
@@ -891,72 +608,7 @@ def _wipe_list_u8(mut data: List[UInt8]):
 
 
 def _rfc6979_p384(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int) -> U384:
-    var h1 = _reduce_n(_from_be(digest))
-    var h1_bytes = InlineArray[UInt8, 48](fill=0)
-    _to_be(h1, h1_bytes.unsafe_ptr())
-    var k = List[UInt8](length=48, fill=0)
-    var v = List[UInt8](length=48, fill=1)
-
-    var seed = List[UInt8](capacity=145)
-    for i in range(48):
-        seed.append(v[i])
-    seed.append(0)
-    for i in range(48):
-        seed.append(private_key[i])
-    for i in range(48):
-        seed.append(h1_bytes[i])
-    var next_k = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](seed))
-    _wipe_list_u8(k)
-    k = next_k^
-    var next_v = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](v))
-    _wipe_list_u8(v)
-    v = next_v^
-
-    _wipe_list_u8(seed)
-    seed.clear()
-    for i in range(48):
-        seed.append(v[i])
-    seed.append(1)
-    for i in range(48):
-        seed.append(private_key[i])
-    for i in range(48):
-        seed.append(h1_bytes[i])
-    next_k = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](seed))
-    _wipe_list_u8(k)
-    k = next_k^
-    next_v = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](v))
-    _wipe_list_u8(v)
-    v = next_v^
-
-    var accepted = 0
-    while True:
-        next_v = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](v))
-        _wipe_list_u8(v)
-        v = next_v^
-        var candidate = _from_be(Span[UInt8, ...](v))
-        if not candidate.is_zero() and _cmp(candidate, _n()) < 0:
-            if accepted == skip:
-                _wipe_list_u8(k)
-                _wipe_list_u8(v)
-                _wipe_list_u8(seed)
-                var hp = h1_bytes.unsafe_ptr()
-                for i in range(48):
-                    hp.unsafe_store[volatile=True](i, UInt8(0))
-                _wipe_u384(h1)
-                return candidate
-            accepted += 1
-        _wipe_u384(candidate)
-        _wipe_list_u8(seed)
-        seed.clear()
-        for i in range(48):
-            seed.append(v[i])
-        seed.append(0)
-        next_k = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](seed))
-        _wipe_list_u8(k)
-        k = next_k^
-        next_v = hmac_sha384(Span[UInt8, ...](k), Span[UInt8, ...](v))
-        _wipe_list_u8(v)
-        v = next_v^
+    return ws_rfc6979[6](private_key, digest, skip, Limbs[6](_n().limbs))
 
 
 def p384_ecdsa_sign_digest(
@@ -1022,22 +674,10 @@ def p384_ecdsa_sign(
 
 
 def _p384_add_public(a: P384Point, b: P384Point) -> P384Point:
-    if a.infinity:
-        return b
-    if b.infinity:
-        return a
-    if _eq(a.x, b.x):
-        if not _eq(a.y, b.y) or a.y.is_zero():
-            return P384Point()
-        var am = P384JacobianPoint(_to_mont(a.x), _to_mont(a.y), _one_mont(), False)
-        return _jacobian_to_affine(_jacobian_double_ct(am))
-    var dx = _sub_mod(b.x, a.x, _p())
-    var dy = _sub_mod(b.y, a.y, _p())
-    var dx_inv = _from_mont(_inv_p(_to_mont(dx)))
-    var slope = _mul_mod(dy, dx_inv, _p())
-    var x3 = _sub_mod(_sub_mod(_square_mod(slope, _p()), a.x, _p()), b.x, _p())
-    var y3 = _sub_mod(_mul_mod(slope, _sub_mod(a.x, x3, _p()), _p()), a.y, _p())
-    return P384Point(x3, y3, False)
+    var ga = Point[6](Limbs[6](a.x.limbs), Limbs[6](a.y.limbs), a.infinity)
+    var gb = Point[6](Limbs[6](b.x.limbs), Limbs[6](b.y.limbs), b.infinity)
+    var res = ws_point_add[6, _N0](ga, gb, Limbs[6](_p().limbs), Limbs[6](_rr().limbs), Limbs[6](_one_mont().limbs))
+    return P384Point(U384(res.x.limbs), U384(res.y.limbs), res.infinity)
 
 
 def p384_ecdsa_verify_digest(

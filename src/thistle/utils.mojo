@@ -1,5 +1,6 @@
 from std.bit import byte_swap
 from std.os import abort
+from std.memory import Pointer
 
 
 struct StackInlineArray[ElementType: Copyable & Deinitable, size: Int](Copyable):
@@ -234,6 +235,24 @@ def zero_stack_u8(mut data: StackBuffer[UInt8, ...]):
     for i in range(data.len()):
         ptr.unsafe_store[volatile=True](i, UInt8(0))
     data.clear()
+
+
+@always_inline
+def volatile_wipe(ptr: Pointer[mut=True, UInt8, _, address_space=_], n: Int):
+    for i in range(n):
+        ptr.unsafe_store[volatile=True](i, UInt8(0))
+
+
+@always_inline
+def volatile_wipe(ptr: Pointer[mut=True, UInt32, _, address_space=_], n: Int):
+    for i in range(n):
+        ptr.unsafe_store[volatile=True](i, UInt32(0))
+
+
+@always_inline
+def volatile_wipe(ptr: Pointer[mut=True, UInt64, _, address_space=_], n: Int):
+    for i in range(n):
+        ptr.unsafe_store[volatile=True](i, UInt64(0))
 
 
 @always_inline

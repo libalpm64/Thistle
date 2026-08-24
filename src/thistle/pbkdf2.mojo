@@ -28,18 +28,54 @@ def _secure_zero(ptr: Pointer[mut=True, UInt8, _, address_space=_], count: Int):
         ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 @always_inline
-def _xor_block_32(dst: Pointer[mut=True, UInt8, _, address_space=_], src: Pointer[mut=True, UInt8, _, address_space=_]):
-    var d = dst.unsafe_bitcast[UInt64]().unsafe_load[width=4, alignment=1]()
-    var s = src.unsafe_bitcast[UInt64]().unsafe_load[width=4, alignment=1]()
-    dst.unsafe_bitcast[UInt64]().unsafe_store[width=4, alignment=1](0, d ^ s)
+def _xor_block[WIDTH: Int](dst: Pointer[mut=True, UInt8, _, address_space=_], src: Pointer[mut=True, UInt8, _, address_space=_]):
+    var d = dst.unsafe_bitcast[UInt64]().unsafe_load[width=WIDTH, alignment=1]()
+    var s = src.unsafe_bitcast[UInt64]().unsafe_load[width=WIDTH, alignment=1]()
+    dst.unsafe_bitcast[UInt64]().unsafe_store[width=WIDTH, alignment=1](0, d ^ s)
+
+
+trait HMACer(Movable):
+    comptime BLOCK: Int
+    comptime HASH: Int
+    def hmac(mut self, data: Span[UInt8, ...]): ...
+    def hmac_with_counter(mut self, data: Span[UInt8, ...], counter: UInt32): ...
+    def u_block_ptr(mut self) -> Pointer[UInt8, MutUntrackedOrigin]: ...
+
 
 @always_inline
-def _xor_block_64(dst: Pointer[mut=True, UInt8, _, address_space=_], src: Pointer[mut=True, UInt8, _, address_space=_]):
-    var d = dst.unsafe_bitcast[UInt64]().unsafe_load[width=8, alignment=1]()
-    var s = src.unsafe_bitcast[UInt64]().unsafe_load[width=8, alignment=1]()
-    dst.unsafe_bitcast[UInt64]().unsafe_store[width=8, alignment=1](0, d ^ s)
+def _pbkdf2_derive[H: HMACer](mut h: H, salt: Span[UInt8, ...], iterations: Int, dklen: Int) raises -> List[UInt8]:
+    if iterations < 1:
+        raise Error("PBKDF2 iterations must be positive")
+    comptime hLen = H.HASH
+    if dklen < 1 or dklen > 0xFFFFFFFF * hLen:
+        raise Error("PBKDF2 dkLen exceeds the RFC 8018 limit")
+    var num_blocks = dklen // hLen
+    if dklen % hLen != 0:
+        num_blocks += 1
+    var derived_key = List[UInt8](capacity=dklen)
+    var t_block = InlineArray[UInt8, 64](fill=0)
+    var input_block = InlineArray[UInt8, 64](fill=0)
+    for block_idx in range(1, num_blocks + 1):
+        h.hmac_with_counter(salt, UInt32(block_idx))
+        unsafe_memcpy(dest=t_block.unsafe_ptr(), src=h.u_block_ptr(), count=hLen)
+        for _ in range(1, iterations):
+            unsafe_memcpy(dest=input_block.unsafe_ptr(), src=h.u_block_ptr(), count=hLen)
+            h.hmac(Span[UInt8, ...](unsafe_ptr=input_block.unsafe_ptr(), length=hLen))
+            comptime if hLen == 32:
+                _xor_block[4](t_block.unsafe_ptr(), h.u_block_ptr())
+            else:
+                _xor_block[8](t_block.unsafe_ptr(), h.u_block_ptr())
+        var remaining = dklen - len(derived_key)
+        var to_copy = hLen if remaining > hLen else remaining
+        for b in range(to_copy):
+            derived_key.append(t_block[b])
+    _secure_zero(t_block.unsafe_ptr(), 64)
+    _secure_zero(input_block.unsafe_ptr(), 64)
+    return derived_key^
 
-struct PBKDF2SHA256(Movable):
+struct PBKDF2SHA256(HMACer):
+    comptime BLOCK = 64
+    comptime HASH = 32
     var ipad: StackBuffer[UInt8, 64]
     var opad: StackBuffer[UInt8, 64]
     var inner_hash: StackBuffer[UInt8, 32]
@@ -47,6 +83,8 @@ struct PBKDF2SHA256(Movable):
     var counter_bytes: StackBuffer[UInt8, 4]
     var inner_ctx: SHA256Context
     var outer_ctx: SHA256Context
+    def u_block_ptr(mut self) -> Pointer[UInt8, MutUntrackedOrigin]:
+        return self.u_block.ptr().unsafe_origin_cast[MutUntrackedOrigin]()
 
     def __init__(out self, password: Span[UInt8, ...]):
         self.ipad = StackBuffer[UInt8, 64](fill=0)
@@ -111,42 +149,7 @@ struct PBKDF2SHA256(Movable):
 
     @always_inline
     def derive(mut self, salt: Span[UInt8, ...], iterations: Int, dklen: Int) raises -> List[UInt8]:
-        if iterations < 1:
-            raise Error("PBKDF2-SHA256 iterations must be positive")
-        if dklen < 1 or dklen > PBKDF2_SHA256_MAX_DKLEN:
-            raise Error("PBKDF2-SHA256 dkLen exceeds the RFC 8018 limit")
-        var hLen = 32
-        var num_blocks = dklen // hLen
-        if dklen % hLen != 0:
-            num_blocks += 1
-
-        var derived_key = List[UInt8](capacity=dklen)
-        var t_block = StackBuffer[UInt8, 32](fill=0)
-        var input_block = StackBuffer[UInt8, 32](fill=0)
-
-        for block_idx in range(1, num_blocks + 1):
-            self.hmac_with_counter(salt, UInt32(block_idx))
-            unsafe_memcpy(dest=t_block.ptr(), src=self.u_block.ptr(), count=32)
-
-            for _ in range(1, iterations):
-                unsafe_memcpy(
-                    dest=input_block.ptr(),
-                    src=self.u_block.ptr(),
-                    count=32,
-                )
-                self.hmac(
-                    Span[UInt8, ...](unsafe_ptr=input_block.ptr(), length=32)
-                )
-                _xor_block_32(t_block.ptr(), self.u_block.ptr())
-
-            var remaining = dklen - len(derived_key)
-            var to_copy = 32 if remaining > 32 else remaining
-            for b in range(to_copy):
-                derived_key.append(t_block[b])
-
-        _secure_zero(t_block.ptr(), 32)
-        _secure_zero(input_block.ptr(), 32)
-        return derived_key^
+        return _pbkdf2_derive(self, salt, iterations, dklen)
 
 def pbkdf2_hmac_sha256(
     password: Span[UInt8, ...], salt: Span[UInt8, ...], iterations: Int, dkLen: Int
@@ -160,7 +163,9 @@ def pbkdf2_hmac_sha256(
     var ctx = PBKDF2SHA256(password)
     return ctx.derive(salt, iterations, dkLen)
 
-struct PBKDF2SHA512(Movable):
+struct PBKDF2SHA512(HMACer):
+    comptime BLOCK = 128
+    comptime HASH = 64
     var ipad: StackBuffer[UInt8, 128]
     var opad: StackBuffer[UInt8, 128]
     var inner_hash: StackBuffer[UInt8, 64]
@@ -168,6 +173,8 @@ struct PBKDF2SHA512(Movable):
     var counter_bytes: StackBuffer[UInt8, 4]
     var inner_ctx: SHA512Context
     var outer_ctx: SHA512Context
+    def u_block_ptr(mut self) -> Pointer[UInt8, MutUntrackedOrigin]:
+        return self.u_block.ptr().unsafe_origin_cast[MutUntrackedOrigin]()
 
     def __init__(out self, password: Span[UInt8, ...]):
         self.ipad = StackBuffer[UInt8, 128](fill=0)
@@ -232,42 +239,7 @@ struct PBKDF2SHA512(Movable):
 
     @always_inline
     def derive(mut self, salt: Span[UInt8, ...], iterations: Int, dklen: Int) raises -> List[UInt8]:
-        if iterations < 1:
-            raise Error("PBKDF2-SHA512 iterations must be positive")
-        if dklen < 1 or dklen > PBKDF2_SHA512_MAX_DKLEN:
-            raise Error("PBKDF2-SHA512 dkLen exceeds the RFC 8018 limit")
-        var hLen = 64
-        var num_blocks = dklen // hLen
-        if dklen % hLen != 0:
-            num_blocks += 1
-
-        var derived_key = List[UInt8](capacity=dklen)
-        var t_block = StackBuffer[UInt8, 64](fill=0)
-        var input_block = StackBuffer[UInt8, 64](fill=0)
-
-        for block_idx in range(1, num_blocks + 1):
-            self.hmac_with_counter(salt, UInt32(block_idx))
-            unsafe_memcpy(dest=t_block.ptr(), src=self.u_block.ptr(), count=64)
-
-            for _ in range(1, iterations):
-                unsafe_memcpy(
-                    dest=input_block.ptr(),
-                    src=self.u_block.ptr(),
-                    count=64,
-                )
-                self.hmac(
-                    Span[UInt8, ...](unsafe_ptr=input_block.ptr(), length=64)
-                )
-                _xor_block_64(t_block.ptr(), self.u_block.ptr())
-
-            var remaining = dklen - len(derived_key)
-            var to_copy = 64 if remaining > 64 else remaining
-            for b in range(to_copy):
-                derived_key.append(t_block[b])
-
-        _secure_zero(t_block.ptr(), 64)
-        _secure_zero(input_block.ptr(), 64)
-        return derived_key^
+        return _pbkdf2_derive(self, salt, iterations, dklen)
 
 def pbkdf2_hmac_sha512(
     password: Span[UInt8, ...], salt: Span[UInt8, ...], iterations: Int, dkLen: Int

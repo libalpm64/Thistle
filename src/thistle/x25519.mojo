@@ -86,6 +86,20 @@ def x25519(
         scalar_ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
+def x25519_checked(
+    scalar_in: Span[UInt8, ...],
+    point: Span[UInt8, ...],
+    output: Span[mut=True, UInt8, ...],
+) raises:
+    x25519(scalar_in, point, output)
+    var out_ptr = output.unsafe_ptr()
+    var zero_diff: UInt8 = 0
+    for i in range(32):
+        zero_diff |= out_ptr[unsafe_offset=i]
+    if zero_diff == 0:
+        raise Error("X25519 shared secret is all-zero (low-order point)")
+
+
 def x25519_public_key(
     private_key: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
 ) raises:

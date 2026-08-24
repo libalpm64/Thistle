@@ -6,6 +6,7 @@ from std.gpu import global_idx
 from std.memory import stack_allocation
 from std.memory.unsafe_pointer import Pointer
 from .aes import _ct_encrypt_blocks
+from .aes_ni import _write_gcm_counter
 
 @always_inline
 def add_counter_offset(counter: Pointer[mut=True, UInt8, _, address_space=_], offset: Int) -> None:
@@ -27,17 +28,7 @@ def _gcm_counter_from_j0(
     block_index: Int,
     counter: Pointer[mut=True, UInt8, _, address_space=_],
 ) -> None:
-    for i in range(12):
-        counter[unsafe_offset=i] = j0[unsafe_offset=i]
-    var base = (
-        (UInt32(j0[unsafe_offset=12]) << 24) | (UInt32(j0[unsafe_offset=13]) << 16)
-        | (UInt32(j0[unsafe_offset=14]) << 8) | UInt32(j0[unsafe_offset=15])
-    )
-    var ctr = base + UInt32(1) + UInt32(block_index & 0xFFFFFFFF)
-    counter[unsafe_offset=12] = UInt8((ctr >> 24) & 0xFF)
-    counter[unsafe_offset=13] = UInt8((ctr >> 16) & 0xFF)
-    counter[unsafe_offset=14] = UInt8((ctr >> 8) & 0xFF)
-    counter[unsafe_offset=15] = UInt8(ctr & 0xFF)
+    _write_gcm_counter(counter, j0, block_index)
 
 @always_inline
 def aes_gpu_kernel_ecb(

@@ -564,6 +564,7 @@ struct ChaCha20:
     var key: SIMD[DType.uint32, 8]
     var nonce: SIMD[DType.uint32, 4]
     var counter: UInt32
+    var exhausted: Bool
 
     def __init__(
         out self,
@@ -574,11 +575,24 @@ struct ChaCha20:
         self.key = bitcast[DType.uint32, 8](key_bytes)
         self.nonce = _chacha20_nonce_words(nonce_bytes)
         self.counter = counter
+        self.exhausted = False
+
+    def __deinit__(deinit self):
+        var kp = Pointer(to=self.key).unsafe_mut_cast[True]().unsafe_bitcast[UInt8]()
+        for i in range(32):
+            kp.unsafe_store[volatile=True](i, UInt8(0))
+        var np = Pointer(to=self.nonce).unsafe_mut_cast[True]().unsafe_bitcast[UInt8]()
+        for i in range(16):
+            np.unsafe_store[volatile=True](i, UInt8(0))
+        Pointer(to=self.counter).unsafe_mut_cast[True]().unsafe_store[volatile=True](0, UInt32(0))
+        Pointer(to=self.exhausted).unsafe_mut_cast[True]().unsafe_bitcast[UInt8]().unsafe_store[volatile=True](0, UInt8(0))
 
     def _check_counter_space(self, data_len: Int) raises:
         var blocks_needed = UInt64((data_len + 63) // 64)
+        if self.exhausted and blocks_needed > 0:
+            raise Error("ChaCha20 counter is exhausted, use a new nonce")
         var space = UInt64(0x100000000) - UInt64(self.counter)
-        if blocks_needed >= space:
+        if blocks_needed > space:
             raise Error("ChaCha20 counter would wrap, use a new nonce")
 
     @always_inline
@@ -639,7 +653,12 @@ struct ChaCha20:
                 (dst.unsafe_offset(offset).unsafe_offset(i)).unsafe_store(0, (src.unsafe_offset(offset).unsafe_offset(i)).unsafe_load(0) ^ ks_u8[i])
             block_idx += 1
 
-        self.counter += UInt32(block_idx)
+        var next_counter = UInt64(self.counter) + UInt64(block_idx)
+        if next_counter == UInt64(0x100000000):
+            self.counter = 0
+            self.exhausted = True
+        else:
+            self.counter = UInt32(next_counter)
 
     def encrypt_into[origin: Origin[mut=True]](
         mut self,

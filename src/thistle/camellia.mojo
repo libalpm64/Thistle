@@ -579,13 +579,7 @@ struct CamelliaCipher:
         _wipe_u64(self.kwhw.unsafe_ptr(), 4)
 
     def __deinit__(deinit self):
-        _wipe_u64(Pointer(to=self.kw).unsafe_bitcast[UInt64](), 4)
-        _wipe_u64(self.k.unsafe_ptr(), 24)
-        _wipe_u64(self.ke.unsafe_ptr(), 6)
-        _wipe_u64(self.kp.unsafe_ptr(), 192)
-        _wipe_u64(self.kep.unsafe_ptr(), 48)
-        _wipe_u64(self.khw.unsafe_ptr(), 24)
-        _wipe_u64(self.kwhw.unsafe_ptr(), 4)
+        self.wipe()
 
     @always_inline
     def _bytes_to_u64_be(ref self, b: Span[UInt8, ...]) -> UInt64:
