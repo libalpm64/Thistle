@@ -672,9 +672,15 @@ def main() raises:
     print(benchmark_chacha20(1024 * 1024, duration))
     print(benchmark_kcipher2(1024 * 1024, duration))
     print(benchmark_aes_cpu(duration))
-    print(benchmark_aes_gpu_ecb())
-    print(benchmark_aes_gpu_ctr())
-    print(benchmark_aes_gpu_gcm())
+    comptime
+    if has_accelerator():
+        print(benchmark_aes_gpu_ecb())
+        print(benchmark_aes_gpu_ctr())
+        print(benchmark_aes_gpu_gcm())
+    else:
+        print("aes-128-gpu-ecb | (GPU not available)")
+        print("aes-128-gpu-ctr | (GPU not available)")
+        print("aes-128-gpu-gcm | (GPU not available)")
     print(benchmark_argon2(duration))
     print(benchmark_x25519(duration))
     print(benchmark_p384(duration))
