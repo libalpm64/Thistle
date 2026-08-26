@@ -1,7 +1,4 @@
-"""
-BLAKE2b Implementation in Mojo
-RFC 7693
-"""
+"""Implements the BLAKE2b hash function specified by RFC 7693."""
 
 from std.collections import List
 from std.memory import Pointer, unsafe_memcpy, unsafe_memset_zero
@@ -15,7 +12,7 @@ comptime BLAKE2B_IV = SIMD[DType.uint64, 8](
     0x510E527FADE682D1,
     0x9B05688C2B3E6C1F,
     0x1F83D9ABFB41BD6B,
-    0x5BE0CD19137E2179,
+    0x5BE0CD19137E2179
 )
 
 comptime SIGMA = (
@@ -30,7 +27,7 @@ comptime SIGMA = (
     SIMD[DType.uint8, 16](6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5),
     SIMD[DType.uint8, 16](10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0),
     SIMD[DType.uint8, 16](0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
-    SIMD[DType.uint8, 16](14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3),
+    SIMD[DType.uint8, 16](14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3)
 )
 
 
@@ -57,13 +54,14 @@ def _mload(m: Pointer[mut=False, UInt8, _, address_space=_], i: Int) -> UInt64:
     return (m.unsafe_offset(i * 8)).unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]()
 
 
+# fmt: off
 @always_inline
 def round_fn[r: Int](
     mut v0: UInt64, mut v1: UInt64, mut v2: UInt64, mut v3: UInt64,
     mut v4: UInt64, mut v5: UInt64, mut v6: UInt64, mut v7: UInt64,
     mut v8: UInt64, mut v9: UInt64, mut v10: UInt64, mut v11: UInt64,
     mut v12: UInt64, mut v13: UInt64, mut v14: UInt64, mut v15: UInt64,
-    m: Pointer[mut=False, UInt8, _, address_space=_],
+    m: Pointer[mut=False, UInt8, _, address_space=_]
 ) -> Tuple[UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64]:
     comptime s = SIGMA[r]
 
@@ -78,8 +76,7 @@ def round_fn[r: Int](
     v3, v4, v9, v14 = g(v3, v4, v9, v14, _mload(m, Int(s[14])), _mload(m, Int(s[15])))
 
     return (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15)
-
-
+# fmt: on
 struct Blake2b(Movable):
     var h: SIMD[DType.uint64, 8]
     var t_low: UInt64
@@ -157,6 +154,7 @@ struct Blake2b(Movable):
         if self.t_low < 128:
             self.t_high += 1
 
+    # fmt: off
     def compress(mut self, m: Pointer[mut=False, UInt8, _, address_space=_], is_last: Bool):
         var v0 = self.h[0]
         var v1 = self.h[1]
@@ -203,6 +201,7 @@ struct Blake2b(Movable):
         self.h[6] ^= v6 ^ v14
         self.h[7] ^= v7 ^ v15
 
+    # fmt: on
     def update(mut self, data: Span[UInt8, ...]):
         var total = len(data)
         if total == 0:
@@ -248,9 +247,11 @@ struct Blake2b(Movable):
         self.compress(self._buf_ptr(), True)
 
         var h_copy = self.h
-        var h_bytes = Pointer(to=h_copy).unsafe_bitcast[UInt8]()
+        var h_copy_ptr = Pointer(to=h_copy).unsafe_mut_cast[True]().unsafe_bitcast[UInt64]()
+        var h_bytes = h_copy_ptr.unsafe_bitcast[UInt8]()
         for i in range(self.out_len):
             output[unsafe_offset=i] = h_bytes[unsafe_offset=i]
+        volatile_wipe(h_copy_ptr, 8)
 
     def finalize_into(
         mut self, output: Span[mut=True, UInt8, ...]

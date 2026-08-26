@@ -6,6 +6,7 @@ from std.python import Python
 from thistle.x25519 import x25519
 from thistle.utils import StackInlineArray
 
+
 def hex_to_bytes(s: String) -> List[UInt8]:
     var r = List[UInt8]()
     var b = s.as_bytes()
@@ -18,11 +19,13 @@ def hex_to_bytes(s: String) -> List[UInt8]:
         r.append((hi << 4) | lo)
     return r^
 
+
 def matches32(actual: StackInlineArray[UInt8, 32], expected: List[UInt8]) -> Bool:
     for i in range(32):
         if actual[i] != expected[i]:
             return False
     return True
+
 
 def run_case(tc_id: String, private_hex: String, public_hex: String, shared_hex: String) raises -> Bool:
     var private_key = hex_to_bytes(private_hex)
@@ -34,12 +37,13 @@ def run_case(tc_id: String, private_hex: String, public_hex: String, shared_hex:
         Span[UInt8, ...](public_key),
         Span[mut=True, UInt8, ...](
             unsafe_ptr=actual.unsafe_ptr(), length=32
-        ),
+        )
     )
     if not matches32(actual, expected):
         print("Test ", tc_id, " mismatch")
         return False
     return True
+
 
 def main() raises:
     print("Wycheproof X25519")

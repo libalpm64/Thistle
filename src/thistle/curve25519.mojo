@@ -1,4 +1,7 @@
+"""Provides finite-field operations used by Curve25519 implementations."""
+
 from std.builtin.dtype import DType
+
 
 @always_inline
 def _u128_shr[shift: Int](x: UInt128) -> UInt128:
@@ -20,7 +23,8 @@ def _u128_shr[shift: Int](x: UInt128) -> UInt128:
                 else:
                     return UInt128(hi >> UInt64(shift - 64))
 
-struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
+
+struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
     var limbs: SIMD[DType.uint64, 8]
 
     @always_inline
@@ -58,7 +62,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
             2251799813685247,
             2251799813685247,
             2251799813685247,
-            2251799813685247,
+            2251799813685247
         )
 
     @always_inline
@@ -75,10 +79,14 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         limbs[0] += 19 * q
 
         var MASK = UInt64(0x7FFFFFFFFFFFF)
-        limbs[1] += limbs[0] >> 51; limbs[0] &= MASK
-        limbs[2] += limbs[1] >> 51; limbs[1] &= MASK
-        limbs[3] += limbs[2] >> 51; limbs[2] &= MASK
-        limbs[4] += limbs[3] >> 51; limbs[3] &= MASK
+        limbs[1] += limbs[0] >> 51
+        limbs[0] &= MASK
+        limbs[2] += limbs[1] >> 51
+        limbs[1] &= MASK
+        limbs[3] += limbs[2] >> 51
+        limbs[2] &= MASK
+        limbs[4] += limbs[3] >> 51
+        limbs[3] &= MASK
         limbs[4] &= MASK
 
         var value = Int(limbs[0])
@@ -121,7 +129,7 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
             self.limbs[1] + other.limbs[1],
             self.limbs[2] + other.limbs[2],
             self.limbs[3] + other.limbs[3],
-            self.limbs[4] + other.limbs[4],
+            self.limbs[4] + other.limbs[4]
         )
 
     @always_inline
@@ -133,11 +141,16 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         l[3] = (self.limbs[3] + 0x7FFFFFFFFFFFF0) - other.limbs[3]
         l[4] = (self.limbs[4] + 0x7FFFFFFFFFFFF0) - other.limbs[4]
         var MASK = UInt64(0x7FFFFFFFFFFFF)
-        l[1] += l[0] >> 51; l[0] &= MASK
-        l[2] += l[1] >> 51; l[1] &= MASK
-        l[3] += l[2] >> 51; l[2] &= MASK
-        l[4] += l[3] >> 51; l[3] &= MASK
-        l[0] += (l[4] >> 51) * 19; l[4] &= MASK
+        l[1] += l[0] >> 51
+        l[0] &= MASK
+        l[2] += l[1] >> 51
+        l[1] &= MASK
+        l[3] += l[2] >> 51
+        l[2] &= MASK
+        l[4] += l[3] >> 51
+        l[3] &= MASK
+        l[0] += (l[4] >> 51) * 19
+        l[4] &= MASK
         return FieldElement51(l)
 
     @always_inline
@@ -251,7 +264,8 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         return res
 
     @always_inline
-    def _carry_reduce(self, var c0: UInt128, var c1: UInt128, var c2: UInt128, var c3: UInt128, var c4: UInt128) -> FieldElement51:
+    def _carry_reduce(self, var c0: UInt128, var c1: UInt128, var c2: UInt128, var c3: UInt128, var c4: UInt128
+    ) -> FieldElement51:
         var MASK = UInt64(0x7FFFFFFFFFFFF)
         
         c1 += _u128_shr[51](c0)
@@ -277,17 +291,22 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         var l = limbs
         var MASK = UInt64(0x7FFFFFFFFFFFF)
         for _ in range(5):
-            l[1] += l[0] >> 51; l[0] &= MASK
-            l[2] += l[1] >> 51; l[1] &= MASK
-            l[3] += l[2] >> 51; l[2] &= MASK
-            l[4] += l[3] >> 51; l[3] &= MASK
-            l[0] += (l[4] >> 51) * 19; l[4] &= MASK
+            l[1] += l[0] >> 51
+            l[0] &= MASK
+            l[2] += l[1] >> 51
+            l[1] &= MASK
+            l[3] += l[2] >> 51
+            l[2] &= MASK
+            l[4] += l[3] >> 51
+            l[3] &= MASK
+            l[0] += (l[4] >> 51) * 19
+            l[4] &= MASK
         return FieldElement51(l)
 
     @staticmethod
     def from_bytes_span(bytes: Span[UInt8, ...]) raises -> FieldElement51:
-        if len(bytes) < 32:
-            raise Error("FieldElement51 input must be at least 32 bytes")
+        if len(bytes) != 32:
+            raise Error("FieldElement51 input must be exactly 32 bytes")
         @always_inline
         def load8(ptr: Pointer[mut=False, UInt8, _, address_space=_]) -> UInt64:
             return ptr.unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]()
@@ -316,10 +335,14 @@ struct FieldElement51(Movable, Copyable, ImplicitlyCopyable):
         limbs[0] += 19 * q
 
         var MASK = UInt64(0x7FFFFFFFFFFFF)
-        limbs[1] += limbs[0] >> 51; limbs[0] &= MASK
-        limbs[2] += limbs[1] >> 51; limbs[1] &= MASK
-        limbs[3] += limbs[2] >> 51; limbs[2] &= MASK
-        limbs[4] += limbs[3] >> 51; limbs[3] &= MASK
+        limbs[1] += limbs[0] >> 51
+        limbs[0] &= MASK
+        limbs[2] += limbs[1] >> 51
+        limbs[1] &= MASK
+        limbs[3] += limbs[2] >> 51
+        limbs[2] &= MASK
+        limbs[4] += limbs[3] >> 51
+        limbs[3] &= MASK
         limbs[4] &= MASK
 
         var w0 = limbs[0] | (limbs[1] << 51)

@@ -1,6 +1,4 @@
-"""
-Ed25519 implementation
-"""
+"""Implements Ed25519 signing and verification."""
 from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
 from std.memory import bitcast
@@ -15,7 +13,7 @@ comptime L_LIMBS = SIMD[DType.uint64, 8](
     0x000000000014def9,
     0x0000000000000000,
     0x0000100000000000,
-    0, 0, 0,
+    0, 0, 0
 )
 comptime LFACTOR: UInt64 = 0x51da312547e1b
 
@@ -25,7 +23,7 @@ comptime RR_LIMBS = SIMD[DType.uint64, 8](
     0x0005be65cb687604,
     0x0003dceec73d217f,
     0x000009411b7c309a,
-    0, 0, 0,
+    0, 0, 0
 )
 
 comptime ED25519_D_LIMBS = SIMD[DType.uint64, 8](
@@ -34,7 +32,7 @@ comptime ED25519_D_LIMBS = SIMD[DType.uint64, 8](
     0x005e7a26001c029,
     0x00739c663a03cbb,
     0x0052036cee2b6ff,
-    0, 0, 0,
+    0, 0, 0
 )
 
 comptime POW2_256_LIMBS = SIMD[DType.uint64, 8](
@@ -43,22 +41,23 @@ comptime POW2_256_LIMBS = SIMD[DType.uint64, 8](
     0x000f5be65cc244cc,
     0x000a3dceec73d217,
     0x0000099411b7c309,
-    0, 0, 0,
+    0, 0, 0
 )
 
 comptime L_BYTES = SIMD[DType.uint8, 32](
     0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
     0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
 )
 
 comptime FIELD_P_BYTES = SIMD[DType.uint8, 32](
     0xed, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f,
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f
 )
+
 
 @always_inline
 def _s_lt_l(s: Span[UInt8, ...]) -> Bool:
@@ -71,6 +70,7 @@ def _s_lt_l(s: Span[UInt8, ...]) -> Bool:
         if s[i] > li:
             return False
     return False
+
 
 @always_inline
 def _encoded_y_lt_p(y: Span[UInt8, ...]) -> Bool:
@@ -87,7 +87,9 @@ def _encoded_y_lt_p(y: Span[UInt8, ...]) -> Bool:
             gt = 1
     return lt == 1
 
-def _pack_limbs_into(limbs: SIMD[DType.uint64, 8], output: Pointer[mut=True, UInt8, _, address_space=_]):
+
+def _pack_limbs_into(limbs: SIMD[DType.uint64, 8], output: Pointer[mut=True, UInt8, _, address_space=_]
+):
     var words = SIMD[DType.uint64, 4](0, 0, 0, 0)
     words[0] = limbs[0] | (limbs[1] << 52)
     words[1] = (limbs[1] >> 12) | (limbs[2] << 40)
@@ -96,6 +98,7 @@ def _pack_limbs_into(limbs: SIMD[DType.uint64, 8], output: Pointer[mut=True, UIn
     var bytes = bitcast[DType.uint8, 32](words)
     for i in range(32):
         output[unsafe_offset=i] = bytes[i]
+
 
 def _unpack_limbs(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 8]:
     # Input may be byte-aligned; use alignment=1 for the UInt64 wide load.
@@ -110,6 +113,7 @@ def _unpack_limbs(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 8]:
     s[4] = (words[3] >> UInt64(16)) & TOP_MASK
     return s
 
+
 def _from_512_raw(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 8]:
     # RFC 8032 5.1.6: reduce 64-byte SHA-512 output modulo L.
     var ptr = bytes.unsafe_ptr()
@@ -121,27 +125,30 @@ def _from_512_raw(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 8]:
     var res = lo + hi * pow2_256
     return res.limbs
 
+
 @always_inline
 def ed25519_d() -> FieldElement51:
     return FieldElement51(ED25519_D_LIMBS)
+
 
 @always_inline
 def ed25519_d2() -> FieldElement51:
     return ed25519_d() * FieldElement51(2, 0, 0, 0, 0)
 
+
 def ed25519_base_point() -> EdwardsPoint:
     var X = FieldElement51(
         1738742601995546, 1146398526822698, 2070867633025821,
-        562264141797630, 587772402128613,
+        562264141797630, 587772402128613
     )
     var Y = FieldElement51(
         1801439850948184, 1351079888211148, 450359962737049,
-        900719925474099, 1801439850948198,
+        900719925474099, 1801439850948198
     )
     return EdwardsPoint(X, Y, FieldElement51.ONE(), X * Y)
 
 
-struct Scalar(Movable, Copyable, ImplicitlyCopyable):
+struct Scalar(Copyable, ImplicitlyCopyable, Movable):
     var limbs: SIMD[DType.uint64, 8]
 
     @always_inline
@@ -262,7 +269,7 @@ struct Scalar(Movable, Copyable, ImplicitlyCopyable):
         return Scalar(diff)
 
 
-struct EdwardsPoint(Movable, Copyable, ImplicitlyCopyable):
+struct EdwardsPoint(Copyable, ImplicitlyCopyable, Movable):
     var X: FieldElement51
     var Y: FieldElement51
     var Z: FieldElement51
@@ -276,18 +283,29 @@ struct EdwardsPoint(Movable, Copyable, ImplicitlyCopyable):
         self.T = FieldElement51.ZERO()
 
     @always_inline
-    def __init__(out self, X: FieldElement51, Y: FieldElement51, Z: FieldElement51, T: FieldElement51):
-        self.X = X; self.Y = Y; self.Z = Z; self.T = T
+    def __init__(out self, X: FieldElement51, Y: FieldElement51, Z: FieldElement51, T: FieldElement51
+    ):
+        self.X = X
+        self.Y = Y
+        self.Z = Z
+        self.T = T
 
     @always_inline
     def __copyinit__(out self, copy: Self):
-        self.X = copy.X; self.Y = copy.Y; self.Z = copy.Z; self.T = copy.T
+        self.X = copy.X
+        self.Y = copy.Y
+        self.Z = copy.Z
+        self.T = copy.T
 
     @always_inline
     def __moveinit__(out self, deinit take: Self):
-        self.X = take.X^; self.Y = take.Y^; self.Z = take.Z^; self.T = take.T^
+        self.X = take.X^
+        self.Y = take.Y^
+        self.Z = take.Z^
+        self.T = take.T^
 
-struct DecodeResult(Movable, Copyable, ImplicitlyCopyable):
+
+struct DecodeResult(Copyable, ImplicitlyCopyable, Movable):
     var ok: Bool
     var p: EdwardsPoint
 
@@ -301,15 +319,19 @@ struct DecodeResult(Movable, Copyable, ImplicitlyCopyable):
         self.ok = ok
         self.p = p
 
+
 def edwards_add(p: EdwardsPoint, q: EdwardsPoint) -> EdwardsPoint:
     var d2 = ed25519_d2()
     return _edwards_add_d2(p, q, d2)
 
+
 def edwards_double(p: EdwardsPoint) -> EdwardsPoint:
     return _edwards_double_standalone(p)
 
+
 def edwards_negate(p: EdwardsPoint) -> EdwardsPoint:
     return EdwardsPoint(FieldElement51.ZERO() - p.X, p.Y, p.Z, FieldElement51.ZERO() - p.T)
+
 
 @always_inline
 def _ct_select_fe(a: FieldElement51, b: FieldElement51, choice: UInt8) -> FieldElement51:
@@ -319,6 +341,7 @@ def _ct_select_fe(a: FieldElement51, b: FieldElement51, choice: UInt8) -> FieldE
     for i in range(5):
         limbs[i] = a.limbs[i] ^ (mask & (a.limbs[i] ^ b.limbs[i]))
     return FieldElement51(limbs)
+
 
 @no_inline
 def _edwards_add_d2(p: EdwardsPoint, q: EdwardsPoint, d2: FieldElement51) -> EdwardsPoint:
@@ -333,6 +356,7 @@ def _edwards_add_d2(p: EdwardsPoint, q: EdwardsPoint, d2: FieldElement51) -> Edw
     var G = D + C
     var H = B + A
     return EdwardsPoint(E * F, G * H, F * G, E * H)
+
 
 @no_inline
 def _edwards_double_standalone(p: EdwardsPoint) -> EdwardsPoint:
@@ -366,13 +390,16 @@ def fe_from_bytes(bytes: Span[UInt8, ...]) -> FieldElement51:
     var l4 = (load8(ptr.unsafe_offset(24)) >> UInt64(12)) & MASK
     return FieldElement51(l0, l1, l2, l3, l4)
 
+
 @no_inline
 def edwards_encode_into(p: EdwardsPoint, output: Pointer[mut=True, UInt8, _, address_space=_]):
     # RFC 8032 5.1.2: encode y and store x parity in bit 255.
     _edwards_encode_with_zinv(p, p.Z.invert(), output)
 
+
 @no_inline
-def _edwards_encode_with_zinv(p: EdwardsPoint, z_inv: FieldElement51, output: Pointer[mut=True, UInt8, _, address_space=_]):
+def _edwards_encode_with_zinv(p: EdwardsPoint, z_inv: FieldElement51, output: Pointer[mut=True, UInt8, _, address_space=_]
+):
     var x = p.X * z_inv
     var y = p.Y * z_inv
     y.to_bytes_into(output)
@@ -380,6 +407,7 @@ def _edwards_encode_with_zinv(p: EdwardsPoint, z_inv: FieldElement51, output: Po
     x.to_bytes_into(x_bytes.unsafe_ptr())
     var x_parity = x_bytes[0] & 1
     output[unsafe_offset=31] = output[unsafe_offset=31] | (x_parity << 7)
+
 
 @no_inline
 def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
@@ -433,6 +461,7 @@ def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
 
     return DecodeResult(False, EdwardsPoint())
 
+
 def edwards_decode_verify_compatible(data: Span[UInt8, ...]) -> DecodeResult:
     # strict RFC decoding only, no ZIP-215
     return edwards_decode(data, strict=True)
@@ -450,6 +479,7 @@ def _is_small_order(p: EdwardsPoint) -> Bool:
     for i in range(32):
         diff |= x[i] | yz[i]
     return diff == 0
+
 
 @no_inline
 def sqrt_ratio_checked(u: FieldElement51, v: FieldElement51) -> Optional[FieldElement51]:
@@ -482,17 +512,20 @@ def sqrt_ratio_checked(u: FieldElement51, v: FieldElement51) -> Optional[FieldEl
     if is_zero2:
         var sqrtm1 = FieldElement51(
             1718705420411056, 234908883556509,
-            2233514472574048, 2117202627021982, 765476049583133)
+            2233514472574048, 2117202627021982, 765476049583133
+        )
         return Optional[FieldElement51](x * sqrtm1)
     return None
 
-struct AffineNielsPoint(Movable, Copyable, ImplicitlyCopyable):
+
+struct AffineNielsPoint(Copyable, ImplicitlyCopyable, Movable):
     var y_plus_x: FieldElement51
     var y_minus_x: FieldElement51
     var xy2d: FieldElement51
 
     @always_inline
-    def __init__(out self, y_plus_x: FieldElement51, y_minus_x: FieldElement51, xy2d: FieldElement51):
+    def __init__(out self, y_plus_x: FieldElement51, y_minus_x: FieldElement51, xy2d: FieldElement51
+    ):
         self.y_plus_x = y_plus_x
         self.y_minus_x = y_minus_x
         self.xy2d = xy2d
@@ -510,7 +543,7 @@ struct AffineNielsPoint(Movable, Copyable, ImplicitlyCopyable):
         self.xy2d = take.xy2d^
 
 
-struct ProjectiveNielsPoint(Movable, Copyable, ImplicitlyCopyable):
+struct ProjectiveNielsPoint(Copyable, ImplicitlyCopyable, Movable):
     var Y_plus_X: FieldElement51
     var Y_minus_X: FieldElement51
     var Z: FieldElement51
@@ -524,7 +557,8 @@ struct ProjectiveNielsPoint(Movable, Copyable, ImplicitlyCopyable):
         self.T2d = FieldElement51()
 
     @always_inline
-    def __init__(out self, Y_plus_X: FieldElement51, Y_minus_X: FieldElement51, Z: FieldElement51, T2d: FieldElement51):
+    def __init__(out self, Y_plus_X: FieldElement51, Y_minus_X: FieldElement51, Z: FieldElement51, T2d: FieldElement51
+    ):
         self.Y_plus_X = Y_plus_X
         self.Y_minus_X = Y_minus_X
         self.Z = Z
@@ -549,6 +583,7 @@ struct ProjectiveNielsPoint(Movable, Copyable, ImplicitlyCopyable):
 def _to_projective_niels(p: EdwardsPoint, d2: FieldElement51) -> ProjectiveNielsPoint:
     return ProjectiveNielsPoint(p.Y + p.X, p.Y - p.X, p.Z, p.T * d2)
 
+
 @always_inline
 def _add_affine_niels(p: EdwardsPoint, q: AffineNielsPoint) -> EdwardsPoint:
     var PP = (p.Y + p.X) * q.y_plus_x
@@ -561,6 +596,7 @@ def _add_affine_niels(p: EdwardsPoint, q: AffineNielsPoint) -> EdwardsPoint:
     var T3 = Z2 - Txy
     return EdwardsPoint(X3 * T3, Y3 * Z3, Z3 * T3, X3 * Y3)
 
+
 @always_inline
 def _sub_affine_niels(p: EdwardsPoint, q: AffineNielsPoint) -> EdwardsPoint:
     var PM = (p.Y + p.X) * q.y_minus_x
@@ -572,6 +608,7 @@ def _sub_affine_niels(p: EdwardsPoint, q: AffineNielsPoint) -> EdwardsPoint:
     var Z3 = Z2 - Txy
     var T3 = Z2 + Txy
     return EdwardsPoint(X3 * T3, Y3 * Z3, Z3 * T3, X3 * Y3)
+
 
 @always_inline
 def _add_projective_niels(p: EdwardsPoint, n: ProjectiveNielsPoint) -> EdwardsPoint:
@@ -586,6 +623,7 @@ def _add_projective_niels(p: EdwardsPoint, n: ProjectiveNielsPoint) -> EdwardsPo
     var T3 = ZZ2 - TT2d
     return EdwardsPoint(X3 * T3, Y3 * Z3, Z3 * T3, X3 * Y3)
 
+
 @always_inline
 def _sub_projective_niels(p: EdwardsPoint, n: ProjectiveNielsPoint) -> EdwardsPoint:
     var PM = (p.Y + p.X) * n.Y_minus_X
@@ -599,6 +637,7 @@ def _sub_projective_niels(p: EdwardsPoint, n: ProjectiveNielsPoint) -> EdwardsPo
     var T3 = ZZ2 + TT2d
     return EdwardsPoint(X3 * T3, Y3 * Z3, Z3 * T3, X3 * Y3)
 
+
 @always_inline
 def _radix16_digits(scalar: Span[UInt8, ...]) -> InlineArray[Int, 64]:
     var digits = InlineArray[Int, 64](fill=0)
@@ -610,6 +649,7 @@ def _radix16_digits(scalar: Span[UInt8, ...]) -> InlineArray[Int, 64]:
         digits[i] -= carry << 4
         digits[i + 1] += carry
     return digits^
+
 
 @always_inline
 def _base_table_lookup(ptr: Pointer[UInt64, _], j: Int, digit: Int) -> AffineNielsPoint:
@@ -636,6 +676,7 @@ def _base_table_lookup(ptr: Pointer[UInt64, _], j: Int, digit: Int) -> AffineNie
     var xy_sel = _ct_select_fe(xy, xy_neg, UInt8(sm & 1))
     return AffineNielsPoint(FieldElement51(yp), FieldElement51(ym), xy_sel)
 
+
 @no_inline
 def _mul_base_ct(scalar: Span[UInt8, ...]) -> EdwardsPoint:
     var table = ed25519_base_table()
@@ -655,13 +696,16 @@ def _mul_base_ct(scalar: Span[UInt8, ...]) -> EdwardsPoint:
         dptr.unsafe_store[volatile=True](i, UInt64(0))
     return P
 
+
 def _naf5(scalar: Span[UInt8, ...]) -> InlineArray[Int, 256]:
     var naf = InlineArray[Int, 256](fill=0)
     var words = InlineArray[UInt64, 5](fill=0)
     words[4] = 0
     var ptr = scalar.unsafe_ptr()
     for w in range(4):
-        words[w] = (ptr.unsafe_offset(8 * w)).unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]()
+        words[w] = (
+            (ptr.unsafe_offset(8 * w)).unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]()
+        )
     var pos = 0
     var carry: UInt64 = 0
     while pos < 256:
@@ -683,14 +727,18 @@ def _naf5(scalar: Span[UInt8, ...]) -> InlineArray[Int, 256]:
         pos += 5
     return naf^
 
+
 @always_inline
 def _b_odd_entry(ptr: Pointer[UInt64, _], k: Int) -> AffineNielsPoint:
     var base = ptr.unsafe_offset(k * 16)
     return AffineNielsPoint(
-        FieldElement51(base[unsafe_offset=0], base[unsafe_offset=1], base[unsafe_offset=2], base[unsafe_offset=3], base[unsafe_offset=4]),
-        FieldElement51(base[unsafe_offset=5], base[unsafe_offset=6], base[unsafe_offset=7], base[unsafe_offset=8], base[unsafe_offset=9]),
-        FieldElement51(base[unsafe_offset=10], base[unsafe_offset=11], base[unsafe_offset=12], base[unsafe_offset=13], base[unsafe_offset=14]),
+        FieldElement51(base[unsafe_offset=0], base[unsafe_offset=1], base[unsafe_offset=2], base[unsafe_offset=3], base[unsafe_offset=4]
+        ),
+        FieldElement51(base[unsafe_offset=5], base[unsafe_offset=6], base[unsafe_offset=7], base[unsafe_offset=8], base[unsafe_offset=9]
+        ),
+        FieldElement51(base[unsafe_offset=10], base[unsafe_offset=11], base[unsafe_offset=12], base[unsafe_offset=13], base[unsafe_offset=14])
     )
+
 
 @no_inline
 def _double_scalar_mult_vartime(a: Span[UInt8, ...], A: EdwardsPoint, b: Span[UInt8, ...]) -> EdwardsPoint:
@@ -724,6 +772,7 @@ def _double_scalar_mult_vartime(a: Span[UInt8, ...], A: EdwardsPoint, b: Span[UI
             Q = _sub_affine_niels(Q, _b_odd_entry(bptr, (-db - 1) >> 1))
     return Q
 
+
 @no_inline
 def ed25519_generate_public_key(
     private_key: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
@@ -752,11 +801,12 @@ def ed25519_generate_public_key(
     for i in range(32):
         s_ptr.unsafe_store[volatile=True](i, UInt8(0))
 
+
 @no_inline
 def ed25519_sign(
     private_key: Span[UInt8, ...],
     message: Span[UInt8, ...],
-    output: Span[mut=True, UInt8, ...],
+    output: Span[mut=True, UInt8, ...]
 ) raises:
     # RFC 8032 5.1.6 pure Ed25519:
     # r = SHA512(prefix || M), R = [r]B,
@@ -825,6 +875,7 @@ def ed25519_sign(
         s_ptr.unsafe_store[volatile=True](i, UInt8(0))
         r_bytes_ptr.unsafe_store[volatile=True](i, UInt8(0))
         S_ptr.unsafe_store[volatile=True](i, UInt8(0))
+
 
 struct Ed25519SigningKey(Copyable, Movable):
     var _s: Scalar
@@ -923,7 +974,8 @@ struct Ed25519SigningKey(Copyable, Movable):
 
 
 @no_inline
-def ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], signature: Span[UInt8, ...]) -> Bool:
+def ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], signature: Span[UInt8, ...]
+) -> Bool:
     # Uses canonical decoding, S < L, and the uncofactored equation.
     # Low-order public keys are rejected by library policy.
     if len(public_key) != 32 or len(signature) != 64:

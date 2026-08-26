@@ -1,11 +1,11 @@
-# ChaCha20 stream cipher per RFC 7539.
+"""Implements the ChaCha20 stream cipher specified by RFC 7539."""
 
 from std.memory import bitcast
 from std.memory.unsafe_pointer import Pointer
 from std.bit import rotate_bits_left
 
 comptime CHACHA_CONSTANTS = SIMD[DType.uint32, 4](
-    0x61707865, 0x3320646E, 0x79622D32, 0x6B206574,
+    0x61707865, 0x3320646E, 0x79622D32, 0x6B206574
 )
 
 
@@ -22,7 +22,7 @@ def _rotl[shift: Int, W: Int](x: SIMD[DType.uint32, W]) -> SIMD[DType.uint32, W]
                 h.shuffle[
                     1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14,
                     17, 16, 19, 18, 21, 20, 23, 22, 25, 24, 27, 26, 29, 28,
-                    31, 30,
+                    31, 30
                 ]()
             )
         else:
@@ -40,7 +40,7 @@ def _rotl[shift: Int, W: Int](x: SIMD[DType.uint32, W]) -> SIMD[DType.uint32, W]
                     19, 16, 17, 18, 23, 20, 21, 22, 27, 24, 25, 26, 31, 28,
                     29, 30, 35, 32, 33, 34, 39, 36, 37, 38, 43, 40, 41, 42,
                     47, 44, 45, 46, 51, 48, 49, 50, 55, 52, 53, 54, 59, 56,
-                    57, 58, 63, 60, 61, 62,
+                    57, 58, 63, 60, 61, 62
                 ]()
             )
         else:
@@ -48,13 +48,15 @@ def _rotl[shift: Int, W: Int](x: SIMD[DType.uint32, W]) -> SIMD[DType.uint32, W]
     else:
         return rotate_bits_left[shift](x)
 
+
 @always_inline
 def simd_quarter_round(
     a: SIMD[DType.uint32, 4],
     b: SIMD[DType.uint32, 4],
     c: SIMD[DType.uint32, 4],
-    d: SIMD[DType.uint32, 4],
-) -> Tuple[SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4]]:
+    d: SIMD[DType.uint32, 4]
+) -> Tuple[SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4]
+]:
     
     var aa = a
     var bb = b
@@ -85,8 +87,9 @@ def shuffle_for_diagonal(
     row0: SIMD[DType.uint32, 4],
     row1: SIMD[DType.uint32, 4],
     row2: SIMD[DType.uint32, 4],
-    row3: SIMD[DType.uint32, 4],
-) -> Tuple[SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4]]:
+    row3: SIMD[DType.uint32, 4]
+) -> Tuple[SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4]
+]:
 
     var a = row0
     var b = row1.rotate_left[1]()
@@ -101,8 +104,9 @@ def unshuffle_from_diagonal(
     a: SIMD[DType.uint32, 4],
     b: SIMD[DType.uint32, 4],
     c: SIMD[DType.uint32, 4],
-    d: SIMD[DType.uint32, 4],
-) -> Tuple[SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4]]:
+    d: SIMD[DType.uint32, 4]
+) -> Tuple[SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4]
+]:
 
     var row0 = a
     var row1 = b.rotate_right[1]()
@@ -117,8 +121,9 @@ def simd_double_round(
     row0: SIMD[DType.uint32, 4],
     row1: SIMD[DType.uint32, 4],
     row2: SIMD[DType.uint32, 4],
-    row3: SIMD[DType.uint32, 4],
-) -> Tuple[SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4]]:
+    row3: SIMD[DType.uint32, 4]
+) -> Tuple[SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4]
+]:
 
     var rr0 = row0
     var rr1 = row1
@@ -126,23 +131,32 @@ def simd_double_round(
     var rr3 = row3
 
     var qr = simd_quarter_round(rr0, rr1, rr2, rr3)
-    rr0 = qr[0]; rr1 = qr[1]; rr2 = qr[2]; rr3 = qr[3]
+    rr0 = qr[0]
+    rr1 = qr[1]
+    rr2 = qr[2]
+    rr3 = qr[3]
     
     var shuffled = shuffle_for_diagonal(rr0, rr1, rr2, rr3)
-    var diag_a = shuffled[0]; var diag_b = shuffled[1]
-    var diag_c = shuffled[2]; var diag_d = shuffled[3]
+    var diag_a = shuffled[0]
+    var diag_b = shuffled[1]
+    var diag_c = shuffled[2]
+    var diag_d = shuffled[3]
     
     qr = simd_quarter_round(diag_a, diag_b, diag_c, diag_d)
-    diag_a = qr[0]; diag_b = qr[1]; diag_c = qr[2]; diag_d = qr[3]
+    diag_a = qr[0]
+    diag_b = qr[1]
+    diag_c = qr[2]
+    diag_d = qr[3]
     
     return unshuffle_from_diagonal(diag_a, diag_b, diag_c, diag_d)
+
 
 @always_inline
 def _qr16(
     mut a: SIMD[DType.uint32, 16],
     mut b: SIMD[DType.uint32, 16],
     mut c: SIMD[DType.uint32, 16],
-    mut d: SIMD[DType.uint32, 16],
+    mut d: SIMD[DType.uint32, 16]
 ):
     a = a + b
     d = _rotl[16, 16](d ^ a)
@@ -159,7 +173,7 @@ def simd_double_round_16x(
     mut row0: SIMD[DType.uint32, 16],
     mut row1: SIMD[DType.uint32, 16],
     mut row2: SIMD[DType.uint32, 16],
-    mut row3: SIMD[DType.uint32, 16],
+    mut row3: SIMD[DType.uint32, 16]
 ):
     _qr16(row0, row1, row2, row3)
 
@@ -192,7 +206,7 @@ def _quad_block(
     row1: SIMD[DType.uint32, 16],
     row2: SIMD[DType.uint32, 16],
     row3: SIMD[DType.uint32, 16],
-    blk: Int,
+    blk: Int
 ) -> SIMD[DType.uint32, 16]:
     var out = SIMD[DType.uint32, 16]()
     if blk == 0:
@@ -227,32 +241,32 @@ comptime _CTR_INC4 = SIMD[DType.uint32, 16](
 def _quad_rows_init(
     key: SIMD[DType.uint32, 8],
     counter: UInt32,
-    nonce: SIMD[DType.uint32, 4],
+    nonce: SIMD[DType.uint32, 4]
 ) -> Tuple[
     SIMD[DType.uint32, 16],
     SIMD[DType.uint32, 16],
     SIMD[DType.uint32, 16],
-    SIMD[DType.uint32, 16],
+    SIMD[DType.uint32, 16]
 ]:
     comptime CONST16 = SIMD[DType.uint32, 16](
         0x61707865, 0x3320646E, 0x79622D32, 0x6B206574,
         0x61707865, 0x3320646E, 0x79622D32, 0x6B206574,
         0x61707865, 0x3320646E, 0x79622D32, 0x6B206574,
-        0x61707865, 0x3320646E, 0x79622D32, 0x6B206574,
+        0x61707865, 0x3320646E, 0x79622D32, 0x6B206574
     )
     var row1 = SIMD[DType.uint32, 16](
         key[0], key[1], key[2], key[3], key[0], key[1], key[2], key[3],
-        key[0], key[1], key[2], key[3], key[0], key[1], key[2], key[3],
+        key[0], key[1], key[2], key[3], key[0], key[1], key[2], key[3]
     )
     var row2 = SIMD[DType.uint32, 16](
         key[4], key[5], key[6], key[7], key[4], key[5], key[6], key[7],
-        key[4], key[5], key[6], key[7], key[4], key[5], key[6], key[7],
+        key[4], key[5], key[6], key[7], key[4], key[5], key[6], key[7]
     )
     var row3 = SIMD[DType.uint32, 16](
         counter, nonce[0], nonce[1], nonce[2],
         counter + 1, nonce[0], nonce[1], nonce[2],
         counter + 2, nonce[0], nonce[1], nonce[2],
-        counter + 3, nonce[0], nonce[1], nonce[2],
+        counter + 3, nonce[0], nonce[1], nonce[2]
     )
     return Tuple(CONST16, row1, row2, row3)
 
@@ -261,7 +275,7 @@ def _quad_rows_init(
 def _diag16[back: Bool](
     mut r1: SIMD[DType.uint32, 16],
     mut r2: SIMD[DType.uint32, 16],
-    mut r3: SIMD[DType.uint32, 16],
+    mut r3: SIMD[DType.uint32, 16]
 ):
     comptime if back:
         r1 = r1.shuffle[3, 0, 1, 2, 7, 4, 5, 6, 11, 8, 9, 10, 15, 12, 13, 14]()
@@ -279,12 +293,12 @@ def chacha20_x12_core_rows(
     init2: SIMD[DType.uint32, 16],
     init3a: SIMD[DType.uint32, 16],
     init3b: SIMD[DType.uint32, 16],
-    init3c: SIMD[DType.uint32, 16],
+    init3c: SIMD[DType.uint32, 16]
 ) -> Tuple[
     SIMD[DType.uint32, 16], SIMD[DType.uint32, 16], SIMD[DType.uint32, 16],
     SIMD[DType.uint32, 16], SIMD[DType.uint32, 16], SIMD[DType.uint32, 16],
     SIMD[DType.uint32, 16], SIMD[DType.uint32, 16], SIMD[DType.uint32, 16],
-    SIMD[DType.uint32, 16], SIMD[DType.uint32, 16], SIMD[DType.uint32, 16],
+    SIMD[DType.uint32, 16], SIMD[DType.uint32, 16], SIMD[DType.uint32, 16]
 ]:
     var a0 = init0
     var a1 = init1
@@ -338,7 +352,7 @@ def chacha20_x12_core_rows(
         _quad_block(c0, c1, c2, c3, 0),
         _quad_block(c0, c1, c2, c3, 1),
         _quad_block(c0, c1, c2, c3, 2),
-        _quad_block(c0, c1, c2, c3, 3),
+        _quad_block(c0, c1, c2, c3, 3)
     )
 
 
@@ -348,7 +362,7 @@ def chacha20_octo_core_rows(
     init1: SIMD[DType.uint32, 16],
     init2: SIMD[DType.uint32, 16],
     init3a: SIMD[DType.uint32, 16],
-    init3b: SIMD[DType.uint32, 16],
+    init3b: SIMD[DType.uint32, 16]
 ) -> Tuple[
     SIMD[DType.uint32, 16],
     SIMD[DType.uint32, 16],
@@ -357,7 +371,7 @@ def chacha20_octo_core_rows(
     SIMD[DType.uint32, 16],
     SIMD[DType.uint32, 16],
     SIMD[DType.uint32, 16],
-    SIMD[DType.uint32, 16],
+    SIMD[DType.uint32, 16]
 ]:
     var a0 = init0
     var a1 = init1
@@ -403,7 +417,7 @@ def chacha20_octo_core_rows(
         _quad_block(b0, b1, b2, b3, 0),
         _quad_block(b0, b1, b2, b3, 1),
         _quad_block(b0, b1, b2, b3, 2),
-        _quad_block(b0, b1, b2, b3, 3),
+        _quad_block(b0, b1, b2, b3, 3)
     )
 
 
@@ -412,12 +426,12 @@ def chacha20_quad_core_rows(
     init0: SIMD[DType.uint32, 16],
     init1: SIMD[DType.uint32, 16],
     init2: SIMD[DType.uint32, 16],
-    init3: SIMD[DType.uint32, 16],
+    init3: SIMD[DType.uint32, 16]
 ) -> Tuple[
     SIMD[DType.uint32, 16],
     SIMD[DType.uint32, 16],
     SIMD[DType.uint32, 16],
-    SIMD[DType.uint32, 16],
+    SIMD[DType.uint32, 16]
 ]:
     var row0 = init0
     var row1 = init1
@@ -436,7 +450,7 @@ def chacha20_quad_core_rows(
         _quad_block(row0, row1, row2, row3, 0),
         _quad_block(row0, row1, row2, row3, 1),
         _quad_block(row0, row1, row2, row3, 2),
-        _quad_block(row0, row1, row2, row3, 3),
+        _quad_block(row0, row1, row2, row3, 3)
     )
 
 
@@ -456,7 +470,7 @@ def _qr_scalar(mut a: UInt32, mut b: UInt32, mut c: UInt32, mut d: UInt32):
 def chacha20_block_core(
     key: SIMD[DType.uint32, 8],
     counter: UInt32,
-    nonce: SIMD[DType.uint32, 4],
+    nonce: SIMD[DType.uint32, 4]
 ) -> SIMD[DType.uint32, 16]:
 
     var row0 = CHACHA_CONSTANTS
@@ -471,7 +485,10 @@ def chacha20_block_core(
 
     comptime for _ in range(10):
         var dr = simd_double_round(row0, row1, row2, row3)
-        row0 = dr[0]; row1 = dr[1]; row2 = dr[2]; row3 = dr[3]
+        row0 = dr[0]
+        row1 = dr[1]
+        row2 = dr[2]
+        row3 = dr[3]
 
     row0 = row0 + init0
     row1 = row1 + init1
@@ -490,7 +507,7 @@ def chacha20_block_core(
 def _chacha20_block_scalar(
     key: SIMD[DType.uint32, 8],
     counter: UInt32,
-    nonce: SIMD[DType.uint32, 4],
+    nonce: SIMD[DType.uint32, 4]
 ) -> SIMD[DType.uint32, 16]:
     var x0: UInt32 = 0x61707865
     var x1: UInt32 = 0x3320646E
@@ -523,7 +540,7 @@ def _chacha20_block_scalar(
         x0 + 0x61707865, x1 + 0x3320646E, x2 + 0x79622D32, x3 + 0x6B206574,
         x4 + key[0], x5 + key[1], x6 + key[2], x7 + key[3],
         x8 + key[4], x9 + key[5], x10 + key[6], x11 + key[7],
-        x12 + counter, x13 + nonce[0], x14 + nonce[1], x15 + nonce[2],
+        x12 + counter, x13 + nonce[0], x14 + nonce[1], x15 + nonce[2]
     )
     return result
 
@@ -553,7 +570,7 @@ def _xor_block64(
     src: Pointer[mut=True, UInt8, _, address_space=_],
     dst: Pointer[mut=True, UInt8, _, address_space=_],
     keystream: SIMD[DType.uint32, 16],
-    offset: Int,
+    offset: Int
 ):
     var ks = bitcast[DType.uint8, 64](keystream)
     var v = (src.unsafe_offset(offset)).unsafe_load[width=64, alignment=1](0)
@@ -570,7 +587,7 @@ struct ChaCha20:
         out self,
         key_bytes: SIMD[DType.uint8, 32],
         nonce_bytes: Span[UInt8, ...],
-        counter: UInt32 = 1,
+        counter: UInt32 = 1
     ) raises:
         self.key = bitcast[DType.uint32, 8](key_bytes)
         self.nonce = _chacha20_nonce_words(nonce_bytes)
@@ -588,7 +605,11 @@ struct ChaCha20:
         Pointer(to=self.exhausted).unsafe_mut_cast[True]().unsafe_bitcast[UInt8]().unsafe_store[volatile=True](0, UInt8(0))
 
     def _check_counter_space(self, data_len: Int) raises:
-        var blocks_needed = UInt64((data_len + 63) // 64)
+        if data_len < 0:
+            raise Error("ChaCha20 input length cannot be negative")
+        var blocks_needed = UInt64(data_len // 64)
+        if data_len % 64 != 0:
+            blocks_needed += 1
         if self.exhausted and blocks_needed > 0:
             raise Error("ChaCha20 counter is exhausted, use a new nonce")
         var space = UInt64(0x100000000) - UInt64(self.counter)
@@ -600,7 +621,7 @@ struct ChaCha20:
         mut self,
         src: Pointer[mut=True, UInt8, _, address_space=_],
         dst: Pointer[mut=True, UInt8, _, address_space=_],
-        length: Int,
+        length: Int
     ) raises:
         self._check_counter_space(length)
         var block_idx = 0
@@ -612,7 +633,7 @@ struct ChaCha20:
             while offset + 768 <= length:
                 var o = chacha20_x12_core_rows(
                     rows[0], rows[1], rows[2], i3,
-                    i3 + _CTR_INC4, i3 + _CTR_INC4 + _CTR_INC4,
+                    i3 + _CTR_INC4, i3 + _CTR_INC4 + _CTR_INC4
                 )
                 comptime for j in range(12):
                     _xor_block64(src, dst, o[j], offset + j * 64)
@@ -663,20 +684,20 @@ struct ChaCha20:
     def encrypt_into[origin: Origin[mut=True]](
         mut self,
         plaintext: Span[UInt8, ...],
-        mut ciphertext: Span[mut=True, UInt8, origin],
+        mut ciphertext: Span[mut=True, UInt8, origin]
     ) raises:
         if len(ciphertext) < len(plaintext):
             raise Error("ChaCha20 ciphertext buffer too small")
         self._stream_xor(
             plaintext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin](),
             ciphertext.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin](),
-            len(plaintext),
+            len(plaintext)
         )
 
     def decrypt_into[origin: Origin[mut=True]](
         mut self,
         ciphertext: Span[UInt8, ...],
-        mut plaintext: Span[mut=True, UInt8, origin],
+        mut plaintext: Span[mut=True, UInt8, origin]
     ) raises:
         self.encrypt_into(ciphertext, plaintext)
 

@@ -19,6 +19,7 @@ def hex_to_bytes(s: String) -> List[UInt8]:
         r.append((hi << 4) | lo)
     return r^
 
+
 def extract_p256_public_key(public_der: List[UInt8]) -> List[UInt8]:
     # RFC 5480 section 2.1 identifies EC public keys with id-ecPublicKey plus
     # a namedCurve OID. SEC 2 v2.0 appendix A assigns secp256r1:
@@ -63,7 +64,7 @@ def extract_p256_public_key(public_der: List[UInt8]) -> List[UInt8]:
 
 
 def extract_trailing_sec1_p256_public_key(
-    public_der: List[UInt8],
+    public_der: List[UInt8]
 ) -> List[UInt8]:
     if len(public_der) >= 65 and public_der[len(public_der) - 65] == 0x04:
         var out = List[UInt8](capacity=65)
@@ -115,7 +116,7 @@ def run_case(
     private_hex: String,
     public_hex: String,
     shared_hex: String,
-    result: String,
+    result: String
 ) -> Bool:
     var is_valid = result == "valid"
     var is_acceptable = result == "acceptable"
@@ -132,13 +133,13 @@ def run_case(
     var got = p256_ecdh(
         Span[UInt8, ...](private_key),
         Span[UInt8, ...](public_key),
-        Span[mut=True, UInt8, ...](unsafe_ptr=actual.unsafe_ptr(), length=32),
+        Span[mut=True, UInt8, ...](unsafe_ptr=actual.unsafe_ptr(), length=32)
     )
     if is_valid and not got:
         print(
             "Test ",
             tc_id,
-            " validity mismatch: valid vector was rejected",
+            " validity mismatch: valid vector was rejected"
         )
         return False
     if (not is_valid and not is_acceptable) and got:
@@ -148,6 +149,7 @@ def run_case(
         print("Test ", tc_id, " shared secret mismatch")
         return False
     return True
+
 
 def main() raises:
     print("Wycheproof P-256 ECDH")
@@ -169,7 +171,7 @@ def main() raises:
                 String(t["private"]),
                 String(t["public"]),
                 String(t["shared"]),
-                result,
+                result
             ):
                 ok_count += 1
             else:

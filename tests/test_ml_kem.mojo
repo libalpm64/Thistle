@@ -29,7 +29,7 @@ from thistle.ml_kem import (
     poly_ntt,
     poly_reduce,
     poly_tobytes,
-    poly_tomsg,
+    poly_tomsg
 )
 
 

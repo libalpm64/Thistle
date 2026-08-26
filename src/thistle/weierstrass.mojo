@@ -4,6 +4,7 @@ Generic Weierstrass limb operations for P-256 (N=4) and P-384 (N=6).
 
 from std.utils import StaticTuple
 from std.memory import Pointer
+from std.os import abort
 from .utils import u64_nonzero_choice, u64_zero_choice, volatile_wipe
 from .pbkdf2 import hmac_sha256, hmac_sha384
 
@@ -31,7 +32,8 @@ struct Limbs[N: Int](Copyable, ImplicitlyCopyable, Movable):
         self.limbs[2] = l2
         self.limbs[3] = l3
 
-    def __init__(out self, l0: UInt64, l1: UInt64, l2: UInt64, l3: UInt64, l4: UInt64, l5: UInt64) where Self.N == 6:
+    def __init__(out self, l0: UInt64, l1: UInt64, l2: UInt64, l3: UInt64, l4: UInt64, l5: UInt64
+    ) where Self.N == 6:
         self.limbs = StaticTuple[UInt64, Self.N]()
         comptime for i in range(Self.N):
             self.limbs[i] = 0
@@ -140,7 +142,7 @@ def sub_mod[N: Int](a: Limbs[N], b: Limbs[N], m: Limbs[N]) -> Limbs[N]:
 def from_be[N: Int](bytes: Span[UInt8, ...]) -> Limbs[N]:
     var out = Limbs[N].zero()
     comptime for i in range(N):
-        var off = (N * 8 - 8 - i * 8)
+        var off = N * 8 - 8 - i * 8
         var v: UInt64 = 0
         for k in range(8):
             v = (v << 8) | UInt64(bytes[off + k])
@@ -184,7 +186,8 @@ struct JacobianPoint[N: Int](Copyable, ImplicitlyCopyable, Movable):
         self.z = Limbs[Self.N].zero()
         self.infinity = True
 
-    def __init__(out self, x: Limbs[Self.N], y: Limbs[Self.N], z: Limbs[Self.N], infinity: Bool):
+    def __init__(out self, x: Limbs[Self.N], y: Limbs[Self.N], z: Limbs[Self.N], infinity: Bool
+    ):
         self.x = x
         self.y = y
         self.z = z
@@ -198,7 +201,7 @@ def _p256_final_sub(
     acc2: UInt64,
     acc3: UInt64,
     acc4: UInt64,
-    p: Limbs[4],
+    p: Limbs[4]
 ) -> Limbs[4]:
     var out = Limbs[4](acc0, acc1, acc2, acc3)
     var d, borrow = sub_raw(out, p)
@@ -312,19 +315,15 @@ def _p256_mont_sqr(a: Limbs[4], p: Limbs[4]) -> Limbs[4]:
     var acc1 = UInt64(p10 & _MASK64)
     var s = (p20 & _MASK64) + (p10 >> UInt128(64))
     var acc2 = UInt64(s & _MASK64)
-    s = (
-        (p30 & _MASK64)
+    s = (p30 & _MASK64)
         + (p20 >> UInt128(64))
         + (p21 & _MASK64)
         + (s >> UInt128(64))
-    )
     var acc3 = UInt64(s & _MASK64)
-    s = (
-        (p30 >> UInt128(64))
+    s = (p30 >> UInt128(64))
         + (p21 >> UInt128(64))
         + (p31 & _MASK64)
         + (s >> UInt128(64))
-    )
     var acc4 = UInt64(s & _MASK64)
     s = (p31 >> UInt128(64)) + (p32 & _MASK64) + (s >> UInt128(64))
     var acc5 = UInt64(s & _MASK64)
@@ -694,7 +693,8 @@ def base_table_entry[N: Int](tptr: Pointer[UInt64, _], j: Int, d: UInt64) -> Poi
 
 
 @always_inline
-def scalar_mult_base[N: Int, N0: UInt64](tptr: Pointer[UInt64, _], k: Limbs[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]) -> Point[N]:
+def scalar_mult_base[N: Int, N0: UInt64](tptr: Pointer[UInt64, _], k: Limbs[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]
+) -> Point[N]:
     var acc = jacobian_infinity(one_mont)
     for i in range(1, N * 16, 2):
         var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
@@ -722,6 +722,10 @@ def _hmac[N: Int](key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
 
 
 def rfc6979[N: Int](private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int, n: Limbs[N]) -> Limbs[N]:
+    if len(private_key) != N * 8 or len(digest) != N * 8:
+        abort("RFC 6979 inputs must match the curve scalar size")
+    if skip < 0:
+        abort("RFC 6979 skip count cannot be negative")
     var h1 = reduce_mod(from_be[N](digest), n)
     var h1_bytes = InlineArray[UInt8, N * 8](fill=0)
     to_be(h1, h1_bytes.unsafe_ptr())
@@ -796,7 +800,8 @@ def rfc6979[N: Int](private_key: Span[UInt8, ...], digest: Span[UInt8, ...], ski
 
 
 @always_inline
-def jacobian_add_affine_non_equal_ct[N: Int, N0: UInt64](p: JacobianPoint[N], q: Point[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]) -> JacobianPoint[N]:
+def jacobian_add_affine_non_equal_ct[N: Int, N0: UInt64](p: JacobianPoint[N], q: Point[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]
+) -> JacobianPoint[N]:
     var z1z1 = mont_sqr[N, N0](p.z, mod)
     var u2 = mont_mul[N, N0](q.x, z1z1, mod)
     var s2 = mont_mul[N, N0](q.y, mont_mul[N, N0](p.z, z1z1, mod), mod)

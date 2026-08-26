@@ -7,7 +7,7 @@ from thistle.sha2 import (
     string_to_bytes,
     sha224_hash_bits,
     sha256_hash_bits,
-    sha384_hash_bits,
+    sha384_hash_bits
 )
 from thistle.argon2 import Argon2id
 from thistle.blake2b import Blake2b
@@ -20,22 +20,24 @@ from thistle.camellia import (
     camellia_decrypt_blocks,
     camellia_cbc_encrypt_kernel,
     camellia_cbc_decrypt_kernel,
-    camellia_ctr_kernel,
+    camellia_ctr_kernel
 )
 from thistle.chacha20 import ChaCha20
 from thistle.chacha20poly1305 import (
     chacha20_poly1305_encrypt,
     chacha20_poly1305_decrypt,
     xchacha20_poly1305_encrypt,
-    xchacha20_poly1305_decrypt,
+    xchacha20_poly1305_decrypt
 )
 from thistle.kcipher2 import KCipher2
 from thistle.pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
 from thistle.aes import (
     cpu_aes_encrypt, cpu_aes_ecb_kernel, cpu_aes_cbc_kernel, cpu_aes_ctr_kernel,
-    cpu_aes_xts_kernel, AESExpandedKey,
+    cpu_aes_xts_kernel, AESExpandedKey
 )
-from thistle.aes_ni import aes_encrypt, has_aes_ni, has_x86_aes_ni, aes_gcm_encrypt, aes_gcm_decrypt
+from thistle.aes_ni import (
+    aes_encrypt, has_aes_ni, has_x86_aes_ni, aes_gcm_encrypt, aes_gcm_decrypt
+)
 from thistle.sha_ni import sha256ni_hash, has_sha_ni
 
 
@@ -138,7 +140,7 @@ def test_argon2(data: PythonObject, py: PythonObject) raises -> TestResult:
             tag_length=Int(py=v["tag_length"]),
             memory_size_kb=Int(py=v["memory_size_kb"]),
             iterations=Int(py=v["iterations"]),
-            version=Int(py=v["version"]),
+            version=Int(py=v["version"])
         )
         var got = bytes_to_hex(argon2.hash(Span[UInt8, ...](pass_bytes)))
         var expected = String(v["hash"])
@@ -183,7 +185,7 @@ def test_blake3(data: PythonObject, py: PythonObject) raises -> TestResult:
         var got = bytes_to_hex(
             blake3_parallel_hash(
                 Span[UInt8, ...](generate_blake3_input(input_len)),
-                expected.byte_length() // 2,
+                expected.byte_length() // 2
             )
         )
         if got == expected:
@@ -300,7 +302,7 @@ def test_camellia(data: PythonObject, py: PythonObject) raises -> TestResult:
             ctr_out.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin](),
             cipher,
             ctr_nb,
-            nonce.unsafe_ptr(),
+            nonce.unsafe_ptr()
         )
         for i2 in range(ctr_nb * 16):
             if ctr_out[i2] != msg[i2]:
@@ -337,7 +339,7 @@ def test_camellia(data: PythonObject, py: PythonObject) raises -> TestResult:
             cbc_out.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin](),
             cipher,
             cbc_nb,
-            nonce.unsafe_ptr(),
+            nonce.unsafe_ptr()
         )
         for i2 in range(cbc_nb * 16):
             if cbc_out[i2] != cbc_msg[i2]:
@@ -360,7 +362,7 @@ def test_chacha20(data: PythonObject, py: PythonObject) raises -> TestResult:
         var cipher = ChaCha20(
             list_to_simd32(hex_to_bytes(String(v["key"]))),
             Span[UInt8, ...](nonce),
-            UInt32(Int(py=v["counter"])),
+            UInt32(Int(py=v["counter"]))
         )
         var pt_bytes = hex_to_bytes(String(v["plaintext"]))
         var expected_ct = hex_to_bytes(String(v["ciphertext"]))
@@ -454,7 +456,7 @@ def _test_pbkdf2_sha256(
                 password,
                 Span[UInt8, ...](salt),
                 Int(py=v["iterations"]),
-                Int(py=v["dklen"]),
+                Int(py=v["dklen"])
             )
         )
         var expected = String(v["derived_key"])
@@ -482,7 +484,7 @@ def _test_pbkdf2_sha512(
                 password,
                 Span[UInt8, ...](salt),
                 Int(py=v["iterations"]),
-                Int(py=v["dklen"]),
+                Int(py=v["dklen"])
             )
         )
         var expected = String(v["derived_key"])
@@ -512,9 +514,7 @@ def _test_sha224(data: PythonObject, py: PythonObject) raises -> TestResult:
     for i in range(Int(py=data.__len__())):
         var v = data[i]
         var bit_len = Int(py=v["len"])
-        var msg = (
-            hex_to_bytes(String(v["msg"])) if bit_len > 0 else List[UInt8]()
-        )
+        var msg = hex_to_bytes(String(v["msg"])) if bit_len > 0 else List[UInt8]()
         var got = bytes_to_hex(sha224_hash_bits(Span[UInt8, ...](msg), bit_len))
         var expected = String(v["md"])
         if got == expected:
@@ -538,9 +538,7 @@ def _test_sha256(data: PythonObject, py: PythonObject) raises -> TestResult:
     for i in range(Int(py=data.__len__())):
         var v = data[i]
         var bit_len = Int(py=v["len"])
-        var msg = (
-            hex_to_bytes(String(v["msg"])) if bit_len > 0 else List[UInt8]()
-        )
+        var msg = hex_to_bytes(String(v["msg"])) if bit_len > 0 else List[UInt8]()
         var got = bytes_to_hex(sha256_hash_bits(Span[UInt8, ...](msg), bit_len))
         var expected = String(v["md"])
         if got == expected:
@@ -564,9 +562,7 @@ def _test_sha384(data: PythonObject, py: PythonObject) raises -> TestResult:
     for i in range(Int(py=data.__len__())):
         var v = data[i]
         var bit_len = Int(py=v["len"])
-        var msg = (
-            hex_to_bytes(String(v["msg"])) if bit_len > 0 else List[UInt8]()
-        )
+        var msg = hex_to_bytes(String(v["msg"])) if bit_len > 0 else List[UInt8]()
         var got = bytes_to_hex(sha384_hash_bits(Span[UInt8, ...](msg), bit_len))
         var expected = String(v["md"])
         if got == expected:
@@ -678,9 +674,7 @@ def test_sha_ni(data: PythonObject, py: PythonObject) raises -> TestResult:
     for i in range(Int(py=sha256_data.__len__())):
         var v = sha256_data[i]
         var bit_len = Int(py=v["len"])
-        var msg = (
-            hex_to_bytes(String(v["msg"])) if bit_len > 0 else List[UInt8]()
-        )
+        var msg = hex_to_bytes(String(v["msg"])) if bit_len > 0 else List[UInt8]()
         var got = bytes_to_hex(sha256ni_hash(Span[UInt8, ...](msg)))
         var expected = String(v["md"])
         if got == expected:
@@ -718,12 +712,12 @@ def test_aes_gcm(data: PythonObject, py: PythonObject) raises -> TestResult:
                 try:
                     var enc = aes_gcm_encrypt(
                         Span[UInt8, ...](key), Span[UInt8, ...](iv),
-                        Span[UInt8, ...](msg), Span[UInt8, ...](aad),
+                        Span[UInt8, ...](msg), Span[UInt8, ...](aad)
                     )
                     var dec = aes_gcm_decrypt(
                         Span[UInt8, ...](key), Span[UInt8, ...](iv),
                         Span[UInt8, ...](ct), Span[UInt8, ...](aad),
-                        Span[UInt8, ...](tag),
+                        Span[UInt8, ...](tag)
                     )
                     ok = (
                         bytes_to_hex(enc[0]) == bytes_to_hex(ct)
@@ -738,7 +732,7 @@ def test_aes_gcm(data: PythonObject, py: PythonObject) raises -> TestResult:
                     var dec = aes_gcm_decrypt(
                         Span[UInt8, ...](key), Span[UInt8, ...](iv),
                         Span[UInt8, ...](ct), Span[UInt8, ...](aad),
-                        Span[UInt8, ...](tag),
+                        Span[UInt8, ...](tag)
                     )
                     ok = (not dec[1]) and len(dec[0]) == 0
                 except:
@@ -785,14 +779,14 @@ def test_chacha20_poly1305(data: PythonObject, py: PythonObject, xchacha: Bool) 
                         Span[UInt8, ...](key), Span[UInt8, ...](iv), Span[UInt8, ...](aad),
                         Span[UInt8, ...](msg),
                         Span[mut=True, UInt8, ...](out_ct),
-                        Span[mut=True, UInt8, ...](out_tag),
+                        Span[mut=True, UInt8, ...](out_tag)
                     )
                 else:
                     chacha20_poly1305_encrypt(
                         Span[UInt8, ...](key), Span[UInt8, ...](iv), Span[UInt8, ...](aad),
                         Span[UInt8, ...](msg),
                         Span[mut=True, UInt8, ...](out_ct),
-                        Span[mut=True, UInt8, ...](out_tag),
+                        Span[mut=True, UInt8, ...](out_tag)
                     )
                 enc_matches = len(ct) == n and len(tag) == 16
                 for i in range(n):
@@ -810,13 +804,13 @@ def test_chacha20_poly1305(data: PythonObject, py: PythonObject, xchacha: Bool) 
                     dec_ok = xchacha20_poly1305_decrypt(
                         Span[UInt8, ...](key), Span[UInt8, ...](iv), Span[UInt8, ...](aad),
                         Span[UInt8, ...](ct), Span[UInt8, ...](tag),
-                        Span[mut=True, UInt8, ...](out_pt),
+                        Span[mut=True, UInt8, ...](out_pt)
                     )
                 else:
                     dec_ok = chacha20_poly1305_decrypt(
                         Span[UInt8, ...](key), Span[UInt8, ...](iv), Span[UInt8, ...](aad),
                         Span[UInt8, ...](ct), Span[UInt8, ...](tag),
-                        Span[mut=True, UInt8, ...](out_pt),
+                        Span[mut=True, UInt8, ...](out_pt)
                     )
                 if dec_ok:
                     for i in range(len(ct)):
@@ -863,7 +857,7 @@ def test_aes_cpu_modes(data: PythonObject, py: PythonObject) raises -> TestResul
                 var aad = List[UInt8]()
                 var enc = aes_gcm_encrypt(
                     Span[UInt8, ...](key), Span[UInt8, ...](nonce),
-                    Span[UInt8, ...](pt), Span[UInt8, ...](aad),
+                    Span[UInt8, ...](pt), Span[UInt8, ...](aad)
                 )
                 ok = bytes_to_hex(enc[0]) == bytes_to_hex(ct_exp)
                 if len(tag_exp) == 16:
@@ -974,7 +968,7 @@ def main() raises:
             test_argon2(load_json("tests/vectors/argon2.json", py), py),
             tp,
             tf,
-            af,
+            af
         )
     except e:
         print("Argon2 [error] " + String(e))
@@ -988,7 +982,7 @@ def main() raises:
             test_blake2b(load_json("tests/vectors/blake2b.json", py), py),
             tp,
             tf,
-            af,
+            af
         )
     except e:
         print("BLAKE2b [error] " + String(e))
@@ -1002,7 +996,7 @@ def main() raises:
             test_blake3(load_json("tests/vectors/blake3.json", py), py),
             tp,
             tf,
-            af,
+            af
         )
     except e:
         print("BLAKE3 [error] " + String(e))
@@ -1016,7 +1010,7 @@ def main() raises:
             test_camellia(load_json("tests/vectors/camellia.json", py), py),
             tp,
             tf,
-            af,
+            af
         )
     except e:
         print("Camellia [error] " + String(e))
@@ -1030,7 +1024,7 @@ def main() raises:
             test_chacha20(load_json("tests/vectors/chacha20.json", py), py),
             tp,
             tf,
-            af,
+            af
         )
     except e:
         print("ChaCha20 [error] " + String(e))
@@ -1044,7 +1038,7 @@ def main() raises:
             test_kcipher2(load_json("tests/vectors/kcipher2.json", py), py),
             tp,
             tf,
-            af,
+            af
         )
     except e:
         print("KCipher2 [error] " + String(e))
@@ -1058,7 +1052,7 @@ def main() raises:
             test_pbkdf2(load_json("tests/vectors/pbkdf2.json", py), py),
             tp,
             tf,
-            af,
+            af
         )
     except e:
         print("PBKDF2 [error] " + String(e))
@@ -1072,7 +1066,7 @@ def main() raises:
             test_sha(load_json("tests/vectors/sha.json", py), py),
             tp,
             tf,
-            af,
+            af
         )
     except e:
         print("SHA [error] " + String(e))
@@ -1086,7 +1080,7 @@ def main() raises:
             test_aes_cpu(load_json("tests/vectors/aes.json", py), py),
             tp,
             tf,
-            af,
+            af
         )
     except e:
         print("AES-CPU [error] " + String(e))
@@ -1100,7 +1094,7 @@ def main() raises:
             test_aes_ni(load_json("tests/vectors/aes.json", py), py),
             tp,
             tf,
-            af,
+            af
         )
     except e:
         print("AES-NI [error] " + String(e))
@@ -1114,7 +1108,7 @@ def main() raises:
             test_aes_cpu_modes(load_json("tests/vectors/aes_test_vectors.json", py), py),
             tp,
             tf,
-            af,
+            af
         )
     except e:
         print("AES-CPU-Modes [error] " + String(e))
@@ -1130,7 +1124,7 @@ def main() raises:
             ),
             tp,
             tf,
-            af,
+            af
         )
     except e:
         print("ChaCha20-Poly1305 [error] " + String(e))
@@ -1146,7 +1140,7 @@ def main() raises:
             ),
             tp,
             tf,
-            af,
+            af
         )
     except e:
         print("XChaCha20-Poly1305 [error] " + String(e))
@@ -1160,7 +1154,7 @@ def main() raises:
             test_aes_gcm(load_json("tests/Wycheproof/aes_gcm_test.json", py), py),
             tp,
             tf,
-            af,
+            af
         )
     except e:
         print("AES-GCM [error] " + String(e))
@@ -1174,7 +1168,7 @@ def main() raises:
             test_sha_ni(load_json("tests/vectors/sha.json", py), py),
             tp,
             tf,
-            af,
+            af
         )
     except e:
         print("SHA256-NI [error] " + String(e))

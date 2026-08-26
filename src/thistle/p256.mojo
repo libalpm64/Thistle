@@ -7,7 +7,9 @@ from .utils import u64_nonzero_choice, u64_zero_choice
 from .sha2 import sha256_hash
 from .pbkdf2 import hmac_sha256
 from std.utils import StaticTuple
-from .weierstrass import Limbs, U256, Point, JacobianPoint, cmp as ws_cmp, sub_raw as ws_sub_raw, add_raw as ws_add_raw, select as ws_select, zero_choice as ws_zero_choice, add_mod as ws_add_mod, sub_mod as ws_sub_mod, from_be as ws_from_be, to_be as ws_to_be, mont_mul as ws_mont_mul, mont_sqr as ws_mont_sqr, to_mont as ws_to_mont, from_mont as ws_from_mont, mul_mod as ws_mul_mod, square_mod as ws_square_mod, is_on_curve as ws_is_on_curve, mul_small_mod as ws_mul_small_mod, jacobian_double_ct as ws_jacobian_double_ct, jacobian_infinity as ws_jacobian_infinity, select_jacobian_ct as ws_select_jacobian_ct, jacobian_add_affine_non_equal_ct as ws_jacobian_add_affine, pow_mod as ws_pow_mod, sqn as ws_sqn, inv_p as ws_inv_p, jacobian_to_affine as ws_jacobian_to_affine, scalar_mult as ws_scalar_mult, base_table_entry as ws_base_table_entry, scalar_mult_base as ws_scalar_mult_base, mod_inv_ct as ws_mod_inv_ct, reduce_mod as ws_reduce_mod, point_add as ws_point_add, rfc6979 as ws_rfc6979
+from .weierstrass import (
+    Limbs, U256, Point, JacobianPoint, cmp as ws_cmp, sub_raw as ws_sub_raw, add_raw as ws_add_raw, select as ws_select, zero_choice as ws_zero_choice, add_mod as ws_add_mod, sub_mod as ws_sub_mod, from_be as ws_from_be, to_be as ws_to_be, mont_mul as ws_mont_mul, mont_sqr as ws_mont_sqr, to_mont as ws_to_mont, from_mont as ws_from_mont, mul_mod as ws_mul_mod, square_mod as ws_square_mod, is_on_curve as ws_is_on_curve, mul_small_mod as ws_mul_small_mod, jacobian_double_ct as ws_jacobian_double_ct, jacobian_infinity as ws_jacobian_infinity, select_jacobian_ct as ws_select_jacobian_ct, jacobian_add_affine_non_equal_ct as ws_jacobian_add_affine, pow_mod as ws_pow_mod, sqn as ws_sqn, inv_p as ws_inv_p, jacobian_to_affine as ws_jacobian_to_affine, scalar_mult as ws_scalar_mult, base_table_entry as ws_base_table_entry, scalar_mult_base as ws_scalar_mult_base, mod_inv_ct as ws_mod_inv_ct, reduce_mod as ws_reduce_mod, point_add as ws_point_add, rfc6979 as ws_rfc6979
+)
 
 comptime P256_SIZE = 32
 comptime P256_POINT_SIZE = 65
@@ -22,7 +24,7 @@ def _p() -> U256:
         0xFFFFFFFFFFFFFFFF,
         0x00000000FFFFFFFF,
         0x0000000000000000,
-        0xFFFFFFFF00000001,
+        0xFFFFFFFF00000001
     )
 
 
@@ -31,7 +33,7 @@ def _a() -> U256:
         0xFFFFFFFFFFFFFFFC,
         0x00000000FFFFFFFF,
         0x0000000000000000,
-        0xFFFFFFFF00000001,
+        0xFFFFFFFF00000001
     )
 
 
@@ -40,7 +42,7 @@ def _b() -> U256:
         0x3BCE3C3E27D2604B,
         0x651D06B0CC53B0F6,
         0xB3EBBD55769886BC,
-        0x5AC635D8AA3A93E7,
+        0x5AC635D8AA3A93E7
     )
 
 
@@ -49,7 +51,7 @@ def _n() -> U256:
         0xF3B9CAC2FC632551,
         0xBCE6FAADA7179E84,
         0xFFFFFFFFFFFFFFFF,
-        0xFFFFFFFF00000000,
+        0xFFFFFFFF00000000
     )
 
 
@@ -58,7 +60,7 @@ def _gx() -> U256:
         0xF4A13945D898C296,
         0x77037D812DEB33A0,
         0xF8BCE6E563A440F2,
-        0x6B17D1F2E12C4247,
+        0x6B17D1F2E12C4247
     )
 
 
@@ -67,7 +69,7 @@ def _gy() -> U256:
         0xCBB6406837BF51F5,
         0x2BCE33576B315ECE,
         0x8EE7EB4A7C0F9E16,
-        0x4FE342E2FE1A7F9B,
+        0x4FE342E2FE1A7F9B
     )
 
 
@@ -77,7 +79,7 @@ def _sqrt_exp() -> U256:
         0x0000000000000000,
         0x0000000040000000,
         0x4000000000000000,
-        0x3FFFFFFFC0000000,
+        0x3FFFFFFFC0000000
     )
 
 
@@ -87,7 +89,7 @@ def _rr() -> U256:
         0x0000000000000003,
         0xFFFFFFFBFFFFFFFF,
         0xFFFFFFFFFFFFFFFE,
-        0x00000004FFFFFFFD,
+        0x00000004FFFFFFFD
     )
 
 
@@ -97,7 +99,7 @@ def _one_mont() -> U256:
         0x0000000000000001,
         0xFFFFFFFF00000000,
         0xFFFFFFFFFFFFFFFF,
-        0x00000000FFFFFFFE,
+        0x00000000FFFFFFFE
     )
 
 
@@ -414,7 +416,7 @@ def p256_public_key(
 def p256_ecdh(
     private_key: Span[UInt8, ...],
     public_key: Span[UInt8, ...],
-    output: Span[mut=True, UInt8, ...],
+    output: Span[mut=True, UInt8, ...]
 ) -> Bool:
     if len(private_key) != 32 or len(output) < P256_SIZE:
         return False
@@ -445,7 +447,7 @@ def _n_rr() -> U256:
         0x83244C95BE79EEA2,
         0x4699799C49BD6FA6,
         0x2845B2392B6BEC59,
-        0x66E12D94F3D95620,
+        0x66E12D94F3D95620
     )
 
 
@@ -454,7 +456,7 @@ def _n_one_mont() -> U256:
         0x0C46353D039CDAAF,
         0x4319055258E8617B,
         0x0000000000000000,
-        0x00000000FFFFFFFF,
+        0x00000000FFFFFFFF
     )
 
 
@@ -463,7 +465,7 @@ def _n_minus_2() -> U256:
         0xF3B9CAC2FC63254F,
         0xBCE6FAADA7179E84,
         0xFFFFFFFFFFFFFFFF,
-        0xFFFFFFFF00000000,
+        0xFFFFFFFF00000000
     )
 
 
@@ -515,12 +517,10 @@ def _rfc6979_p256(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip:
 def p256_ecdsa_sign_digest(
     private_key: Span[UInt8, ...],
     digest: Span[UInt8, ...],
-    signature: Span[mut=True, UInt8, ...],
+    signature: Span[mut=True, UInt8, ...]
 ) -> Bool:
-    if (
-        len(private_key) != 32 or len(digest) != 32
-        or len(signature) < P256_SIGNATURE_SIZE
-    ):
+    if len(private_key) != 32 or len(digest) != 32
+        or len(signature) < P256_SIGNATURE_SIZE:
         return False
     var signature_ptr = signature.unsafe_ptr()
     var d = _from_be(private_key)
@@ -562,7 +562,7 @@ def p256_ecdsa_sign_digest(
 def p256_ecdsa_sign(
     private_key: Span[UInt8, ...],
     message: Span[UInt8, ...],
-    signature: Span[mut=True, UInt8, ...],
+    signature: Span[mut=True, UInt8, ...]
 ) -> Bool:
     if len(signature) < P256_SIGNATURE_SIZE:
         return False
@@ -584,7 +584,7 @@ def _p256_add_public(a: P256Point, b: P256Point) -> P256Point:
 def p256_ecdsa_verify_digest(
     public_key: Span[UInt8, ...],
     digest: Span[UInt8, ...],
-    signature: Span[UInt8, ...],
+    signature: Span[UInt8, ...]
 ) -> Bool:
     if len(digest) != 32 or len(signature) != 64:
         return False
@@ -608,7 +608,7 @@ def p256_ecdsa_verify_digest(
 def p256_ecdsa_verify(
     public_key: Span[UInt8, ...],
     message: Span[UInt8, ...],
-    signature: Span[UInt8, ...],
+    signature: Span[UInt8, ...]
 ) -> Bool:
     var digest = sha256_hash(message)
     return p256_ecdsa_verify_digest(public_key, Span[UInt8, ...](digest), signature)
@@ -628,7 +628,7 @@ def p256_ecdsa_sign_der(
 
 def p256_ecdsa_verify_der(
     public_key: Span[UInt8, ...], message: Span[UInt8, ...],
-    signature: Span[UInt8, ...],
+    signature: Span[UInt8, ...]
 ) -> Bool:
     from .ecdsa_der import ecdsa_der_decode
     var raw = ecdsa_der_decode(signature, P256_SIZE)
@@ -646,7 +646,7 @@ def p256_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
             var public_key = List[UInt8](unsafe_uninit_length=65)
             if p256_public_key(
                 Span[UInt8, ...](private_key),
-                Span[mut=True, UInt8, ...](public_key),
+                Span[mut=True, UInt8, ...](public_key)
             ):
                 _wipe_u256(d)
                 return (private_key^, public_key^)

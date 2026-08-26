@@ -1,3 +1,5 @@
+"""Provides bounded stack buffers and constant-time utility operations."""
+
 from std.bit import byte_swap
 from std.os import abort
 from std.memory import Pointer
@@ -18,13 +20,13 @@ struct StackInlineArray[ElementType: Copyable & Deinitable, size: Int](Copyable)
 
     @always_inline
     def __init__[
-        origin: MutOrigin,
+        origin: MutOrigin
     ](
         out self,
         *,
         var storage: VariadicList[
             elt_is_mutable=True, origin=origin, Self.ElementType, is_owned=True
-        ],
+        ]
     ):
         if len(storage) != Self.size:
             abort("StackInlineArray storage length must match its size")
@@ -99,7 +101,9 @@ struct StackBuffer[T: Copyable & Deinitable & Defaultable, N: Int](Movable):
 
     @always_inline
     def __init__(out self):
-        comptime assert Self.T.__del__is_trivial, "StackBuffer requires trivially destructible types (UInt8, UInt32, UInt64, etc)"
+        comptime assert (
+            Self.T.__del__is_trivial
+        ), "StackBuffer requires trivially destructible types (UInt8, UInt32, UInt64, etc)"
         self._data = InlineArray[Self.T, Self.N](fill=Self.T())
         self._len = 0
 
@@ -266,10 +270,8 @@ def nibble_to_hex_char(nibble: UInt8) -> UInt8:
 
 @always_inline
 def bytes_to_hex_simd(data: Pointer[mut=False, UInt8, _, address_space=_], len: Int) -> String:
-    debug_assert[assert_mode="safe"](
-        0 <= len <= Int.MAX // 2,
-        "Hex input length cannot be negative or overflow the output size",
-    )
+    if len < 0 or len > Int.MAX // 2:
+        abort("Hex input length cannot be negative or overflow the output size")
     var result = String(capacity=len * 2)
     for i in range(len):
         var b = data[unsafe_offset=i]

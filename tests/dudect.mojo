@@ -25,6 +25,7 @@ comptime N_ASYM = 2_000
 comptime BATCH = 16
 comptime T_THRESHOLD = 4.5
 
+
 struct Rng:
     var s: UInt64
 
@@ -148,6 +149,8 @@ def _classes(n: Int, mut rng: Rng) -> List[Int]:
     return cls^
 
 # This is intentionally leaked
+
+
 @no_inline
 def _leaky(secret: UInt64) -> UInt64:
     var acc = secret
@@ -219,7 +222,7 @@ def run_kcipher2(mut rng: Rng) raises -> Bool:
     for i in range(len(cls)):
         var key = SIMD[DType.uint32, 4](
             UInt32(keys[2 * i] & 0xFFFFFFFF), UInt32(keys[2 * i] >> 32),
-            UInt32(keys[2 * i + 1] & 0xFFFFFFFF), UInt32(keys[2 * i + 1] >> 32),
+            UInt32(keys[2 * i + 1] & 0xFFFFFFFF), UInt32(keys[2 * i + 1] >> 32)
         )
         var t0 = perf_counter_ns()
         for _ in range(8):
@@ -403,7 +406,7 @@ def run_x25519(mut rng: Rng) raises -> Bool:
         x25519(
             Span[UInt8, ...](sc),
             Span[UInt8, ...](base),
-            Span[mut=True, UInt8, ...](out),
+            Span[mut=True, UInt8, ...](out)
         )
         times.append(Float64(perf_counter_ns() - t0))
         sink ^= out[0]
@@ -434,7 +437,7 @@ def run_ed25519(mut rng: Rng) raises -> Bool:
         var t0 = perf_counter_ns()
         ed25519_sign(
             Span[UInt8, ...](sk), Span[UInt8, ...](msg),
-            Span[mut=True, UInt8, ...](sig),
+            Span[mut=True, UInt8, ...](sig)
         )
         times.append(Float64(perf_counter_ns() - t0))
         sink ^= sig[0]
@@ -495,7 +498,7 @@ def run_p256_sign(mut rng: Rng) -> Bool:
         var ok = p256_ecdsa_sign(
             Span[UInt8, ...](private_key),
             Span[UInt8, ...](message),
-            Span[mut=True, UInt8, ...](signature),
+            Span[mut=True, UInt8, ...](signature)
         )
         times.append(Float64(perf_counter_ns() - t0))
         sink ^= signature[0] ^ (UInt8(1) if ok else UInt8(0))
@@ -516,7 +519,7 @@ def run_p384_sign(mut rng: Rng) -> Bool:
         var ok = p384_ecdsa_sign(
             Span[UInt8, ...](private_key),
             Span[UInt8, ...](message),
-            Span[mut=True, UInt8, ...](signature),
+            Span[mut=True, UInt8, ...](signature)
         )
         times.append(Float64(perf_counter_ns() - t0))
         sink ^= signature[0] ^ (UInt8(1) if ok else UInt8(0))
@@ -557,7 +560,7 @@ def run_mlkem_decaps(mut rng: Rng) raises -> Bool:
 def main() raises:
     print(
         "dudect harness: fast", N_FAST, "batch", BATCH, "| asym", N_ASYM,
-        "| |t| threshold", T_THRESHOLD,
+        "| |t| threshold", T_THRESHOLD
     )
     print("")
     var rng = Rng(0x1234567890ABCDEF)

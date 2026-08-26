@@ -9,7 +9,7 @@ from .aes_ni import (
     _aesmc,
     _mm_aesenc_si128,
     has_arm_crypto,
-    has_x86_aes_ni,
+    has_x86_aes_ni
 )
 
 comptime AMUL_BASIS_0 = SIMD[DType.uint32, 4](
@@ -36,6 +36,7 @@ comptime AMUL_BASIS_6 = SIMD[DType.uint32, 4](
 comptime AMUL_BASIS_7 = SIMD[DType.uint32, 4](
     0x4B8AF89E, 0xF85E6A49, 0x59036A01, 0x9C20FEDD
 )
+
 
 @always_inline
 def _amul4(b: SIMD[DType.uint32, 4]) -> SIMD[DType.uint32, 4]:
@@ -206,6 +207,8 @@ def _sbox_planes(mut p: InlineArray[UInt32, 8]):
 
 
 # idx[4*c + r] = 4*((c - r) mod 4) + r.
+
+
 @always_inline
 def sub_k2_x4(
     w0: UInt32, w1: UInt32, w2: UInt32, w3: UInt32
@@ -284,7 +287,7 @@ def _sub_k2_x4_bitsliced(
         UInt32(olo & 0xFFFFFFFF),
         UInt32(olo >> 32),
         UInt32(ohi & 0xFFFFFFFF),
-        UInt32(ohi >> 32),
+        UInt32(ohi >> 32)
     )
 
 
@@ -384,20 +387,16 @@ struct KCipher2:
         ik[2] = key[2]
         ik[3] = key[3]
 
-        ik[4] = (
-            ik[0]
+        ik[4] = ik[0]
             ^ sub_k2(((ik[3] << 8) & 0xFFFFFFFF) ^ (ik[3] >> 24))
             ^ 0x01000000
-        )
         ik[5] = ik[1] ^ ik[4]
         ik[6] = ik[2] ^ ik[5]
         ik[7] = ik[3] ^ ik[6]
 
-        ik[8] = (
-            ik[4]
+        ik[8] = ik[4]
             ^ sub_k2(((ik[7] << 8) & 0xFFFFFFFF) ^ (ik[7] >> 24))
             ^ 0x02000000
-        )
         ik[9] = ik[5] ^ ik[8]
         ik[10] = ik[6] ^ ik[9]
         ik[11] = ik[7] ^ ik[10]
@@ -474,13 +473,11 @@ struct KCipher2:
         var temp2_amul3 = ((self.b8 << 8) & 0xFFFFFF00) ^ am[3]
         var temp2 = self._select_u32(self.b8, temp2_amul3, (old_a2 >> 31) & 1)
 
-        var new_b10 = (
-            temp1
+        var new_b10 = temp1
             ^ self.b1
             ^ self.b6
             ^ temp2
             ^ nlf(self.b10, self.l2, self.l1, old_a0)
-        )
 
         self.b0 = self.b1
         self.b1 = self.b2
@@ -611,7 +608,7 @@ struct KCipher2:
                 UInt8(z >> 32),
                 UInt8(z >> 40),
                 UInt8(z >> 48),
-                UInt8(z >> 56),
+                UInt8(z >> 56)
             )
 
             for j in range(len_data - offset):

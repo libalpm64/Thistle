@@ -1,7 +1,4 @@
-"""
-SHA-2 (SHA-256/SHA-512) Implementation in Mojo
-RFC 6234 / FIPS 180-4 / CAVP validated
-"""
+"""Implements SHA-224, SHA-256, SHA-384, and SHA-512."""
 
 from std.collections import List
 from std.memory import Pointer, unsafe_memcpy, unsafe_memset_zero
@@ -10,6 +7,7 @@ from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
 from std.sys import CompilationTarget
 from std.utils import StaticTuple
+from std.os import abort
 from .sha_ni import sha512ni_transform_blocks, sha256ni_transform_blocks
 from .utils import bytes_to_hex, string_to_bytes, load_32be, load_64be
 
@@ -26,7 +24,7 @@ comptime SHA256_K = SIMD[DType.uint32, 64](
     0xD6990624, 0xF40E3585, 0x106AA070, 0x19A4C116, 0x1E376C08,
     0x2748774C, 0x34B0BCB5, 0x391C0CB3, 0x4ED8AA4A, 0x5B9CCA4F,
     0x682E6FF3, 0x748F82EE, 0x78A5636F, 0x84C87814, 0x8CC70208,
-    0x90BEFFFA, 0xA4506CEB, 0xBEF9A3F7, 0xC67178F2,
+    0x90BEFFFA, 0xA4506CEB, 0xBEF9A3F7, 0xC67178F2
 )
 
 comptime SHA512_K = StaticTuple[UInt64, 80](
@@ -45,8 +43,9 @@ comptime SHA512_K = StaticTuple[UInt64, 80](
     0x90BEFFFA23631E28, 0xA4506CEBDE82BDE9, 0xBEF9A3F7B2C67915, 0xC67178F2E372532B, 0xCA273ECEEA26619C,
     0xD186B8C721C0C207, 0xEADA7DD6CDE0EB1E, 0xF57D4F7FEE6ED178, 0x06F067AA72176FBA, 0x0A637DC5A2C898A6,
     0x113F9804BEF90DAE, 0x1B710B35131C471B, 0x28DB77F523047D84, 0x32CAAB7B40C72493, 0x3C9EBE0A15C9BEBC,
-    0x431D67C49C100D4C, 0x4CC5D4BECB3E42B6, 0x597F299CFC657E2A, 0x5FCB6FAB3AD6FAEC, 0x6C44198C4A475817,
+    0x431D67C49C100D4C, 0x4CC5D4BECB3E42B6, 0x597F299CFC657E2A, 0x5FCB6FAB3AD6FAEC, 0x6C44198C4A475817
 )
+
 
 @always_inline
 def ch32(x: UInt32, y: UInt32, z: UInt32) -> UInt32:
@@ -116,7 +115,7 @@ comptime SHA256_IV = SIMD[DType.uint32, 8](
     0x510E527F,
     0x9B05688C,
     0x1F83D9AB,
-    0x5BE0CD19,
+    0x5BE0CD19
 )
 
 comptime SHA224_IV = SIMD[DType.uint32, 8](
@@ -127,7 +126,7 @@ comptime SHA224_IV = SIMD[DType.uint32, 8](
     0xFFC00B31,
     0x68581511,
     0x64F98FA7,
-    0xBEFA4FA4,
+    0xBEFA4FA4
 )
 
 comptime SHA512_IV = SIMD[DType.uint64, 8](
@@ -138,7 +137,7 @@ comptime SHA512_IV = SIMD[DType.uint64, 8](
     0x510E527FADE682D1,
     0x9B05688C2B3E6C1F,
     0x1F83D9ABFB41BD6B,
-    0x5BE0CD19137E2179,
+    0x5BE0CD19137E2179
 )
 
 comptime SHA384_IV = SIMD[DType.uint64, 8](
@@ -149,8 +148,9 @@ comptime SHA384_IV = SIMD[DType.uint64, 8](
     0x67332667FFC00B31,
     0x8EB44A8768581511,
     0xDB0C2E0D64F98FA7,
-    0x47B5481DBEFA4FA4,
+    0x47B5481DBEFA4FA4
 )
+
 
 struct SHA256Context(Movable):
     var state: SIMD[DType.uint32, 8]
@@ -198,11 +198,12 @@ struct SHA256Context(Movable):
         unsafe_memset_zero(self.buffer.unsafe_ptr(), 64)
         self.buffer_len = 0
 
+
 @always_inline
 def sha256_transform_blocks(
     mut state: SIMD[DType.uint32, 8],
     data: Pointer[mut=False, UInt8, _, address_space=_],
-    nblocks: Int,
+    nblocks: Int
 ):
     comptime if (CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86()) or (CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]()):
         sha256ni_transform_blocks(state, data, nblocks)
@@ -326,6 +327,7 @@ def sha256_final(mut ctx: SHA256Context) -> List[UInt8]:
     sha256_final_to_buffer(ctx, output.unsafe_ptr())
     return output^
 
+
 def sha256_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     var ctx = SHA256Context()
     sha256_update(ctx, data)
@@ -372,6 +374,7 @@ def sha256_final_to_buffer(mut ctx: SHA256Context, output: Pointer[mut=True, UIn
     _sha256_pad(ctx, bitlen)
     for i in range(8):
         (output.unsafe_offset(i * 4)).unsafe_bitcast[UInt32]().unsafe_store[alignment=1](byte_swap(ctx.state[i]))
+
 
 struct SHA512Context(Movable):
     var state: SIMD[DType.uint64, 8]
@@ -444,7 +447,7 @@ struct SHA512Context(Movable):
 def sha512_transform_blocks(
     mut state: SIMD[DType.uint64, 8],
     data: Pointer[mut=False, UInt8, _, address_space=_],
-    nblocks: Int,
+    nblocks: Int
 ):
     comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["sha3"]() and not CompilationTarget.is_x86():
         sha512ni_transform_blocks(state, data, nblocks)
@@ -578,6 +581,7 @@ def sha512_final(mut ctx: SHA512Context) -> List[UInt8]:
     sha512_final_to_buffer(ctx, output.unsafe_ptr())
     return output^
 
+
 def sha512_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     var ctx = SHA512Context(SHA512_IV)
     sha512_update(ctx, data)
@@ -630,7 +634,10 @@ def sha512_final_to_buffer(mut ctx: SHA512Context, output: Pointer[mut=True, UIn
     for i in range(8):
         (output.unsafe_offset(i * 8)).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](byte_swap(ctx.state[i]))
 
+
 def sha256_final_with_len(mut ctx: SHA256Context, output_len: Int) -> List[UInt8]:
+    if output_len < 0 or output_len > 32:
+        abort("SHA-256 output length must be between 0 and 32 bytes")
     var bit_count = ctx.count + UInt64(ctx.buffer_len) * 8
     _sha256_pad(ctx, bit_count)
     return _sha256_output(ctx, output_len)
@@ -657,6 +664,10 @@ def padding_bit(n: Int) -> UInt8:
 def sha256_final_partial(
     mut ctx: SHA256Context, final_octet: UInt8, final_bit_count: Int, output_len: Int
 ) -> List[UInt8]:
+    if final_bit_count < 0 or final_bit_count > 7:
+        abort("SHA-256 final bit count must be between 0 and 7")
+    if output_len < 0 or output_len > 32:
+        abort("SHA-256 output length must be between 0 and 32 bytes")
     var bit_count = ctx.count + UInt64(ctx.buffer_len) * 8 + UInt64(final_bit_count)
     var pad = (final_octet & high_bits_mask(final_bit_count)) | padding_bit(final_bit_count)
     _sha256_pad_byte(ctx, pad, bit_count)
@@ -664,9 +675,14 @@ def sha256_final_partial(
 
 
 def sha224_hash_bits(data: Span[UInt8, ...], bit_len: Int) -> List[UInt8]:
+    if bit_len < 0:
+        abort("SHA-224 bit length cannot be negative")
+    var available_bytes = len(data)
     var ctx = SHA256Context(SHA224_IV)
     var full_bytes = bit_len // 8
     var rem_bits = bit_len % 8
+    if full_bytes > available_bytes or (full_bytes == available_bytes and rem_bits != 0):
+        abort("SHA-224 bit length exceeds input")
     if full_bytes > 0:
         sha256_update(ctx, data[0:full_bytes])
     if rem_bits == 0:
@@ -675,9 +691,14 @@ def sha224_hash_bits(data: Span[UInt8, ...], bit_len: Int) -> List[UInt8]:
 
 
 def sha256_hash_bits(data: Span[UInt8, ...], bit_len: Int) -> List[UInt8]:
+    if bit_len < 0:
+        abort("SHA-256 bit length cannot be negative")
+    var available_bytes = len(data)
     var ctx = SHA256Context()
     var full_bytes = bit_len // 8
     var rem_bits = bit_len % 8
+    if full_bytes > available_bytes or (full_bytes == available_bytes and rem_bits != 0):
+        abort("SHA-256 bit length exceeds input")
     if full_bytes > 0:
         sha256_update(ctx, data[0:full_bytes])
     if rem_bits == 0:
@@ -686,6 +707,8 @@ def sha256_hash_bits(data: Span[UInt8, ...], bit_len: Int) -> List[UInt8]:
 
 
 def sha512_final_with_len(mut ctx: SHA512Context, output_len: Int) -> List[UInt8]:
+    if output_len < 0 or output_len > 64:
+        abort("SHA-512 output length must be between 0 and 64 bytes")
     var low = ctx.count_low + UInt64(ctx.buffer_len) * 8
     var high = ctx.count_high
     if low < ctx.count_low:
@@ -703,6 +726,10 @@ def sha384_hash(data: Span[UInt8, ...]) -> List[UInt8]:
 def sha512_final_partial(
     mut ctx: SHA512Context, final_octet: UInt8, final_bit_count: Int, output_len: Int
 ) -> List[UInt8]:
+    if final_bit_count < 0 or final_bit_count > 7:
+        abort("SHA-512 final bit count must be between 0 and 7")
+    if output_len < 0 or output_len > 64:
+        abort("SHA-512 output length must be between 0 and 64 bytes")
     var low = ctx.count_low + UInt64(ctx.buffer_len) * 8 + UInt64(final_bit_count)
     var high = ctx.count_high
     if low < ctx.count_low:
@@ -713,9 +740,14 @@ def sha512_final_partial(
 
 
 def sha384_hash_bits(data: Span[UInt8, ...], bit_len: Int) -> List[UInt8]:
+    if bit_len < 0:
+        abort("SHA-384 bit length cannot be negative")
+    var available_bytes = len(data)
     var ctx = SHA512Context(SHA384_IV)
     var full_bytes = bit_len // 8
     var rem_bits = bit_len % 8
+    if full_bytes > available_bytes or (full_bytes == available_bytes and rem_bits != 0):
+        abort("SHA-384 bit length exceeds input")
     if full_bytes > 0:
         sha512_update(ctx, data[0:full_bytes])
     if rem_bits == 0:
@@ -724,14 +756,20 @@ def sha384_hash_bits(data: Span[UInt8, ...], bit_len: Int) -> List[UInt8]:
 
 
 def sha512_hash_bits(data: Span[UInt8, ...], bit_len: Int) -> List[UInt8]:
+    if bit_len < 0:
+        abort("SHA-512 bit length cannot be negative")
+    var available_bytes = len(data)
     var ctx = SHA512Context(SHA512_IV)
     var full_bytes = bit_len // 8
     var rem_bits = bit_len % 8
+    if full_bytes > available_bytes or (full_bytes == available_bytes and rem_bits != 0):
+        abort("SHA-512 bit length exceeds input")
     if full_bytes > 0:
         sha512_update(ctx, data[0:full_bytes])
     if rem_bits == 0:
         return sha512_final(ctx)
     return sha512_final_partial(ctx, data[full_bytes], rem_bits, 64)
+
 
 def sha256_hash_string(s: String) -> String:
     var data = string_to_bytes(s)

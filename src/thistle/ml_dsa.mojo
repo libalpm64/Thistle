@@ -13,7 +13,10 @@ data, zeroize sensitive temporaries with volatile stores when practical.
 from std.collections import List
 from std.builtin.globals import global_constant
 from std.memory import unsafe_memset_zero
-from thistle.sha3 import SHA3Context, sha3_update, shake_final, shake128, shake256
+from std.os import abort
+from thistle.sha3 import (
+    SHA3Context, sha3_update, shake_final, shake128, shake256
+)
 from thistle.random import random_bytes
 from thistle.utils import StackBuffer, zero_stack_u8
 
@@ -75,7 +78,7 @@ comptime ZETAS_TABLE: InlineArray[UInt32, 256] = [
     5341501, 3523897, 3866901, 269760, 2213111, 7404533, 1717735, 472078,
     7953734, 1723600, 6577327, 1910376, 6712985, 7276084, 8119771, 4546524,
     5441381, 6144432, 7959518, 6094090, 183443, 7403526, 1612842, 4834730,
-    7826001, 3919660, 8332111, 7018208, 3937738, 1400424, 7534263, 1976782,
+    7826001, 3919660, 8332111, 7018208, 3937738, 1400424, 7534263, 1976782
 ]
 
 
@@ -166,19 +169,114 @@ def params87() -> MLDSAParams:
     return MLDSAParams(8, 7, 2, 19, 32, 256, 60, 75)
 
 
+@always_inline
+def _valid_params(p: MLDSAParams) -> Bool:
+    return (
+        (
+            p.k == 4
+            and p.l == 4
+            and p.eta == 2
+            and p.gamma1_log == 17
+            and p.gamma2_denom == 88
+            and p.lambda_bits == 128
+            and p.tau == 39
+            and p.omega == 80
+        )
+        or (
+            p.k == 6
+            and p.l == 5
+            and p.eta == 4
+            and p.gamma1_log == 19
+            and p.gamma2_denom == 32
+            and p.lambda_bits == 192
+            and p.tau == 49
+            and p.omega == 55
+        )
+        or (
+            p.k == 8
+            and p.l == 7
+            and p.eta == 2
+            and p.gamma1_log == 19
+            and p.gamma2_denom == 32
+            and p.lambda_bits == 256
+            and p.tau == 60
+            and p.omega == 75
+        )
+    )
+
+
+@always_inline
+def _same_params(a: MLDSAParams, b: MLDSAParams) -> Bool:
+    return (
+        a.k == b.k
+        and a.l == b.l
+        and a.eta == b.eta
+        and a.gamma1_log == b.gamma1_log
+        and a.gamma2_denom == b.gamma2_denom
+        and a.lambda_bits == b.lambda_bits
+        and a.tau == b.tau
+        and a.omega == b.omega
+    )
+
+
+def _require_valid_params(p: MLDSAParams) raises:
+    if not _valid_params(p):
+        raise Error("unsupported ML-DSA parameter set")
+
+
 def public_key_size(p: MLDSAParams) -> Int:
+    if not _valid_params(p):
+        return 0
     return 32 + p.k * N * 10 // 8
 
 
 def signature_size(p: MLDSAParams) -> Int:
+    if not _valid_params(p):
+        return 0
     return p.lambda_bits // 4 + p.l * N * (p.gamma1_log + 1) // 8 + p.omega + p.k
 
 
 def private_key_size(p: MLDSAParams) -> Int:
+    if not _valid_params(p):
+        return 0
     var eta_bitlen = 3
     if p.eta == 4:
         eta_bitlen = 4
     return 32 + 32 + 64 + p.l * N * eta_bitlen // 8 + p.k * N * eta_bitlen // 8 + p.k * N * 13 // 8
+
+
+def _u32_rows_valid(rows: List[List[UInt32]], expected: Int) -> Bool:
+    if len(rows) != expected:
+        return False
+    for i in range(expected):
+        if len(rows[i]) != N:
+            return False
+    return True
+
+
+def _public_key_shape_valid(pub: MLDSAPublicKey) -> Bool:
+    var p = pub.p.copy()
+    return (
+        _valid_params(p)
+        and len(pub.raw) == public_key_size(p)
+        and len(pub.tr) == MLDSA_CRHBYTES
+        and _u32_rows_valid(pub.a, p.k * p.l)
+        and _u32_rows_valid(pub.t1_hat, p.k)
+    )
+
+
+def _private_key_shape_valid(priv: MLDSAPrivateKey) -> Bool:
+    var p = priv.p.copy()
+    return (
+        _valid_params(p)
+        and _same_params(p, priv.pub.p)
+        and _public_key_shape_valid(priv.pub)
+        and (len(priv.seed) == 0 or len(priv.seed) == MLDSA_SEEDBYTES)
+        and len(priv.k_seed) == MLDSA_SEEDBYTES
+        and _u32_rows_valid(priv.s1, p.l)
+        and _u32_rows_valid(priv.s2, p.k)
+        and _u32_rows_valid(priv.t0, p.k)
+    )
 
 
 def _zero_poly() -> List[UInt32]:
@@ -243,6 +341,8 @@ def _append_bytes(mut out: List[UInt8], src: Span[UInt8, ...]):
 
 
 def _append_bytes_stack(mut out: StackBuffer[UInt8, ...], src: Span[UInt8, ...]):
+    if len(src) > out.remaining():
+        abort("ML-DSA stack buffer overflow")
     for i in range(len(src)):
         out.push_unchecked(src[i])
 
@@ -252,6 +352,8 @@ def _ct_bool_to_u32(b: Bool) -> UInt32:
     return UInt32(Int(b))
 
 # volatile stores so the wipe can't be optimized away
+
+
 def _zero_list_u8(mut data: List[UInt8]):
     var ptr = data.unsafe_ptr()
     for i in range(len(data)):
@@ -408,7 +510,7 @@ def _ntt_mul_into(mut r: List[UInt32], a: List[UInt32], b: List[UInt32]):
 def _ntt_mul_ptrs(
     r: Pointer[mut=True, UInt32, _, address_space=_],
     a: Pointer[mut=False, UInt32, _, address_space=_],
-    b: Pointer[mut=False, UInt32, _, address_space=_],
+    b: Pointer[mut=False, UInt32, _, address_space=_]
 ):
     var i = 0
     while i < N:
@@ -521,7 +623,7 @@ def _dsa_inverse_ntt_inplace(mut f: DSAPoly):
                         j + length,
                         _montgomery_reduce_v(
                             zv * (b - a + _U32v(Q)).cast[DType.uint64]()
-                        ),
+                        )
                     )
                     j += _VW
             else:
@@ -817,6 +919,7 @@ def _pk_encode(rho: Span[UInt8, ...], t1: List[List[UInt16]], p: MLDSAParams) ->
 
 
 def _pk_decode(pk: Span[UInt8, ...], p: MLDSAParams) raises -> Tuple[List[UInt8], List[List[UInt16]]]:
+    _require_valid_params(p)
     if len(pk) != public_key_size(p):
         raise Error("ML-DSA invalid public key length")
     var rho = _slice_bytes(pk, 0, 32)
@@ -862,6 +965,7 @@ def _compute_t1_hat(t1: List[List[UInt16]], p: MLDSAParams) raises -> List[List[
 
 
 def new_public_key(pk: Span[UInt8, ...], p: MLDSAParams) raises -> MLDSAPublicKey:
+    _require_valid_params(p)
     var decoded = _pk_decode(pk, p)
     var rho = decoded[0].copy()
     var t1 = decoded[1].copy()
@@ -1029,7 +1133,8 @@ def _dsa_append_w1_encoded_stack(mut out: StackBuffer[UInt8, ...], w: DSAPoly, p
             out.push_unchecked((b2 >> 4) | (b3 << 2))
 
 
-def _append_use_hint_encoded_stack(mut out: StackBuffer[UInt8, ...], w: List[UInt32], h: List[UInt8], p: MLDSAParams):
+def _append_use_hint_encoded_stack(mut out: StackBuffer[UInt8, ...], w: List[UInt32], h: List[UInt8], p: MLDSAParams
+):
     if p.gamma2_denom == 32:
         for i in range(0, N, 2):
             var b0 = _use_hint_elem(w[i], h[i], p)
@@ -1086,7 +1191,8 @@ def _hint_decode(y: Span[UInt8, ...], p: MLDSAParams) raises -> List[List[UInt8]
     return h^
 
 
-def _dsa_sig_encode(ch: InlineArray[UInt8, MLDSA_CRHBYTES], z: DSAPolyVec[MAX_L], h: DSAHintVec, p: MLDSAParams) -> List[UInt8]:
+def _dsa_sig_encode(ch: InlineArray[UInt8, MLDSA_CRHBYTES], z: DSAPolyVec[MAX_L], h: DSAHintVec, p: MLDSAParams
+) -> List[UInt8]:
     var sig = List[UInt8](capacity=signature_size(p))
     for i in range(p.lambda_bits // 4):
         sig.append(ch[i])
@@ -1097,6 +1203,7 @@ def _dsa_sig_encode(ch: InlineArray[UInt8, MLDSA_CRHBYTES], z: DSAPolyVec[MAX_L]
 
 
 def _sig_decode(sig: Span[UInt8, ...], p: MLDSAParams) raises -> Tuple[List[UInt8], List[List[UInt32]], List[List[UInt8]]]:
+    _require_valid_params(p)
     if len(sig) != signature_size(p):
         raise Error("ML-DSA invalid signature length")
     var ch_len = p.lambda_bits // 4
@@ -1134,6 +1241,7 @@ def mldsa_public_key_from_seed(seed: Span[UInt8, ...], p: MLDSAParams) raises ->
 
 
 def mldsa_private_key_from_seed(seed: Span[UInt8, ...], p: MLDSAParams) raises -> MLDSAPrivateKey:
+    _require_valid_params(p)
     if len(seed) != 32:
         raise Error("ML-DSA invalid seed length")
     var xi = StackBuffer[UInt8, 34]()
@@ -1189,6 +1297,7 @@ def mldsa_private_key_from_seed(seed: Span[UInt8, ...], p: MLDSAParams) raises -
 
 
 def mldsa_private_key_from_semiexpanded(sk: Span[UInt8, ...], p: MLDSAParams) raises -> MLDSAPrivateKey:
+    _require_valid_params(p)
     if len(sk) != private_key_size(p):
         raise Error("ML-DSA invalid semi-expanded private key length")
     var rho = _slice_bytes(sk, 0, 32)
@@ -1211,7 +1320,8 @@ def mldsa_private_key_from_semiexpanded(sk: Span[UInt8, ...], p: MLDSAParams) ra
     var t0_plain = List[List[UInt32]](capacity=p.k)
     for _ in range(p.k):
         var length = N * 13 // 8
-        t0_plain.append(_bit_unpack_slow(sk.unsafe_subspan(offset=off, length=length), (1 << 12) - 1, 1 << 12))
+        t0_plain.append(_bit_unpack_slow(sk.unsafe_subspan(offset=off, length=length), (1 << 12) - 1, 1 << 12
+            ))
         off += length
 
     var a = _compute_matrix_a(Span[UInt8, ...](rho), p)
@@ -1272,6 +1382,8 @@ def mldsa_private_key_from_semiexpanded(sk: Span[UInt8, ...], p: MLDSAParams) ra
 
 
 def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: Span[UInt8, ...]) raises -> List[UInt8]:
+    if not _private_key_shape_valid(priv):
+        raise Error("invalid ML-DSA private key structure")
     if len(mu) != 64 or len(random) != 32:
         raise Error("ML-DSA invalid sign input")
     var p = priv.p.copy()
@@ -1438,15 +1550,19 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
         return sig^
 
 
-def mldsa_sign(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Span[UInt8, ...], random: Span[UInt8, ...]) raises -> List[UInt8]:
+def mldsa_sign(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Span[UInt8, ...], random: Span[UInt8, ...]
+) raises -> List[UInt8]:
+    if not _private_key_shape_valid(priv):
+        raise Error("invalid ML-DSA private key structure")
     var mu = _compute_message_hash(Span[UInt8, ...](priv.pub.tr), msg, context)
-    var sig = mldsa_sign_external_mu(priv, Span[UInt8, ...](mu), random)
-    _zero_list_u8(mu)
-    return sig^
+    try:
+        return mldsa_sign_external_mu(priv, Span[UInt8, ...](mu), random)
+    finally:
+        _zero_list_u8(mu)
 
 
 def mldsa_verify_external_mu(pub: MLDSAPublicKey, mu: Span[UInt8, ...], sig: Span[UInt8, ...]) raises -> Bool:
-    if len(mu) != 64:
+    if not _public_key_shape_valid(pub) or len(mu) != 64:
         return False
     var p = pub.p.copy()
     var beta = p.tau * p.eta
@@ -1497,11 +1613,16 @@ def mldsa_verify_external_mu(pub: MLDSAPublicKey, mu: Span[UInt8, ...], sig: Spa
     _zero_list_u8(computed)
     return ok
 
-def mldsa_verify(pub: MLDSAPublicKey, msg: Span[UInt8, ...], sig: Span[UInt8, ...], context: Span[UInt8, ...]) raises -> Bool:
+
+def mldsa_verify(pub: MLDSAPublicKey, msg: Span[UInt8, ...], sig: Span[UInt8, ...], context: Span[UInt8, ...]
+) raises -> Bool:
+    if not _public_key_shape_valid(pub):
+        return False
     var mu = _compute_message_hash(Span[UInt8, ...](pub.tr), msg, context)
-    var ok = mldsa_verify_external_mu(pub, Span[UInt8, ...](mu), sig)
-    _zero_list_u8(mu)
-    return ok
+    try:
+        return mldsa_verify_external_mu(pub, Span[UInt8, ...](mu), sig)
+    finally:
+        _zero_list_u8(mu)
 
 
 def mldsa44_public_key(pk: Span[UInt8, ...]) raises -> MLDSAPublicKey:
@@ -1549,10 +1670,12 @@ def _zero_random32() -> List[UInt8]:
 
 def mldsa_keygen(p: MLDSAParams) raises -> MLDSAPrivateKey:
     # FIPS 204 external KeyGen: generate fresh 32-byte xi, then run KeyGen_internal.
+    _require_valid_params(p)
     var xi = random_bytes(MLDSA_SEEDBYTES)
-    var sk = mldsa_private_key_from_seed(Span[UInt8, ...](xi), p)
-    _zero_list_u8(xi)
-    return sk^
+    try:
+        return mldsa_private_key_from_seed(Span[UInt8, ...](xi), p)
+    finally:
+        _zero_list_u8(xi)
 
 
 def mldsa44_keygen() raises -> MLDSAPrivateKey:
@@ -1570,28 +1693,32 @@ def mldsa87_keygen() raises -> MLDSAPrivateKey:
 def mldsa_sign_hedged(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Span[UInt8, ...]) raises -> List[UInt8]:
     # FIPS 204 default signing variant: fresh 32-byte rnd.
     var rnd = random_bytes(MLDSA_RNDBYTES)
-    var sig = mldsa_sign(priv, msg, context, Span[UInt8, ...](rnd))
-    _zero_list_u8(rnd)
-    return sig^
+    try:
+        return mldsa_sign(priv, msg, context, Span[UInt8, ...](rnd))
+    finally:
+        _zero_list_u8(rnd)
 
 
 def mldsa_sign_deterministic(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Span[UInt8, ...]) raises -> List[UInt8]:
     # FIPS 204 optional deterministic variant: rnd = {0}^32.
     var rnd = _zero_random32()
-    var sig = mldsa_sign(priv, msg, context, Span[UInt8, ...](rnd))
-    _zero_list_u8(rnd)
-    return sig^
+    try:
+        return mldsa_sign(priv, msg, context, Span[UInt8, ...](rnd))
+    finally:
+        _zero_list_u8(rnd)
 
 
 def mldsa_sign_external_mu_hedged(priv: MLDSAPrivateKey, mu: Span[UInt8, ...]) raises -> List[UInt8]:
     var rnd = random_bytes(MLDSA_RNDBYTES)
-    var sig = mldsa_sign_external_mu(priv, mu, Span[UInt8, ...](rnd))
-    _zero_list_u8(rnd)
-    return sig^
+    try:
+        return mldsa_sign_external_mu(priv, mu, Span[UInt8, ...](rnd))
+    finally:
+        _zero_list_u8(rnd)
 
 
 def mldsa_sign_external_mu_deterministic(priv: MLDSAPrivateKey, mu: Span[UInt8, ...]) raises -> List[UInt8]:
     var rnd = _zero_random32()
-    var sig = mldsa_sign_external_mu(priv, mu, Span[UInt8, ...](rnd))
-    _zero_list_u8(rnd)
-    return sig^
+    try:
+        return mldsa_sign_external_mu(priv, mu, Span[UInt8, ...](rnd))
+    finally:
+        _zero_list_u8(rnd)

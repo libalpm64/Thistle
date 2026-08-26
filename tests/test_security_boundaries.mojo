@@ -5,13 +5,13 @@ from thistle.argon2 import variable_length_hash_into
 from thistle.blake2b import Blake2b
 from thistle.chacha20poly1305 import (
     chacha20_poly1305_encrypt,
-    hchacha20,
+    hchacha20
 )
 from thistle.chacha20 import ChaCha20
 from thistle.ed25519 import (
     Ed25519SigningKey,
     ed25519_generate_public_key,
-    ed25519_sign,
+    ed25519_sign
 )
 from thistle.p256 import p256_ecdsa_sign, p256_public_key
 from thistle.p384 import p384_ecdsa_sign, p384_public_key
@@ -21,7 +21,7 @@ from thistle.pbkdf2 import (
     PBKDF2SHA256,
     PBKDF2SHA512,
     pbkdf2_hmac_sha256,
-    pbkdf2_hmac_sha512,
+    pbkdf2_hmac_sha512
 )
 from thistle.poly1305 import Poly1305
 from thistle.x25519 import x25519, x25519_checked
@@ -45,7 +45,7 @@ def main() raises:
         variable_length_hash_into(
             5,
             Span[UInt8, ...](empty),
-            Span[mut=True, UInt8, ...](argon_output),
+            Span[mut=True, UInt8, ...](argon_output)
         )
     except:
         rejected = True
@@ -83,7 +83,7 @@ def main() raises:
         x25519(
             Span[UInt8, ...](key32),
             Span[UInt8, ...](point32),
-            Span[mut=True, UInt8, ...](output31),
+            Span[mut=True, UInt8, ...](output31)
         )
     except:
         rejected = True
@@ -97,7 +97,7 @@ def main() raises:
         x25519_checked(
             Span[UInt8, ...](key32),
             Span[UInt8, ...](zero_point),
-            Span[mut=True, UInt8, ...](x25519_output),
+            Span[mut=True, UInt8, ...](x25519_output)
         )
     except:
         rejected = True
@@ -110,7 +110,7 @@ def main() raises:
         hchacha20(
             Span[UInt8, ...](key32),
             Span[UInt8, ...](input16),
-            Span[mut=True, UInt8, ...](output31),
+            Span[mut=True, UInt8, ...](output31)
         )
     except:
         rejected = True
@@ -179,7 +179,7 @@ def main() raises:
     try:
         ed25519_generate_public_key(
             Span[UInt8, ...](ed_private),
-            Span[mut=True, UInt8, ...](ed_public_short),
+            Span[mut=True, UInt8, ...](ed_public_short)
         )
     except:
         rejected = True
@@ -192,7 +192,7 @@ def main() raises:
         ed25519_sign(
             Span[UInt8, ...](ed_private),
             Span[UInt8, ...](empty),
-            Span[mut=True, UInt8, ...](ed_signature_short),
+            Span[mut=True, UInt8, ...](ed_signature_short)
         )
     except:
         rejected = True
@@ -208,7 +208,7 @@ def main() raises:
     try:
         ed_key.sign(
             Span[UInt8, ...](empty),
-            Span[mut=True, UInt8, ...](ed_signature_short),
+            Span[mut=True, UInt8, ...](ed_signature_short)
         )
     except:
         rejected = True
@@ -222,7 +222,7 @@ def main() raises:
             Span[UInt8, ...](empty),
             Span[UInt8, ...](empty_salt),
             1,
-            PBKDF2_SHA256_MAX_DKLEN + 1,
+            PBKDF2_SHA256_MAX_DKLEN + 1
         )
     except:
         rejected = True
@@ -235,7 +235,7 @@ def main() raises:
             Span[UInt8, ...](empty),
             Span[UInt8, ...](empty_salt),
             1,
-            PBKDF2_SHA512_MAX_DKLEN + 1,
+            PBKDF2_SHA512_MAX_DKLEN + 1
         )
     except:
         rejected = True
@@ -272,7 +272,7 @@ def main() raises:
             Span[UInt8, ...](empty),
             Span[UInt8, ...](plaintext),
             Span[mut=True, UInt8, ...](ciphertext),
-            Span[mut=True, UInt8, ...](tag),
+            Span[mut=True, UInt8, ...](tag)
         )
     except:
         rejected = True
@@ -287,12 +287,12 @@ def main() raises:
     var p384_output = List[UInt8](length=96, fill=0)
     if p256_public_key(
         Span[UInt8, ...](p256_private),
-        Span[mut=True, UInt8, ...](p256_output),
+        Span[mut=True, UInt8, ...](p256_output)
     ):
         raise Error("P-256 public-key API accepted an undersized destination")
     if p384_public_key(
         Span[UInt8, ...](p384_private),
-        Span[mut=True, UInt8, ...](p384_output),
+        Span[mut=True, UInt8, ...](p384_output)
     ):
         raise Error("P-384 public-key API accepted an undersized destination")
 
@@ -301,13 +301,13 @@ def main() raises:
     if p256_ecdsa_sign(
         Span[UInt8, ...](p256_private),
         Span[UInt8, ...](plaintext),
-        Span[mut=True, UInt8, ...](short_signature),
+        Span[mut=True, UInt8, ...](short_signature)
     ):
         raise Error("P-256 signing accepted an undersized destination")
     if p384_ecdsa_sign(
         Span[UInt8, ...](p384_private),
         Span[UInt8, ...](plaintext),
-        Span[mut=True, UInt8, ...](short_signature384),
+        Span[mut=True, UInt8, ...](short_signature384)
     ):
         raise Error("P-384 signing accepted an undersized destination")
 
