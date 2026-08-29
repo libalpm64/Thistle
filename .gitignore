@@ -13,3 +13,4 @@ build/
 kgen.trace.*
 tests/.DS_Store
 .DS_Store
+/stdlib

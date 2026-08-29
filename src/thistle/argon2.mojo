@@ -1,15 +1,14 @@
-"""
-Argon2id/Argon2d Implementation in Mojo
-RFC 9106
-"""
+"""Implements Argon2id and Argon2d as specified by RFC 9106."""
 
 from std.collections import List
 from std.memory import Layout, Pointer, alloc, unsafe_memcpy, unsafe_memset_zero
 from max.algorithm import parallelize
 from std.bit import rotate_bits_left
 from .blake2b import Blake2b
+from .utils import StackBuffer
 
 comptime MASK32 = 0xFFFFFFFF
+
 
 @always_inline
 def zero_buffer(ptr: Pointer[mut=True, UInt8, _, address_space=_], len: Int):
@@ -23,6 +22,7 @@ def zero_buffer(ptr: Pointer[mut=True, UInt8, _, address_space=_], len: Int):
         ptr.unsafe_store[volatile=True](i, UInt8(0))
         i += 1
 
+
 @always_inline
 def zero_buffer_u64(ptr: Pointer[mut=True, UInt64, _, address_space=_], len: Int):
     var i = 0
@@ -35,19 +35,23 @@ def zero_buffer_u64(ptr: Pointer[mut=True, UInt64, _, address_space=_], len: Int
         ptr.unsafe_store[volatile=True](i, UInt64(0))
         i += 1
 
+
 @always_inline
 def zero_and_free(ptr: Pointer[mut=True, UInt8, _, address_space=_], len: Int):
     zero_buffer(ptr, len)
     ptr.unsafe_free()
+
 
 @always_inline
 def zero_and_free_u64(ptr: Pointer[mut=True, UInt64, _, address_space=_], len: Int):
     zero_buffer_u64(ptr, len)
     ptr.unsafe_free()
 
+
 @always_inline
 def f_bla_mka(x: UInt64, y: UInt64) -> UInt64:
     return x + y + (((x & MASK32) * (y & MASK32)) << UInt64(1))
+
 
 @always_inline
 def gb(a: UInt64, b: UInt64, c: UInt64, d: UInt64) -> Tuple[UInt64, UInt64, UInt64, UInt64]:
@@ -60,6 +64,7 @@ def gb(a: UInt64, b: UInt64, c: UInt64, d: UInt64) -> Tuple[UInt64, UInt64, UInt
     c_new = f_bla_mka(c_new, d_new)
     b_new = rotate_bits_left[shift=1](b_new ^ c_new)
     return (a_new, b_new, c_new, d_new)
+
 
 @always_inline
 def _p_column(base: Int, v: Pointer[mut=True, UInt64, _, address_space=_]):
@@ -84,6 +89,7 @@ def _p_column(base: Int, v: Pointer[mut=True, UInt64, _, address_space=_]):
     v[unsafe_offset=base + 11] = v11
     v[unsafe_offset=base + 15] = v15
 
+
 @always_inline
 def _p_diagonal(base: Int, v: Pointer[mut=True, UInt64, _, address_space=_]):
     var v0, v5, v10, v15 = gb(v[unsafe_offset=base + 0], v[unsafe_offset=base + 5], v[unsafe_offset=base + 10], v[unsafe_offset=base + 15])
@@ -107,6 +113,7 @@ def _p_diagonal(base: Int, v: Pointer[mut=True, UInt64, _, address_space=_]):
     v[unsafe_offset=base + 9] = v9
     v[unsafe_offset=base + 14] = v14
 
+
 struct MemoryPool:
     var block_buffer: Pointer[UInt64, MutUntrackedOrigin]
     var temp_buffer: Pointer[UInt64, MutUntrackedOrigin]
@@ -129,13 +136,14 @@ struct MemoryPool:
     def get_temp(self) -> Pointer[UInt64, MutUntrackedOrigin]:
         return self.temp_buffer
 
+
 @always_inline
 def compression_g_with_pool(
     out_ptr: Pointer[mut=True, UInt64, _, address_space=_],
     x_ptr: Pointer[mut=False, UInt64, _, address_space=_],
     y_ptr: Pointer[mut=False, UInt64, _, address_space=_],
     with_xor: Bool,
-    pool: MemoryPool,
+    pool: MemoryPool
 ):
     var block = pool.get_block()
     var block_xy = pool.get_temp()
@@ -201,6 +209,7 @@ def compression_g_with_pool(
     for i in range(128):
         out_ptr[unsafe_offset=i] = block[unsafe_offset=i] ^ block_xy[unsafe_offset=i]
 
+
 @always_inline
 def store_le32(ptr: Pointer[mut=True, UInt8, _, address_space=_], offset: Int, val: Int):
     ptr[unsafe_offset=offset + 0] = UInt8(val & 0xFF)
@@ -216,8 +225,8 @@ def variable_length_hash_into(
         raise Error("Argon2 variable-length hash output must not be empty")
     if t_len > len(output):
         raise Error("Argon2 variable-length hash output exceeds destination")
-    if t_len > Int.MAX - 31:
-        raise Error("Argon2 variable-length hash output is too large")
+    if t_len >= (1 << 32):
+        raise Error("Argon2 variable-length hash output must fit in 32 bits")
 
     var out_ptr = output.unsafe_ptr()
 
@@ -273,15 +282,18 @@ def variable_length_hash_into(
         zero_and_free(v_buf, 64)
         zero_and_free(le_buf, 4)
 
+
 def variable_length_hash(t_len: Int, input: Span[UInt8, ...]) raises -> List[UInt8]:
     if t_len < 1:
         raise Error("Argon2 variable-length hash output must not be empty")
+    if t_len >= (1 << 32):
+        raise Error("Argon2 variable-length hash output must fit in 32 bits")
     var out_buf = alloc(Layout[UInt8](count=t_len)).unsafe_leak()
     try:
         variable_length_hash_into(
             t_len,
             input,
-            Span[mut=True, UInt8, ...](unsafe_ptr=out_buf, length=t_len),
+            Span[mut=True, UInt8, ...](unsafe_ptr=out_buf, length=t_len)
         )
         var result = List[UInt8](capacity=t_len)
         for i in range(t_len):
@@ -289,6 +301,7 @@ def variable_length_hash(t_len: Int, input: Span[UInt8, ...]) raises -> List[UIn
         return result^
     finally:
         zero_and_free(out_buf, t_len)
+
 
 @always_inline
 def _argon2_process_lane(
@@ -303,7 +316,7 @@ def _argon2_process_lane(
     m_prime_blocks: Int,
     iterations: Int,
     type_code: Int,
-    parallelism: Int,
+    parallelism: Int
 ):
     var addressing_block = alloc(Layout[UInt64](count=128)).unsafe_leak()
     var z_u64 = alloc(Layout[UInt64](count=128)).unsafe_leak()
@@ -364,11 +377,9 @@ def _argon2_process_lane(
                 window_size = slice_idx * segment_length
         else:
             if ref_lane == lane:
-                window_size = (
-                    q
+                window_size = q
                     - segment_length
                     + (index % segment_length)
-                )
             else:
                 window_size = q - segment_length
 
@@ -400,7 +411,7 @@ def _argon2_process_lane(
             p_ptr.unsafe_origin_cast[MutAnyOrigin](),
             r_ptr.unsafe_origin_cast[MutAnyOrigin](),
             t > 0,
-            pool,
+            pool
         )
 
     zero_and_free_u64(addressing_block, 128)
@@ -408,7 +419,9 @@ def _argon2_process_lane(
     zero_and_free_u64(zero_u64, 128)
     zero_and_free_u64(tmp_addr, 128)
 
-def _validate_params(parallelism: Int, tag_length: Int, memory_size_kb: Int, iterations: Int, version: Int) raises:
+
+def _validate_params(parallelism: Int, tag_length: Int, memory_size_kb: Int, iterations: Int, version: Int
+) raises:
     # RFC 9106 section 3 parameter bounds
     if parallelism < 1 or parallelism >= (1 << 24):
         raise Error("Argon2 parallelism must be in [1, 2^24)")
@@ -445,7 +458,7 @@ struct Argon2id:
         tag_length: Int = 32,
         memory_size_kb: Int = 65536,
         iterations: Int = 3,
-        version: Int = 0x13,
+        version: Int = 0x13
     ) raises:
         _validate_params(parallelism, tag_length, memory_size_kb, iterations, version)
         self.parallelism = parallelism
@@ -469,7 +482,7 @@ struct Argon2id:
         tag_length: Int = 32,
         memory_size_kb: Int = 65536,
         iterations: Int = 3,
-        version: Int = 0x13,
+        version: Int = 0x13
     ) raises:
         _validate_params(parallelism, tag_length, memory_size_kb, iterations, version)
         self.parallelism = parallelism
@@ -489,117 +502,156 @@ struct Argon2id:
             self.ad.append(ad[i])
 
     def hash(self, password: Span[UInt8, ...]) raises -> List[UInt8]:
-        var h0_ctx = Blake2b(64)
-        var le_buf = alloc(Layout[UInt8](count=4)).unsafe_leak()
-        store_le32(le_buf, 0, self.parallelism)
-        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
-        store_le32(le_buf, 0, self.tag_length)
-        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
-        store_le32(le_buf, 0, self.memory_size_kb)
-        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
-        store_le32(le_buf, 0, self.iterations)
-        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
-        store_le32(le_buf, 0, self.version)
-        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
-        store_le32(le_buf, 0, self.type_code)
-        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
-        store_le32(le_buf, 0, len(password))
-        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
-        h0_ctx.update(password)
-        store_le32(le_buf, 0, len(self.salt))
-        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
-        h0_ctx.update(Span[UInt8, ...](self.salt))
-        store_le32(le_buf, 0, len(self.secret))
-        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
-        h0_ctx.update(Span[UInt8, ...](self.secret))
-        store_le32(le_buf, 0, len(self.ad))
-        h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
-        h0_ctx.update(Span[UInt8, ...](self.ad))
-        zero_and_free(le_buf, 4)
+        if (
+            len(password) >= (1 << 32)
+            or len(self.salt) >= (1 << 32)
+            or len(self.secret) >= (1 << 32)
+            or len(self.ad) >= (1 << 32)
+        ):
+            raise Error("Argon2 input lengths must fit in 32 bits")
 
-        var h0_buf = alloc(Layout[UInt8](count=64)).unsafe_leak()
-        h0_ctx.finalize_into(
-            Span[mut=True, UInt8, ...](unsafe_ptr=h0_buf, length=64)
-        )
+        # These buffers contain password-derived state. Keeping them on the
+        # stack avoids per-block heap churn, and the outer finally guarantees
+        # cleanup on every raised path.
+        var le_buf = StackBuffer[UInt8, 4](fill=0)
+        var h0_buf = StackBuffer[UInt8, 64](fill=0)
+        var h0_input = StackBuffer[UInt8, 72](fill=0)
+        var b_bytes = StackBuffer[UInt8, 1024](fill=0)
+        var c_block = StackBuffer[UInt64, 128](fill=0)
+        var c_bytes = StackBuffer[UInt8, 1024](fill=0)
+        try:
+            var h0_ctx = Blake2b(64)
+            store_le32(le_buf.ptr(), 0, self.parallelism)
+            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
+            store_le32(le_buf.ptr(), 0, self.tag_length)
+            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
+            store_le32(le_buf.ptr(), 0, self.memory_size_kb)
+            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
+            store_le32(le_buf.ptr(), 0, self.iterations)
+            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
+            store_le32(le_buf.ptr(), 0, self.version)
+            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
+            store_le32(le_buf.ptr(), 0, self.type_code)
+            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
+            store_le32(le_buf.ptr(), 0, len(password))
+            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
+            h0_ctx.update(password)
+            store_le32(le_buf.ptr(), 0, len(self.salt))
+            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
+            h0_ctx.update(Span[UInt8, ...](self.salt))
+            store_le32(le_buf.ptr(), 0, len(self.secret))
+            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
+            h0_ctx.update(Span[UInt8, ...](self.secret))
+            store_le32(le_buf.ptr(), 0, len(self.ad))
+            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
+            h0_ctx.update(Span[UInt8, ...](self.ad))
+            h0_ctx.finalize_into(
+                Span[mut=True, UInt8, ...](unsafe_ptr=h0_buf.ptr(), length=64)
+            )
 
-        var m_blocks = self.memory_size_kb
-        var m_prime_blocks = (
-            4 * self.parallelism * (m_blocks // (4 * self.parallelism))
-        )
-        if m_prime_blocks < 8 * self.parallelism:
-            m_prime_blocks = 8 * self.parallelism
-        var q = m_prime_blocks // self.parallelism
-        var segment_length = q // 4
+            var m_blocks = self.memory_size_kb
+            var m_prime_blocks = (
+                4 * self.parallelism * (m_blocks // (4 * self.parallelism))
+            )
+            if m_prime_blocks < 8 * self.parallelism:
+                m_prime_blocks = 8 * self.parallelism
+            var q = m_prime_blocks // self.parallelism
+            var segment_length = q // 4
 
-        var memory = alloc(Layout[UInt64](count=m_prime_blocks * 128)).unsafe_leak()
+            var memory = alloc(Layout[UInt64](count=m_prime_blocks * 128)).unsafe_leak()
+            try:
+                unsafe_memcpy(dest=h0_input.ptr(), src=h0_buf.ptr(), count=64)
+                for i in range(self.parallelism):
+                    for block_idx in range(2):
+                        store_le32(h0_input.ptr(), 64, block_idx)
+                        store_le32(h0_input.ptr(), 68, i)
+                        variable_length_hash_into(
+                            1024,
+                            Span[UInt8, ...](unsafe_ptr=h0_input.ptr(), length=72),
+                            Span[mut=True, UInt8, ...](
+                                unsafe_ptr=b_bytes.ptr(), length=1024
+                            ),
+                        )
+                        for k in range(128):
+                            var word = (
+                                b_bytes.ptr()
+                                .unsafe_offset(k * 8)
+                                .unsafe_bitcast[UInt64]()
+                                .unsafe_load[width=1, alignment=1]()
+                            )
+                            memory[
+                                unsafe_offset=i * q * 128 + block_idx * 128 + k
+                            ] = word
+                        zero_buffer(b_bytes.ptr(), 1024)
 
-        var h0_input = alloc(Layout[UInt8](count=72)).unsafe_leak()
-        unsafe_memcpy(dest=h0_input, src=h0_buf, count=64)
-        zero_and_free(h0_buf, 64)
+                var iterations = self.iterations
+                var type_code = self.type_code
+                var parallelism = self.parallelism
 
-        for i in range(self.parallelism):
-            for block_idx in range(2):
-                store_le32(h0_input, 64, block_idx)
-                store_le32(h0_input, 68, i)
-                
-                var b_bytes = alloc(Layout[UInt8](count=1024)).unsafe_leak()
-                variable_length_hash_into(
-                    1024,
-                    Span[UInt8, ...](unsafe_ptr=h0_input, length=72),
-                    Span[mut=True, UInt8, ...](
-                        unsafe_ptr=b_bytes, length=1024
-                    ),
-                )
-                
+                for t in range(iterations):
+                    for slice_idx in range(4):
+                        var seg_start = slice_idx * segment_length
+                        var seg_end = (slice_idx + 1) * segment_length
+
+                        @always_inline
+                        @__copy_capture(
+                            memory,
+                            seg_start,
+                            seg_end,
+                            segment_length,
+                            q,
+                            m_prime_blocks,
+                            t,
+                            slice_idx,
+                            iterations,
+                            type_code,
+                            parallelism,
+                        )
+                        @parameter
+                        def process_lane(lane: Int):
+                            _argon2_process_lane(
+                                memory,
+                                lane,
+                                t,
+                                slice_idx,
+                                seg_start,
+                                seg_end,
+                                segment_length,
+                                q,
+                                m_prime_blocks,
+                                iterations,
+                                type_code,
+                                parallelism,
+                            )
+
+                        parallelize[process_lane](parallelism)
+
+                zero_buffer_u64(c_block.ptr(), 128)
+                for i in range(self.parallelism):
+                    var last_ptr = memory.unsafe_offset(i * q * 128 + (q - 1) * 128)
+                    for k in range(128):
+                        c_block.ptr()[unsafe_offset=k] ^= last_ptr[unsafe_offset=k]
+
                 for k in range(128):
-                    var word = (b_bytes.unsafe_offset(k * 8)).unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]()
-                    memory[unsafe_offset=i * q * 128 + block_idx * 128 + k] = word
-                zero_and_free(b_bytes, 1024)
-
-        zero_and_free(h0_input, 72)
-
-        var iterations = self.iterations
-        var type_code = self.type_code
-        var parallelism = self.parallelism
-
-        for t in range(iterations):
-            for slice_idx in range(4):
-                var seg_start = slice_idx * segment_length
-                var seg_end = (slice_idx + 1) * segment_length
-
-                @always_inline
-                @__copy_capture(
-                    memory, seg_start, seg_end, segment_length,
-                    q, m_prime_blocks, t, slice_idx, iterations,
-                    type_code, parallelism,
+                    (
+                        c_bytes.ptr().unsafe_offset(k * 8)
+                    ).unsafe_bitcast[UInt64]().unsafe_store[
+                        alignment=1
+                    ](0, c_block.ptr()[unsafe_offset=k])
+                return variable_length_hash(
+                    self.tag_length,
+                    Span[UInt8, ...](unsafe_ptr=c_bytes.ptr(), length=1024),
                 )
-                @parameter
-                def process_lane(lane: Int):
-                    _argon2_process_lane(
-                        memory, lane, t, slice_idx, seg_start, seg_end,
-                        segment_length, q, m_prime_blocks, iterations,
-                        type_code, parallelism,
-                    )
+            finally:
+                zero_and_free_u64(memory, m_prime_blocks * 128)
+        finally:
+            zero_buffer(le_buf.ptr(), 4)
+            zero_buffer(h0_buf.ptr(), 64)
+            zero_buffer(h0_input.ptr(), 72)
+            zero_buffer(b_bytes.ptr(), 1024)
+            zero_buffer_u64(c_block.ptr(), 128)
+            zero_buffer(c_bytes.ptr(), 1024)
 
-                parallelize[process_lane](parallelism)
-
-        var c_block = alloc(Layout[UInt64](count=128)).unsafe_leak()
-        zero_buffer_u64(c_block, 128)
-        for i in range(self.parallelism):
-            var last_ptr = memory.unsafe_offset((i * q * 128 + (q - 1) * 128))
-            for k in range(128):
-                c_block[unsafe_offset=k] ^= last_ptr[unsafe_offset=k]
-
-        var c_bytes = alloc(Layout[UInt8](count=1024)).unsafe_leak()
-        for k in range(128):
-            (c_bytes.unsafe_offset(k * 8)).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](c_block[unsafe_offset=k])
-
-        zero_and_free_u64(c_block, 128)
-        zero_and_free_u64(memory, m_prime_blocks * 128)
-        
-        var result = variable_length_hash(self.tag_length, Span[UInt8, ...](unsafe_ptr=c_bytes, length=1024))
-        zero_and_free(c_bytes, 1024)
-        return result^
 
 def argon2id_hash_string(password: String, salt: String) raises -> String:
     var p_bytes = password.as_bytes()

@@ -1,6 +1,4 @@
-"""
-BLAKE3 cryptographic hash function
-"""
+"""Implements the BLAKE3 cryptographic hash function."""
 
 from max.algorithm import parallelize
 from std.collections import List
@@ -17,7 +15,7 @@ comptime IV = SIMD[DType.uint32, 8](
     0x510E527F,
     0x9B05688C,
     0x1F83D9AB,
-    0x5BE0CD19,
+    0x5BE0CD19
 )
 """The BLAKE3 initial chaining value."""
 
@@ -31,6 +29,7 @@ comptime ROOT = UInt8(1 << 3)
 """Flag indicating the root node of the hash tree."""
 comptime CHUNK_LEN = 1024
 """The length of a BLAKE3 chunk in bytes."""
+
 
 @always_inline
 def bit_rotr[n: Int, w: Int](v: SIMD[DType.uint32, w]) -> SIMD[DType.uint32, w]:
@@ -46,7 +45,7 @@ def g_v_half1[
     mut b: SIMD[DType.uint32, w],
     mut c: SIMD[DType.uint32, w],
     mut d: SIMD[DType.uint32, w],
-    x: SIMD[DType.uint32, w],
+    x: SIMD[DType.uint32, w]
 ):
     a = a + b + x
     d = bit_rotr[16, w](d ^ a)
@@ -62,12 +61,13 @@ def g_v_half2[
     mut b: SIMD[DType.uint32, w],
     mut c: SIMD[DType.uint32, w],
     mut d: SIMD[DType.uint32, w],
-    y: SIMD[DType.uint32, w],
+    y: SIMD[DType.uint32, w]
 ):
     a = a + b + y
     d = bit_rotr[8, w](d ^ a)
     c = c + d
     b = bit_rotr[7, w](b ^ c)
+
 
 @always_inline
 def g_v[
@@ -78,7 +78,7 @@ def g_v[
     mut c: SIMD[DType.uint32, w],
     mut d: SIMD[DType.uint32, w],
     x: SIMD[DType.uint32, w],
-    y: SIMD[DType.uint32, w],
+    y: SIMD[DType.uint32, w]
 ):
     g_v_half1[w](a, b, c, d, x)
     g_v_half2[w](a, b, c, d, y)
@@ -90,7 +90,7 @@ def g_idx[
 ](
     mut v: StackInlineArray[SIMD[DType.uint32, w], 16],
     x: SIMD[DType.uint32, w],
-    y: SIMD[DType.uint32, w],
+    y: SIMD[DType.uint32, w]
 ):
     # copy in/out so we never hold two mut refs into the same array
     var a = v[ai]
@@ -103,6 +103,8 @@ def g_idx[
     v[ci] = c
     v[di] = d
 
+
+# fmt: off
 @always_inline
 def compress_internal[
     w: Int
@@ -112,19 +114,17 @@ def compress_internal[
     counter: UInt64,
     blen: UInt8,
     flags: UInt8,
-    out_ptr: Pointer[mut=True, SIMD[DType.uint32, w], _, address_space=_],
+    out_ptr: Pointer[mut=True, SIMD[DType.uint32, w], _, address_space=_]
 ):
     """BLAKE3 compression: 7 rounds of G with message permutation."""
-    # fmt: off
     var v: StackInlineArray[SIMD[DType.uint32, w], 16] = [
         cv[0], cv[1], cv[2], cv[3], cv[4], cv[5], cv[6], cv[7],
         UInt32(0x6A09E667), UInt32(0xBB67AE85), UInt32(0x3C6EF372), UInt32(0xA54FF53A),
         UInt32(counter & 0xFFFFFFFF),
         UInt32(counter >> 32),
         UInt32(blen),
-        UInt32(flags),
+        UInt32(flags)
     ]
-    # fmt: on
 
     @parameter
     @always_inline
@@ -141,12 +141,10 @@ def compress_internal[
     @parameter
     @always_inline
     def transform():
-        # fmt: off
         m = [
             m[2], m[6], m[3], m[10], m[7], m[0], m[4], m[13],
-            m[1], m[11], m[12], m[5], m[9], m[14], m[15], m[8],        
+            m[1], m[11], m[12], m[5], m[9], m[14], m[15], m[8]
         ]
-        # fmt: on
 
     round()
     comptime for _ in range(6):
@@ -157,23 +155,22 @@ def compress_internal[
         v.unsafe_ptr().unsafe_bitcast[UInt32]().unsafe_load[width=w * 16]()
     )
 
+
 @always_inline
 def compress_core(
     cv: SIMD[DType.uint32, 8],
     block: SIMD[DType.uint32, 16],
     counter: UInt64,
     blen: UInt8,
-    flags: UInt8,
+    flags: UInt8
 ) -> SIMD[DType.uint32, 16]:
     """Single-block compression returning 16-word output."""
-    # fmt: off
     var m: StackInlineArray[UInt32, 16] = [
         block[0], block[1], block[2], block[3],
         block[4], block[5], block[6], block[7],
         block[8], block[9], block[10], block[11],
-        block[12], block[13], block[14], block[15],
+        block[12], block[13], block[14], block[15]
     ]
-    # fmt: on
 
     var res = StackInlineArray[SIMD[DType.uint32, 1], 16](
         fill=SIMD[DType.uint32, 1](0)
@@ -186,6 +183,7 @@ def compress_core(
         final[i + 8] = res[i + 8][0] ^ cv[i]
     return final
 
+
 @always_inline
 def compress_internal_16way(
     c: StackInlineArray[SIMD[DType.uint32, 16], 8],
@@ -193,23 +191,21 @@ def compress_internal_16way(
     base_counter: UInt64,
     blen: UInt8,
     flags: UInt8,
-    out_ptr: Pointer[mut=True, SIMD[DType.uint32, 16], _, address_space=_],
+    out_ptr: Pointer[mut=True, SIMD[DType.uint32, 16], _, address_space=_]
 ):
     """16-way SIMD compression with per-lane sequential counters."""
     var counters_low = SIMD[DType.uint32, 16](
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
     )
     counters_low += UInt32(base_counter & 0xFFFFFFFF)
-    # fmt: off
     var v: StackInlineArray[SIMD[DType.uint32, 16], 16] = [
         c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7],
         UInt32(0x6A09E667), UInt32(0xBB67AE85), UInt32(0x3C6EF372), UInt32(0xA54FF53A),
         counters_low,
         UInt32(base_counter >> 32),
         UInt32(blen),
-        UInt32(flags),
+        UInt32(flags)
     ]
-    # fmt: on
 
     @parameter
     @always_inline
@@ -226,12 +222,10 @@ def compress_internal_16way(
     @parameter
     @always_inline
     def transform():
-        # fmt: off
         m = [
             m[2], m[6], m[3], m[10], m[7], m[0], m[4], m[13],
-            m[1], m[11], m[12], m[5], m[9], m[14], m[15], m[8],        
+            m[1], m[11], m[12], m[5], m[9], m[14], m[15], m[8]
         ]
-        # fmt: on
 
     round()
     comptime for _ in range(6):
@@ -247,6 +241,7 @@ def compress_internal_16way(
     out_ptr[unsafe_offset=6] = v[6] ^ v[14]
     out_ptr[unsafe_offset=7] = v[7] ^ v[15]
 
+# fmt: on
 struct Hasher:
     var key: SIMD[DType.uint32, 8]
     var original_key: SIMD[DType.uint32, 8]
@@ -304,7 +299,7 @@ struct Hasher:
                             self.chunk_counter,
                             64,
                             (CHUNK_START if self.blocks_compressed == 0 else UInt8(0))
-                            | CHUNK_END,
+                            | CHUNK_END
                         )
                         var chunk_cv = res.slice[8]()
                         self.add_chunk_cv(chunk_cv, self.chunk_counter)
@@ -321,7 +316,7 @@ struct Hasher:
                         blk,
                         self.chunk_counter,
                         64,
-                        (CHUNK_START if self.blocks_compressed == 0 else UInt8(0)),
+                        (CHUNK_START if self.blocks_compressed == 0 else UInt8(0))
                     )
                     self.key = res.slice[8]()
                     self.blocks_compressed += 1
@@ -383,7 +378,9 @@ struct Hasher:
         for i in range(self.buf_len):
             temp_buf.unsafe_set(i, self.buf[i])
 
-        var blk = temp_buf.unsafe_ptr().unsafe_bitcast[UInt32]().unsafe_load[width=16, alignment=1]()
+        var blk = (
+            temp_buf.unsafe_ptr().unsafe_bitcast[UInt32]().unsafe_load[width=16, alignment=1]()
+        )
 
         var flags = (
             CHUNK_START if self.blocks_compressed == 0 else UInt8(0)
@@ -439,8 +436,12 @@ struct Hasher:
 
 @always_inline
 def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> List[UInt8]:
+    if out_len < 0:
+        raise Error("BLAKE3 output length must be non-negative")
     var d = input
-    var total_chunks = (len(d) + CHUNK_LEN - 1) // CHUNK_LEN
+    var total_chunks = len(d) // CHUNK_LEN
+    if len(d) % CHUNK_LEN != 0:
+        total_chunks += 1
 
     if len(d) <= 65536:
         var h = Hasher()
@@ -468,7 +469,7 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
             # fmt: off
             var c: StackInlineArray[SIMD[DType.uint32, 16], 8] = [
                 UInt32(0x6A09E667), UInt32(0xBB67AE85), UInt32(0x3C6EF372), UInt32(0xA54FF53A),
-                UInt32(0x510E527F), UInt32(0x9B05688C), UInt32(0x1F83D9AB), UInt32(0x5BE0CD19),
+                UInt32(0x510E527F), UInt32(0x9B05688C), UInt32(0x1F83D9AB), UInt32(0x5BE0CD19)
             ]
             # fmt: on
 
@@ -547,7 +548,7 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
                     ma[12].join(mb[12]),
                     ma[13].join(mb[13]),
                     ma[14].join(mb[14]),
-                    ma[15].join(mb[15]),
+                    ma[15].join(mb[15])
                 ]
 
                 var res = StackInlineArray[SIMD[DType.uint32, 16], 8](
@@ -559,7 +560,7 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
                     UInt64(base),
                     64,
                     flags,
-                    res.unsafe_ptr(),
+                    res.unsafe_ptr()
                 )
                 c[0] = res[0]
                 c[1] = res[1]
@@ -597,6 +598,7 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
 
     h.update(d[num_full_batches * 64 * 1024 :])
     return h.finalize(out_len)
+
 
 def blake3_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> List[UInt8]:
     return blake3_parallel_hash(input, out_len)

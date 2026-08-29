@@ -6,7 +6,7 @@ from thistle.p256 import (
     p256_ecdsa_sign_der,
     p256_ecdsa_verify_der,
     p256_keygen,
-    p256_public_key,
+    p256_public_key
 )
 from thistle.p384 import (
     p384_ecdsa_sign,
@@ -14,7 +14,7 @@ from thistle.p384 import (
     p384_ecdsa_sign_der,
     p384_ecdsa_verify_der,
     p384_keygen,
-    p384_public_key,
+    p384_public_key
 )
 from thistle.x25519 import x25519_keygen, x25519_public_key
 from thistle.pbkdf2 import hmac_sha384
@@ -28,8 +28,9 @@ from thistle.rsa import (
     SHA224,
     SHA256,
     SHA384,
-    SHA512,
+    SHA512
 )
+
 
 def hex_bytes(s: String) -> List[UInt8]:
     var out = List[UInt8]()
@@ -102,7 +103,7 @@ def test_p256() raises:
     if not p256_ecdsa_sign(
         Span[UInt8, ...](private_key),
         Span[UInt8, ...](message),
-        Span[mut=True, UInt8, ...](signature),
+        Span[mut=True, UInt8, ...](signature)
     ):
         raise Error("P-256 signing failed")
     if not equal(signature, expected):
@@ -110,14 +111,14 @@ def test_p256() raises:
     if not p256_ecdsa_verify(
         Span[UInt8, ...](public_key),
         Span[UInt8, ...](message),
-        Span[UInt8, ...](signature),
+        Span[UInt8, ...](signature)
     ):
         raise Error("P-256 verification failed")
     signature[0] ^= 1
     if p256_ecdsa_verify(
         Span[UInt8, ...](public_key),
         Span[UInt8, ...](message),
-        Span[UInt8, ...](signature),
+        Span[UInt8, ...](signature)
     ):
         raise Error("P-256 accepted a changed signature")
     var der = p256_ecdsa_sign_der(
@@ -126,7 +127,7 @@ def test_p256() raises:
     if not p256_ecdsa_verify_der(
         Span[UInt8, ...](public_key),
         Span[UInt8, ...](message),
-        Span[UInt8, ...](der),
+        Span[UInt8, ...](der)
     ):
         raise Error("P-256 DER signature failed")
 
@@ -158,7 +159,7 @@ def test_p384() raises:
     if not p384_ecdsa_sign(
         Span[UInt8, ...](private_key),
         Span[UInt8, ...](message),
-        Span[mut=True, UInt8, ...](signature),
+        Span[mut=True, UInt8, ...](signature)
     ):
         raise Error("P-384 signing failed")
     if not equal(signature, expected):
@@ -166,14 +167,14 @@ def test_p384() raises:
     if not p384_ecdsa_verify(
         Span[UInt8, ...](public_key),
         Span[UInt8, ...](message),
-        Span[UInt8, ...](signature),
+        Span[UInt8, ...](signature)
     ):
         raise Error("P-384 verification failed")
     signature[0] ^= 1
     if p384_ecdsa_verify(
         Span[UInt8, ...](public_key),
         Span[UInt8, ...](message),
-        Span[UInt8, ...](signature),
+        Span[UInt8, ...](signature)
     ):
         raise Error("P-384 accepted a changed signature")
     var der = p384_ecdsa_sign_der(
@@ -182,7 +183,7 @@ def test_p384() raises:
     if not p384_ecdsa_verify_der(
         Span[UInt8, ...](public_key),
         Span[UInt8, ...](message),
-        Span[UInt8, ...](der),
+        Span[UInt8, ...](der)
     ):
         raise Error("P-384 DER signature failed")
 
@@ -194,7 +195,7 @@ def test_keygen() raises:
     var p256_check = List[UInt8](unsafe_uninit_length=65)
     if not p256_public_key(
         Span[UInt8, ...](p256_private),
-        Span[mut=True, UInt8, ...](p256_check),
+        Span[mut=True, UInt8, ...](p256_check)
     ) or not equal(p256_public, p256_check):
         raise Error("P-256 key generation failed")
 
@@ -204,7 +205,7 @@ def test_keygen() raises:
     var p384_check = List[UInt8](unsafe_uninit_length=97)
     if not p384_public_key(
         Span[UInt8, ...](p384_private),
-        Span[mut=True, UInt8, ...](p384_check),
+        Span[mut=True, UInt8, ...](p384_check)
     ) or not equal(p384_public, p384_check):
         raise Error("P-384 key generation failed")
 
@@ -238,7 +239,7 @@ def test_rsa_pss_signing() raises:
         Span[UInt8, ...](salt),
         SHA256,
         SHA256,
-        Span[mut=True, UInt8, ...](short_rsa_signature),
+        Span[mut=True, UInt8, ...](short_rsa_signature)
     ):
         raise Error("RSA-PSS accepted an undersized signature destination")
     var sig = rsa_pss_sign_with_salt(
@@ -248,7 +249,7 @@ def test_rsa_pss_signing() raises:
         Span[UInt8, ...](msg),
         Span[UInt8, ...](salt),
         SHA256,
-        SHA256,
+        SHA256
     )
     if not rsa_pss_verify(
         Span[UInt8, ...](n),
@@ -257,7 +258,7 @@ def test_rsa_pss_signing() raises:
         Span[UInt8, ...](sig),
         SHA256,
         SHA256,
-        32,
+        32
     ):
         raise Error("verify")
     var p = hex_bytes(
@@ -282,14 +283,14 @@ def test_rsa_pss_signing() raises:
         Span[UInt8, ...](q),
         Span[UInt8, ...](dp),
         Span[UInt8, ...](dq),
-        Span[UInt8, ...](qi),
+        Span[UInt8, ...](qi)
     )
     if crt.pss_sign_with_salt(
         Span[UInt8, ...](msg),
         Span[UInt8, ...](salt),
         SHA256,
         SHA256,
-        Span[mut=True, UInt8, ...](short_rsa_signature),
+        Span[mut=True, UInt8, ...](short_rsa_signature)
     ):
         raise Error("RSA-PSS CRT accepted an undersized signature destination")
     var sig2 = List[UInt8](unsafe_uninit_length=256)
@@ -298,7 +299,7 @@ def test_rsa_pss_signing() raises:
         Span[UInt8, ...](salt),
         SHA256,
         SHA256,
-        Span[mut=True, UInt8, ...](sig2),
+        Span[mut=True, UInt8, ...](sig2)
     ):
         raise Error("crt sign")
     if not rsa_pss_verify(
@@ -308,7 +309,7 @@ def test_rsa_pss_signing() raises:
         Span[UInt8, ...](sig2),
         SHA256,
         SHA256,
-        32,
+        32
     ):
         raise Error("crt verify")
     if not equal(sig, sig2):
@@ -316,7 +317,7 @@ def test_rsa_pss_signing() raises:
     var full_key = RsaPrivateKey(
         Span[UInt8, ...](n),
         Span[UInt8, ...](e),
-        Span[UInt8, ...](d),
+        Span[UInt8, ...](d)
     )
     var oversized_salt_rejected = False
     try:
@@ -324,7 +325,7 @@ def test_rsa_pss_signing() raises:
             Span[UInt8, ...](msg),
             SHA256,
             SHA256,
-            1_000_000_000,
+            1_000_000_000
         )
     except:
         oversized_salt_rejected = True
@@ -336,7 +337,7 @@ def test_rsa_pss_signing() raises:
         _ = RsaPrivateKey(
             Span[UInt8, ...](n),
             Span[UInt8, ...](e),
-            Span[UInt8, ...](bad_private_exponent),
+            Span[UInt8, ...](bad_private_exponent)
         )
     except:
         invalid_private_rejected = True
@@ -350,16 +351,17 @@ def test_rsa_pss_signing() raises:
         Span[UInt8, ...](sig2),
         SHA256,
         SHA256,
-        32,
+        32
     ):
         raise Error("changed signature accepted")
     print("RSA-PSS signing tests passed")
+
 
 def run_ecdsa_file(
     json: PythonObject,
     builtins: PythonObject,
     path: String,
-    curve_size: Int,
+    curve_size: Int
 ) raises -> Bool:
     var file = builtins.open(path, "r")
     var root = json.load(file)
@@ -376,13 +378,13 @@ def run_ecdsa_file(
                 valid = p256_ecdsa_verify_der(
                     Span[UInt8, ...](public_key),
                     Span[UInt8, ...](message),
-                    Span[UInt8, ...](signature),
+                    Span[UInt8, ...](signature)
                 )
             else:
                 valid = p384_ecdsa_verify_der(
                     Span[UInt8, ...](public_key),
                     Span[UInt8, ...](message),
-                    Span[UInt8, ...](signature),
+                    Span[UInt8, ...](signature)
                 )
             var result = String(test["result"])
             if (
@@ -405,19 +407,20 @@ def test_ecdsa_wycheproof() raises:
         json,
         builtins,
         "tests/Wycheproof/ecdsa_secp256r1_sha256_test.json",
-        32,
+        32
     )
     ok = (
         run_ecdsa_file(
             json,
             builtins,
             "tests/Wycheproof/ecdsa_secp384r1_sha384_test.json",
-            48,
+            48
         )
         and ok
     )
     if not ok:
         raise Error("Wycheproof ECDSA failures")
+
 
 def test_rsa_pkcs1_wycheproof() raises:
     var json = Python.import_module("json")
@@ -439,7 +442,7 @@ def test_rsa_pkcs1_wycheproof() raises:
                 Span[UInt8, ...](modulus),
                 Span[UInt8, ...](exponent),
                 Span[UInt8, ...](message),
-                Span[UInt8, ...](signature),
+                Span[UInt8, ...](signature)
             )
             var result = String(test["result"])
             if (
@@ -454,6 +457,7 @@ def test_rsa_pkcs1_wycheproof() raises:
     print("Wycheproof RSA PKCS#1 v1.5:", passed, "passed,", failed, "failed")
     if failed != 0:
         raise Error("Wycheproof RSA PKCS#1 v1.5 failures")
+
 
 def sha_id(name: String) raises -> Int:
     if name == "SHA-1":
@@ -491,7 +495,7 @@ def run_pss_file(py: PythonObject, builtins: PythonObject, path: String) raises 
                 got = rsa_pss_verify(
                     Span[UInt8, ...](n), Span[UInt8, ...](e),
                     Span[UInt8, ...](msg), Span[UInt8, ...](sig),
-                    sha, mgf_sha, s_len,
+                    sha, mgf_sha, s_len
                 )
             except:
                 got = False
@@ -515,13 +519,31 @@ def test_rsa_pss_wycheproof() raises:
     var builtins = Python.import_module("builtins")
 
     var all_ok = True
-    all_ok = run_pss_file(py, builtins, "tests/Wycheproof/rsa_pss_2048_sha256_mgf1_32_test.json") and all_ok
-    all_ok = run_pss_file(py, builtins, "tests/Wycheproof/rsa_pss_3072_sha256_mgf1_32_test.json") and all_ok
-    all_ok = run_pss_file(py, builtins, "tests/Wycheproof/rsa_pss_4096_sha512_mgf1_64_test.json") and all_ok
+    all_ok = (
+        run_pss_file(py, builtins, "tests/Wycheproof/rsa_pss_2048_sha256_mgf1_32_test.json")
+        and all_ok
+    )
+    all_ok = (
+        run_pss_file(
+            py,
+            builtins,
+            "tests/Wycheproof/rsa_pss_3072_sha256_mgf1_32_test.json"
+        )
+        and all_ok
+    )
+    all_ok = (
+        run_pss_file(
+            py,
+            builtins,
+            "tests/Wycheproof/rsa_pss_4096_sha512_mgf1_64_test.json"
+        )
+        and all_ok
+    )
     all_ok = run_pss_file(py, builtins, "tests/Wycheproof/rsa_pss_misc_test.json") and all_ok
     all_ok = run_pss_file(py, builtins, "tests/Wycheproof/rsa_pss_misc_params_test.json") and all_ok
     if not all_ok:
         raise Error("Wycheproof RSA-PSS failures")
+
 
 def main() raises:
     test_hmac_sha384()

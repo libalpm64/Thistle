@@ -1,6 +1,4 @@
-"""
-RSASSA-PSS signature verification per RFC 8017
-"""
+"""Implements RSA-PSS signatures and PKCS#1 v1.5 verification."""
 
 from std.collections import List, InlineArray
 from std.memory import Pointer
@@ -10,7 +8,7 @@ from .random import random_bytes
 from .sha2 import (
     sha224_hash, sha256_hash, sha384_hash, sha512_hash,
     SHA256Context, sha256_update, sha256_final_to_buffer,
-    SHA512Context, sha512_update, sha512_final_to_buffer,
+    SHA512Context, sha512_update, sha512_final_to_buffer
 )
 
 comptime _NL = 66
@@ -121,7 +119,8 @@ def _hash_len(alg: Int) raises -> Int:
     raise Error("unsupported hash for RSA-PSS")
 
 
-def _hash_into(alg: Int, data: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]) raises -> Int:
+def _hash_into(alg: Int, data: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]
+) raises -> Int:
     if alg == SHA256:
         var ctx = SHA256Context()
         sha256_update(ctx, data)
@@ -158,7 +157,7 @@ def _mgf1(
     seed: Pointer[UInt8, _],
     seed_len: Int,
     mask_len: Int,
-    output: Pointer[mut=True, UInt8, _, address_space=_],
+    output: Pointer[mut=True, UInt8, _, address_space=_]
 ) raises:
     var h_len = _hash_len(alg)
     var block = InlineArray[UInt8, 128](fill=0)
@@ -175,7 +174,7 @@ def _mgf1(
         _ = _hash_into(
             alg,
             Span[UInt8, ...](unsafe_ptr=block.unsafe_ptr(), length=seed_len + 4),
-            digest.unsafe_ptr(),
+            digest.unsafe_ptr()
         )
         var take = mask_len - done
         if take > h_len:
@@ -192,7 +191,7 @@ def _emsa_pss_encode(
     sha: Int,
     mgf_sha: Int,
     em_bits: Int,
-    output: Pointer[mut=True, UInt8, _, address_space=_],
+    output: Pointer[mut=True, UInt8, _, address_space=_]
 ) raises -> Bool:
     var h_len = _hash_len(sha)
     _ = _hash_len(mgf_sha)
@@ -211,7 +210,7 @@ def _emsa_pss_encode(
     _ = _hash_into(
         sha,
         Span[UInt8, ...](unsafe_ptr=mprime.unsafe_ptr(), length=8 + h_len + len(salt)),
-        h.unsafe_ptr(),
+        h.unsafe_ptr()
     )
 
     var db_len = em_len - h_len - 1
@@ -282,16 +281,14 @@ def _bn_ge(a: StaticTuple[UInt64, _NL], b: StaticTuple[UInt64, _NL], k: Int) -> 
 def _bn_ge_ct(
     a: StaticTuple[UInt64, _NL],
     b: StaticTuple[UInt64, _NL],
-    k: Int,
+    k: Int
 ) -> Bool:
     var borrow: UInt64 = 0
     for i in range(k):
-        var d = (
-            (UInt128(1) << 64)
+        var d = (UInt128(1) << 64)
             + UInt128(a[i])
             - UInt128(b[i])
             - UInt128(borrow)
-        )
         borrow = 1 - (d >> 64).cast[DType.uint64]()
     return borrow == 0
 
@@ -323,7 +320,7 @@ def _bn_select(
     a: StaticTuple[UInt64, _NL],
     b: StaticTuple[UInt64, _NL],
     choice: UInt64,
-    k: Int,
+    k: Int
 ) -> StaticTuple[UInt64, _NL]:
     var out = a
     var mask = UInt64(0) - (choice & UInt64(1))
@@ -355,7 +352,7 @@ def _mont_mul_k[K: Int](
     a: StaticTuple[UInt64, _NL],
     b: StaticTuple[UInt64, _NL],
     n: StaticTuple[UInt64, _NL],
-    n0: UInt64,
+    n0: UInt64
 ) -> StaticTuple[UInt64, _NL]:
     var t = StaticTuple[UInt64, _NL]()
     comptime for z in range(K):
@@ -416,7 +413,7 @@ def _mont_mul_any(
     b: StaticTuple[UInt64, _NL],
     n: StaticTuple[UInt64, _NL],
     n0: UInt64,
-    k: Int,
+    k: Int
 ) -> StaticTuple[UInt64, _NL]:
     var t = _bn_zero()
     var t_hi: UInt64 = 0
@@ -445,7 +442,7 @@ def _mont_mul_any(
 def _mont_sqr_k[K: Int](
     a: StaticTuple[UInt64, _NL],
     n: StaticTuple[UInt64, _NL],
-    n0: UInt64,
+    n0: UInt64
 ) -> StaticTuple[UInt64, _NL]:
     var t = InlineArray[UInt64, 2 * _NL + 2](fill=0)
     comptime for z in range(2 * K + 1):
@@ -501,7 +498,7 @@ def _mont_sqr(
     a: StaticTuple[UInt64, _NL],
     n: StaticTuple[UInt64, _NL],
     n0: UInt64,
-    k: Int,
+    k: Int
 ) -> StaticTuple[UInt64, _NL]:
     if k == 16:
         return _mont_sqr_k[16](a, n, n0)
@@ -520,7 +517,7 @@ def _mont_mul(
     b: StaticTuple[UInt64, _NL],
     n: StaticTuple[UInt64, _NL],
     n0: UInt64,
-    k: Int,
+    k: Int
 ) -> StaticTuple[UInt64, _NL]:
     if k == 16:
         return _mont_mul_k[16](a, b, n, n0)
@@ -621,7 +618,7 @@ struct RsaPublicKey:
     def _public_op(
         self,
         sig: Span[UInt8, ...],
-        output: Pointer[mut=True, UInt8, _, address_space=_],
+        output: Pointer[mut=True, UInt8, _, address_space=_]
     ) raises -> Bool:
         var nb = self.nb
         var k = self.k
@@ -665,7 +662,7 @@ struct RsaPublicKey:
         signature: Span[UInt8, ...],
         sha: Int,
         mgf_sha: Int,
-        salt_len: Int,
+        salt_len: Int
     ) raises -> Bool:
         var h_len = _hash_len(sha)
         _ = _hash_len(mgf_sha)
@@ -722,7 +719,7 @@ struct RsaPublicKey:
         _ = _hash_into(
             sha,
             Span[UInt8, ...](unsafe_ptr=mprime.unsafe_ptr(), length=8 + h_len + salt_len),
-            h2.unsafe_ptr(),
+            h2.unsafe_ptr()
         )
 
         var diff: UInt8 = 0
@@ -756,7 +753,7 @@ struct RsaPrivateKey:
         out self,
         modulus: Span[UInt8, ...],
         exponent: Span[UInt8, ...],
-        private_exponent: Span[UInt8, ...],
+        private_exponent: Span[UInt8, ...]
     ) raises:
         self.public = RsaPublicKey(modulus, exponent)
         if self.public.mod_bits < 2048:
@@ -787,7 +784,7 @@ struct RsaPrivateKey:
     def _private_op(
         self,
         encoded: Span[UInt8, ...],
-        signature: Pointer[mut=True, UInt8, _, address_space=_],
+        signature: Pointer[mut=True, UInt8, _, address_space=_]
     ) raises -> Bool:
         var nb = self.public.nb
         var k = self.public.k
@@ -854,33 +851,40 @@ struct RsaPrivateKey:
         salt: Span[UInt8, ...],
         sha: Int,
         mgf_sha: Int,
-        signature: Span[mut=True, UInt8, ...],
+        signature: Span[mut=True, UInt8, ...]
     ) raises -> Bool:
         if len(signature) < self.public.nb:
             return False
         var em_bits = self.public.mod_bits - 1
         var em_len = (em_bits + 7) // 8
         var encoded = InlineArray[UInt8, 528](fill=0)
-        if not _emsa_pss_encode(
-            message, salt, sha, mgf_sha, em_bits,
-            encoded.unsafe_ptr().unsafe_offset((self.public.nb - em_len)),
-        ):
-            return False
-        var ok = self._private_op(
-            Span[UInt8, ...](unsafe_ptr=encoded.unsafe_ptr(), length=self.public.nb),
-            signature.unsafe_ptr(),
-        )
-        var ep = encoded.unsafe_ptr()
-        for i in range(self.public.nb):
-            ep.unsafe_store[volatile=True](i, UInt8(0))
-        return ok
+        try:
+            if not _emsa_pss_encode(
+                message,
+                salt,
+                sha,
+                mgf_sha,
+                em_bits,
+                encoded.unsafe_ptr().unsafe_offset(self.public.nb - em_len),
+            ):
+                return False
+            return self._private_op(
+                Span[UInt8, ...](
+                    unsafe_ptr=encoded.unsafe_ptr(), length=self.public.nb
+                ),
+                signature.unsafe_ptr(),
+            )
+        finally:
+            var ep = encoded.unsafe_ptr()
+            for i in range(self.public.nb):
+                ep.unsafe_store[volatile=True](i, UInt8(0))
 
     def pss_sign(
         self,
         message: Span[UInt8, ...],
         sha: Int,
         mgf_sha: Int,
-        salt_len: Int,
+        salt_len: Int
     ) raises -> List[UInt8]:
         if salt_len < 0:
             raise Error("RSA-PSS salt length must be non-negative")
@@ -890,17 +894,21 @@ struct RsaPrivateKey:
         if em_len < h_len + 2 or salt_len > em_len - h_len - 2:
             raise Error("RSA-PSS salt is too long for the modulus")
         var salt = random_bytes(salt_len)
-        var signature = List[UInt8](unsafe_uninit_length=self.public.nb)
-        var ok = self.pss_sign_with_salt(
-            message, Span[UInt8, ...](salt), sha, mgf_sha,
-            Span[mut=True, UInt8, ...](signature),
-        )
-        var salt_ptr = salt.unsafe_ptr()
-        for i in range(len(salt)):
-            salt_ptr.unsafe_store[volatile=True](i, UInt8(0))
-        if not ok:
-            raise Error("RSA-PSS signing failed")
-        return signature^
+        try:
+            var signature = List[UInt8](unsafe_uninit_length=self.public.nb)
+            if not self.pss_sign_with_salt(
+                message,
+                Span[UInt8, ...](salt),
+                sha,
+                mgf_sha,
+                Span[mut=True, UInt8, ...](signature)
+            ):
+                raise Error("RSA-PSS signing failed")
+            return signature^
+        finally:
+            var salt_ptr = salt.unsafe_ptr()
+            for i in range(len(salt)):
+                salt_ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
 def _bn_reduce_bytes(
@@ -924,7 +932,7 @@ def _bn_reduce_bytes(
 def _private_pow(
     key: RsaPublicKey,
     exponent: InlineArray[UInt8, 528],
-    input: StaticTuple[UInt64, _NL],
+    input: StaticTuple[UInt64, _NL]
 ) -> StaticTuple[UInt64, _NL]:
     var base = _mont_mul(input, key.r2, key.n, key.n0, key.k)
     var table = StaticTuple[StaticTuple[UInt64, _NL], 16]()
@@ -957,7 +965,7 @@ def _private_pow(
 
 def _bn_mul_parts(
     a: StaticTuple[UInt64, _NL], a_len: Int,
-    b: StaticTuple[UInt64, _NL], b_len: Int,
+    b: StaticTuple[UInt64, _NL], b_len: Int
 ) -> StaticTuple[UInt64, _NL]:
     var out = _bn_zero()
     for i in range(a_len):
@@ -992,7 +1000,7 @@ struct RsaCrtPrivateKey:
         modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
         prime1: Span[UInt8, ...], prime2: Span[UInt8, ...],
         exponent1: Span[UInt8, ...], exponent2: Span[UInt8, ...],
-        coefficient: Span[UInt8, ...],
+        coefficient: Span[UInt8, ...]
     ) raises:
         self.public = RsaPublicKey(modulus, exponent)
         if self.public.mod_bits < 2048:
@@ -1061,7 +1069,7 @@ struct RsaCrtPrivateKey:
         )
         var check = _mont_mul(
             _mont_mul(q_mod_p, self.p.r2, self.p.n, self.p.n0, self.p.k),
-            self.qinv, self.p.n, self.p.n0, self.p.k,
+            self.qinv, self.p.n, self.p.n0, self.p.k
         )
         var coefficient_diff = check[0] ^ UInt64(1)
         for i in range(1, self.p.k):
@@ -1093,7 +1101,7 @@ struct RsaCrtPrivateKey:
 
     def _private_op(
         self, encoded: Span[UInt8, ...],
-        signature: Pointer[mut=True, UInt8, _, address_space=_],
+        signature: Pointer[mut=True, UInt8, _, address_space=_]
     ) raises -> Bool:
         if len(encoded) != self.public.nb:
             return False
@@ -1119,7 +1127,7 @@ struct RsaCrtPrivateKey:
         h = _bn_select(h, h_plus_p, borrow, self.p.k)
         h = _mont_mul(
             _mont_mul(h, self.p.r2, self.p.n, self.p.n0, self.p.k),
-            self.qinv, self.p.n, self.p.n0, self.p.k,
+            self.qinv, self.p.n, self.p.n0, self.p.k
         )
 
         var result = _bn_mul_parts(self.q.n, self.q.k, h, self.p.k)
@@ -1163,33 +1171,40 @@ struct RsaCrtPrivateKey:
     def pss_sign_with_salt(
         self, message: Span[UInt8, ...], salt: Span[UInt8, ...],
         sha: Int, mgf_sha: Int,
-        signature: Span[mut=True, UInt8, ...],
+        signature: Span[mut=True, UInt8, ...]
     ) raises -> Bool:
         if len(signature) < self.public.nb:
             return False
         var em_bits = self.public.mod_bits - 1
         var em_len = (em_bits + 7) // 8
         var encoded = InlineArray[UInt8, 528](fill=0)
-        if not _emsa_pss_encode(
-            message, salt, sha, mgf_sha, em_bits,
-            encoded.unsafe_ptr().unsafe_offset((self.public.nb - em_len)),
-        ):
-            return False
-        var ok = self._private_op(
-            Span[UInt8, ...](unsafe_ptr=encoded.unsafe_ptr(), length=self.public.nb),
-            signature.unsafe_ptr(),
-        )
-        var ep = encoded.unsafe_ptr()
-        for i in range(self.public.nb):
-            ep.unsafe_store[volatile=True](i, UInt8(0))
-        return ok
+        try:
+            if not _emsa_pss_encode(
+                message,
+                salt,
+                sha,
+                mgf_sha,
+                em_bits,
+                encoded.unsafe_ptr().unsafe_offset(self.public.nb - em_len),
+            ):
+                return False
+            return self._private_op(
+                Span[UInt8, ...](
+                    unsafe_ptr=encoded.unsafe_ptr(), length=self.public.nb
+                ),
+                signature.unsafe_ptr(),
+            )
+        finally:
+            var ep = encoded.unsafe_ptr()
+            for i in range(self.public.nb):
+                ep.unsafe_store[volatile=True](i, UInt8(0))
 
     def pss_sign(
         self,
         message: Span[UInt8, ...],
         sha: Int,
         mgf_sha: Int,
-        salt_len: Int,
+        salt_len: Int
     ) raises -> List[UInt8]:
         if salt_len < 0:
             raise Error("RSA-PSS salt length must be non-negative")
@@ -1199,23 +1214,28 @@ struct RsaCrtPrivateKey:
         if em_len < h_len + 2 or salt_len > em_len - h_len - 2:
             raise Error("RSA-PSS salt is too long for the modulus")
         var salt = random_bytes(salt_len)
-        var signature = List[UInt8](unsafe_uninit_length=self.public.nb)
-        var ok = self.pss_sign_with_salt(
-            message, Span[UInt8, ...](salt), sha, mgf_sha,
-            Span[mut=True, UInt8, ...](signature),
-        )
-        var salt_ptr = salt.unsafe_ptr()
-        for i in range(len(salt)):
-            salt_ptr.unsafe_store[volatile=True](i, UInt8(0))
-        if not ok:
-            raise Error("RSA-PSS signing failed")
-        return signature^
+        try:
+            var signature = List[UInt8](unsafe_uninit_length=self.public.nb)
+            if not self.pss_sign_with_salt(
+                message,
+                Span[UInt8, ...](salt),
+                sha,
+                mgf_sha,
+                Span[mut=True, UInt8, ...](signature)
+            ):
+                raise Error("RSA-PSS signing failed")
+            return signature^
+        finally:
+            var salt_ptr = salt.unsafe_ptr()
+            for i in range(len(salt)):
+                salt_ptr.unsafe_store[volatile=True](i, UInt8(0))
+
 
 def _pkcs1_v15_verify(
     key: RsaPublicKey,
     message: Span[UInt8, ...],
     signature: Span[UInt8, ...],
-    sha: Int,
+    sha: Int
 ) raises -> Bool:
     var h_len = _hash_len(sha)
     var prefix_len = _digest_info_prefix_len(sha)
@@ -1252,7 +1272,7 @@ def rsa_pss_verify(
     signature: Span[UInt8, ...],
     sha: Int,
     mgf_sha: Int,
-    salt_len: Int,
+    salt_len: Int
 ) raises -> Bool:
     var key: RsaPublicKey
     try:
@@ -1269,7 +1289,7 @@ def rsa_pss_sign_with_salt(
     message: Span[UInt8, ...],
     salt: Span[UInt8, ...],
     sha: Int,
-    mgf_sha: Int,
+    mgf_sha: Int
 ) raises -> List[UInt8]:
     var key = RsaPrivateKey(modulus, exponent, private_exponent)
     var signature = List[UInt8](unsafe_uninit_length=key.public.nb)
@@ -1287,7 +1307,7 @@ def rsa_pss_sign(
     message: Span[UInt8, ...],
     sha: Int,
     mgf_sha: Int,
-    salt_len: Int,
+    salt_len: Int
 ) raises -> List[UInt8]:
     var key = RsaPrivateKey(modulus, exponent, private_exponent)
     return key.pss_sign(message, sha, mgf_sha, salt_len)
@@ -1298,7 +1318,7 @@ def rsa_pss_crt_sign_with_salt(
     prime1: Span[UInt8, ...], prime2: Span[UInt8, ...],
     exponent1: Span[UInt8, ...], exponent2: Span[UInt8, ...],
     coefficient: Span[UInt8, ...], message: Span[UInt8, ...],
-    salt: Span[UInt8, ...], sha: Int, mgf_sha: Int,
+    salt: Span[UInt8, ...], sha: Int, mgf_sha: Int
 ) raises -> List[UInt8]:
     var key = RsaCrtPrivateKey(
         modulus, exponent, prime1, prime2, exponent1, exponent2, coefficient
@@ -1316,7 +1336,7 @@ def rsa_pss_crt_sign(
     prime1: Span[UInt8, ...], prime2: Span[UInt8, ...],
     exponent1: Span[UInt8, ...], exponent2: Span[UInt8, ...],
     coefficient: Span[UInt8, ...], message: Span[UInt8, ...],
-    sha: Int, mgf_sha: Int, salt_len: Int,
+    sha: Int, mgf_sha: Int, salt_len: Int
 ) raises -> List[UInt8]:
     var key = RsaCrtPrivateKey(
         modulus, exponent, prime1, prime2, exponent1, exponent2, coefficient
@@ -1326,21 +1346,21 @@ def rsa_pss_crt_sign(
 
 def rsa_pss_sha256_sign(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
-    private_exponent: Span[UInt8, ...], message: Span[UInt8, ...],
+    private_exponent: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
     return rsa_pss_sign(modulus, exponent, private_exponent, message, SHA256, SHA256, 32)
 
 
 def rsa_pss_sha384_sign(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
-    private_exponent: Span[UInt8, ...], message: Span[UInt8, ...],
+    private_exponent: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
     return rsa_pss_sign(modulus, exponent, private_exponent, message, SHA384, SHA384, 48)
 
 
 def rsa_pss_sha512_sign(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
-    private_exponent: Span[UInt8, ...], message: Span[UInt8, ...],
+    private_exponent: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
     return rsa_pss_sign(modulus, exponent, private_exponent, message, SHA512, SHA512, 64)
 
@@ -1349,11 +1369,11 @@ def rsa_pss_crt_sha256_sign(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     prime1: Span[UInt8, ...], prime2: Span[UInt8, ...],
     exponent1: Span[UInt8, ...], exponent2: Span[UInt8, ...],
-    coefficient: Span[UInt8, ...], message: Span[UInt8, ...],
+    coefficient: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
     return rsa_pss_crt_sign(
         modulus, exponent, prime1, prime2, exponent1, exponent2,
-        coefficient, message, SHA256, SHA256, 32,
+        coefficient, message, SHA256, SHA256, 32
     )
 
 
@@ -1361,11 +1381,11 @@ def rsa_pss_crt_sha384_sign(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     prime1: Span[UInt8, ...], prime2: Span[UInt8, ...],
     exponent1: Span[UInt8, ...], exponent2: Span[UInt8, ...],
-    coefficient: Span[UInt8, ...], message: Span[UInt8, ...],
+    coefficient: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
     return rsa_pss_crt_sign(
         modulus, exponent, prime1, prime2, exponent1, exponent2,
-        coefficient, message, SHA384, SHA384, 48,
+        coefficient, message, SHA384, SHA384, 48
     )
 
 
@@ -1373,11 +1393,11 @@ def rsa_pss_crt_sha512_sign(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     prime1: Span[UInt8, ...], prime2: Span[UInt8, ...],
     exponent1: Span[UInt8, ...], exponent2: Span[UInt8, ...],
-    coefficient: Span[UInt8, ...], message: Span[UInt8, ...],
+    coefficient: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
     return rsa_pss_crt_sign(
         modulus, exponent, prime1, prime2, exponent1, exponent2,
-        coefficient, message, SHA512, SHA512, 64,
+        coefficient, message, SHA512, SHA512, 64
     )
 
 
@@ -1385,7 +1405,7 @@ def rsa_pss_sha256_verify(
     modulus: Span[UInt8, ...],
     exponent: Span[UInt8, ...],
     message: Span[UInt8, ...],
-    signature: Span[UInt8, ...],
+    signature: Span[UInt8, ...]
 ) raises -> Bool:
     return rsa_pss_verify(modulus, exponent, message, signature, SHA256, SHA256, 32)
 
@@ -1394,7 +1414,7 @@ def rsa_pss_sha384_verify(
     modulus: Span[UInt8, ...],
     exponent: Span[UInt8, ...],
     message: Span[UInt8, ...],
-    signature: Span[UInt8, ...],
+    signature: Span[UInt8, ...]
 ) raises -> Bool:
     return rsa_pss_verify(modulus, exponent, message, signature, SHA384, SHA384, 48)
 
@@ -1403,7 +1423,7 @@ def rsa_pss_sha512_verify(
     modulus: Span[UInt8, ...],
     exponent: Span[UInt8, ...],
     message: Span[UInt8, ...],
-    signature: Span[UInt8, ...],
+    signature: Span[UInt8, ...]
 ) raises -> Bool:
     return rsa_pss_verify(modulus, exponent, message, signature, SHA512, SHA512, 64)
 
@@ -1413,7 +1433,7 @@ def rsa_pkcs1_v15_verify(
     exponent: Span[UInt8, ...],
     message: Span[UInt8, ...],
     signature: Span[UInt8, ...],
-    sha: Int,
+    sha: Int
 ) raises -> Bool:
     var key: RsaPublicKey
     try:
@@ -1425,27 +1445,27 @@ def rsa_pkcs1_v15_verify(
 
 def rsa_pkcs1_v15_sha1_verify(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
-    message: Span[UInt8, ...], signature: Span[UInt8, ...],
+    message: Span[UInt8, ...], signature: Span[UInt8, ...]
 ) raises -> Bool:
     return rsa_pkcs1_v15_verify(modulus, exponent, message, signature, SHA1)
 
 
 def rsa_pkcs1_v15_sha256_verify(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
-    message: Span[UInt8, ...], signature: Span[UInt8, ...],
+    message: Span[UInt8, ...], signature: Span[UInt8, ...]
 ) raises -> Bool:
     return rsa_pkcs1_v15_verify(modulus, exponent, message, signature, SHA256)
 
 
 def rsa_pkcs1_v15_sha384_verify(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
-    message: Span[UInt8, ...], signature: Span[UInt8, ...],
+    message: Span[UInt8, ...], signature: Span[UInt8, ...]
 ) raises -> Bool:
     return rsa_pkcs1_v15_verify(modulus, exponent, message, signature, SHA384)
 
 
 def rsa_pkcs1_v15_sha512_verify(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
-    message: Span[UInt8, ...], signature: Span[UInt8, ...],
+    message: Span[UInt8, ...], signature: Span[UInt8, ...]
 ) raises -> Bool:
     return rsa_pkcs1_v15_verify(modulus, exponent, message, signature, SHA512)

@@ -1,10 +1,9 @@
-"""
-Camellia block cipher implementation per RFC 3713
-"""
+"""Implements the Camellia block cipher specified by RFC 3713."""
 
 from std.memory import bitcast, Pointer
 from std.bit import byte_swap, rotate_bits_left
 from std.collections import InlineArray
+from std.os import abort
 from std.sys import llvm_intrinsic
 from std.utils import StaticTuple
 from .aes import _ct_sbox, _ct_ortho, _ctr_write_block
@@ -13,11 +12,19 @@ from .aes_ni import (
     _aese,
     _mm_aesenclast_si128,
     has_arm_crypto,
-    has_x86_aes_ni,
+    has_x86_aes_ni
 )
 
 
 comptime SIGMA1 = 0xA09E667F3BCC908B
+
+
+@always_inline
+def _validate_camellia_block_count(num_blocks: Int):
+    if num_blocks < 0:
+        abort("Camellia block count cannot be negative")
+
+
 comptime SIGMA2 = 0xB67AE8584CAA73B2
 comptime SIGMA3 = 0xC6EF372FE94F82BE
 comptime SIGMA4 = 0x54FF53A5F1D36F1C
@@ -40,12 +47,14 @@ comptime _U8x16 = SIMD[DType.uint8, 16]
 # y = LO[x & 15] ^ HI[x >> 4], constant LO side only.
 # s2 = rotl1(s1), s3 = rotr1(s1) fold rotated POST copies;
 # s4 = s1(rotl1(x)) folds rotl1 into pre matrix.
+
+
 def _mk_tbl(
     cols: StaticTuple[UInt8, 8],
     add: UInt8,
     hi: Bool,
     in_rotl1: Bool,
-    out_rot: Int,
+    out_rot: Int
 ) -> _U8x16:
     var t = _U8x16(0)
     for n in range(16):
@@ -158,7 +167,7 @@ def _f_planes[W: Int](
     left: InlineArray[SIMD[DType.uint64, W], 8],
     mut right: InlineArray[SIMD[DType.uint64, W], 8],
     kp: InlineArray[UInt64, 192],
-    base: Int,
+    base: Int
 ):
     var a = InlineArray[SIMD[DType.uint64, W], 8](fill=0)
     comptime for k in range(8):
@@ -192,11 +201,9 @@ def _f_planes[W: Int](
     comptime m23: UInt64 = _LANES_S2 | _LANES_S3
     var e = InlineArray[SIMD[DType.uint64, W], 8](fill=0)
     comptime for k in range(8):
-        e[k] = (
-            (d[k] & ~m23)
+        e[k] = (d[k] & ~m23)
             | (d[(k + 7) % 8] & _LANES_S2)
             | (d[(k + 1) % 8] & _LANES_S3)
-        )
 
     comptime for k in range(8):
         var p = e[k]
@@ -215,7 +222,7 @@ def _f_planes[W: Int](
 def _fl_planes[inv: Bool, W: Int](
     mut x: InlineArray[SIMD[DType.uint64, W], 8],
     kep: InlineArray[UInt64, 48],
-    base: Int,
+    base: Int
 ):
     comptime if inv:
         comptime for k in range(8):
@@ -245,13 +252,13 @@ def rotl128[n: Int](high: UInt64, low: UInt64) -> SIMD[DType.uint64, 2]:
                 comptime s = UInt64(shift)
                 return SIMD[DType.uint64, 2](
                     (high << s) | (low >> (UInt64(64) - s)),
-                    (low << s) | (high >> (UInt64(64) - s)),
+                    (low << s) | (high >> (UInt64(64) - s))
                 )
             else:
                 comptime s = UInt64(shift - 64)
                 return SIMD[DType.uint64, 2](
                     (low << s) | (high >> (UInt64(64) - s)),
-                    (high << s) | (low >> (UInt64(64) - s)),
+                    (high << s) | (low >> (UInt64(64) - s))
                 )
 
 
@@ -272,11 +279,9 @@ def _p_tail(sout0: UInt64) -> UInt64:
     var orr = ((sout >> 1) & ~(_BIT0_OF_EACH_BYTE << 7)) | (
         (sout << 7) & (_BIT0_OF_EACH_BYTE << 7)
     )
-    sout = (
-        (sout & ~(_LANES_S2 | _LANES_S3))
+    sout = (sout & ~(_LANES_S2 | _LANES_S3))
         | (ol & _LANES_S2)
         | (orr & _LANES_S3)
-    )
 
     var dw = UInt32(sout & 0xFFFFFFFF)
     var uw = UInt32(sout >> 32)
@@ -353,7 +358,6 @@ def _f_one(x: UInt64, k: UInt64) -> UInt64:
         return _f_scalar(x, k)
 
 
-
 comptime _M_S4V = _U8x16(
     0, 0, 0, 0xFF, 0, 0, 0xFF, 0, 0, 0, 0, 0xFF, 0, 0, 0xFF, 0
 )
@@ -370,7 +374,7 @@ comptime _P_SRC = StaticTuple[StaticTuple[UInt8, 6], 8](
     StaticTuple[UInt8, 6](0, 1, 5, 6, 7, 255),
     StaticTuple[UInt8, 6](1, 2, 4, 6, 7, 255),
     StaticTuple[UInt8, 6](2, 3, 4, 5, 7, 255),
-    StaticTuple[UInt8, 6](0, 3, 4, 5, 6, 255),
+    StaticTuple[UInt8, 6](0, 3, 4, 5, 6, 255)
 )
 
 
@@ -414,6 +418,7 @@ comptime _FL_DOWN_A = _mk_fl_idx(0, False, True)
 comptime _FL_SH_B = _mk_fl_idx(8, False, False)
 comptime _FL_SH2_B = _mk_fl_idx(8, True, False)
 comptime _FL_DOWN_B = _mk_fl_idx(8, False, True)
+
 
 @always_inline
 def _kv_a(k: UInt64) -> _U8x16:
@@ -704,12 +709,10 @@ def _load_half[W: Int](
     comptime for e in range(W):
         comptime for j in range(8):
             var base = (e * 8 + j) * 16 + off
-            q[j][e] = (
-                bitcast[DType.uint64, 1](
+            q[j][e] = bitcast[DType.uint64, 1](
                     buf.unsafe_load[width=8, alignment=1](base)
                 )[0]
                 ^ kwl
-            )
     _ct_ortho[W](q)
     return q^
 
@@ -719,7 +722,7 @@ def _store_half[W: Int](
     buf: Pointer[mut=True, UInt8, _, address_space=_],
     off: Int,
     mut q: InlineArray[SIMD[DType.uint64, W], 8],
-    kw: UInt64,
+    kw: UInt64
 ):
     _ct_ortho(q)
     var kwl = byte_swap(kw)
@@ -730,7 +733,7 @@ def _store_half[W: Int](
                 base,
                 bitcast[DType.uint8, 8](
                     SIMD[DType.uint64, 1](q[j][e] ^ kwl)
-                ),
+                )
             )
 
 
@@ -739,7 +742,7 @@ def _six_rounds[forward: Bool, W: Int](
     mut a: InlineArray[SIMD[DType.uint64, W], 8],
     mut b: InlineArray[SIMD[DType.uint64, W], 8],
     kp: InlineArray[UInt64, 192],
-    kbase: Int,
+    kbase: Int
 ):
     comptime for r in range(6):
         comptime off = 8 * (r if forward else 5 - r)
@@ -814,6 +817,7 @@ comptime _BITREV4 = StaticTuple[Int, 16](
     0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15
 )
 
+
 @always_inline
 def _transpose16(mut m: InlineArray[_U8x16, 16]):
     # 16x16 byte matrix transpose setup 4 zip stages.
@@ -851,7 +855,7 @@ def _splat_byte(k: UInt64, j: Int) -> _U8x16:
 def _f_bs(
     l: InlineArray[_U8x16, 8],
     mut r: InlineArray[_U8x16, 8],
-    k: UInt64,
+    k: UInt64
 ):
     # Byte-sliced F on 16 blocks, k is the pre-byte-swapped subkey
     # (byte j = t_{j+1}). P-function in CSE form:
@@ -913,7 +917,7 @@ def _six_rounds_bs[forward: Bool](
     mut a: InlineArray[_U8x16, 8],
     mut b: InlineArray[_U8x16, 8],
     cipher: CamelliaCipher,
-    kbase: Int,
+    kbase: Int
 ):
     comptime for r in range(6):
         comptime off = r if forward else 5 - r
@@ -1089,7 +1093,7 @@ def _camellia_block[encrypt: Bool](
 def _camellia_blocks[encrypt: Bool](
     cipher: CamelliaCipher,
     data: Pointer[mut=True, UInt8, _, address_space=_],
-    num_blocks: Int,
+    num_blocks: Int
 ):
     comptime if _has_hw_sbox():
         var i = 0
@@ -1137,16 +1141,18 @@ def camellia_decrypt_block(
 def camellia_encrypt_blocks(
     cipher: CamelliaCipher,
     data: Pointer[mut=True, UInt8, _, address_space=_],
-    num_blocks: Int,
+    num_blocks: Int
 ):
+    _validate_camellia_block_count(num_blocks)
     _camellia_blocks[True](cipher, data, num_blocks)
 
 
 def camellia_decrypt_blocks(
     cipher: CamelliaCipher,
     data: Pointer[mut=True, UInt8, _, address_space=_],
-    num_blocks: Int,
+    num_blocks: Int
 ):
+    _validate_camellia_block_count(num_blocks)
     _camellia_blocks[False](cipher, data, num_blocks)
 
 
@@ -1155,8 +1161,9 @@ def camellia_cbc_encrypt_kernel(
     output_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     cipher: CamelliaCipher,
     num_blocks: Int,
-    iv_ptr: Pointer[mut=True, UInt8, _, address_space=_],
+    iv_ptr: Pointer[mut=True, UInt8, _, address_space=_]
 ):
+    _validate_camellia_block_count(num_blocks)
     var prev = iv_ptr.unsafe_load[width=16, alignment=1](0)
     for i in range(num_blocks):
         var x = input_ptr.unsafe_load[width=16, alignment=1](i * 16) ^ prev
@@ -1169,8 +1176,9 @@ def camellia_cbc_decrypt_kernel(
     output_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     cipher: CamelliaCipher,
     num_blocks: Int,
-    iv_ptr: Pointer[mut=True, UInt8, _, address_space=_],
+    iv_ptr: Pointer[mut=True, UInt8, _, address_space=_]
 ):
+    _validate_camellia_block_count(num_blocks)
     var ct = InlineArray[UInt8, 1024](fill=0)
     var pt = InlineArray[UInt8, 1024](fill=0)
     var ctp = ct.unsafe_ptr()
@@ -1198,8 +1206,9 @@ def camellia_ctr_kernel(
     output_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     cipher: CamelliaCipher,
     num_blocks: Int,
-    nonce_ptr: Pointer[mut=True, UInt8, _, address_space=_],
+    nonce_ptr: Pointer[mut=True, UInt8, _, address_space=_]
 ):
+    _validate_camellia_block_count(num_blocks)
     var ks = InlineArray[UInt8, 512](fill=0)
     var kp = ks.unsafe_ptr()
     var i = 0
@@ -1213,7 +1222,7 @@ def camellia_ctr_kernel(
                 output_ptr.unsafe_store[alignment=1](
                     off,
                     input_ptr.unsafe_load[width=16, alignment=1](off)
-                    ^ kp.unsafe_load[width=16, alignment=1](b * 16),
+                    ^ kp.unsafe_load[width=16, alignment=1](b * 16)
                 )
             i += 16
         while i < num_blocks:
@@ -1228,7 +1237,7 @@ def camellia_ctr_kernel(
                 output_ptr.unsafe_store[alignment=1](
                     off,
                     input_ptr.unsafe_load[width=16, alignment=1](off)
-                    ^ kp.unsafe_load[width=16, alignment=1](b * 16),
+                    ^ kp.unsafe_load[width=16, alignment=1](b * 16)
                 )
             i += n
     else:
@@ -1241,7 +1250,7 @@ def camellia_ctr_kernel(
                 output_ptr.unsafe_store[alignment=1](
                     off,
                     input_ptr.unsafe_load[width=16, alignment=1](off)
-                    ^ kp.unsafe_load[width=16, alignment=1](b * 16),
+                    ^ kp.unsafe_load[width=16, alignment=1](b * 16)
                 )
             i += 32
         while i < num_blocks:
@@ -1258,6 +1267,6 @@ def camellia_ctr_kernel(
                 output_ptr.unsafe_store[alignment=1](
                     off,
                     input_ptr.unsafe_load[width=16, alignment=1](off)
-                    ^ kp.unsafe_load[width=16, alignment=1](b * 16),
+                    ^ kp.unsafe_load[width=16, alignment=1](b * 16)
                 )
             i += n

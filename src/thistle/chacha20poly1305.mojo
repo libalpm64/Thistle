@@ -1,19 +1,21 @@
-"""
-ChaCha20-Poly1305 and XChaCha20-Poly1305 AEAD RFC 8439
-"""
+"""Implements ChaCha20-Poly1305 and XChaCha20-Poly1305 from RFC 8439."""
 
 from std.memory import bitcast
 from std.memory.unsafe_pointer import Pointer
 from std.collections import InlineArray
-from .chacha20 import ChaCha20, chacha20_block_core, simd_double_round, CHACHA_CONSTANTS, _chacha20_nonce_words
+from .chacha20 import (
+    ChaCha20, chacha20_block_core, simd_double_round, CHACHA_CONSTANTS, _chacha20_nonce_words
+)
 from .poly1305 import Poly1305
+from .utils import volatile_wipe
+
 
 def hchacha20(
     key: Span[UInt8, ...],
     input16: Span[UInt8, ...],
-    output: Span[mut=True, UInt8, ...],
+    output: Span[mut=True, UInt8, ...]
 ) raises:
-    if len(key) < 32 or len(input16) < 16:
+    if len(key) != 32 or len(input16) != 16:
         raise Error("HChaCha20 needs a 32-byte key and 16-byte input")
     if len(output) < 32:
         raise Error("HChaCha20 output needs at least 32 writable bytes")
@@ -28,7 +30,10 @@ def hchacha20(
 
     comptime for _ in range(10):
         var dr = simd_double_round(row0, row1, row2, row3)
-        row0 = dr[0]; row1 = dr[1]; row2 = dr[2]; row3 = dr[3]
+        row0 = dr[0]
+        row1 = dr[1]
+        row2 = dr[2]
+        row3 = dr[3]
 
     out_ptr.unsafe_bitcast[UInt32]().unsafe_store[alignment=1](0, row0)
     (out_ptr.unsafe_offset(16)).unsafe_bitcast[UInt32]().unsafe_store[alignment=1](0, row3)
@@ -38,7 +43,7 @@ def _aead_tag(
     poly_key: Span[UInt8, ...],
     aad: Span[UInt8, ...],
     ciphertext: Span[UInt8, ...],
-    output: Pointer[mut=True, UInt8, _, address_space=_],
+    output: Pointer[mut=True, UInt8, _, address_space=_]
 ) raises:
     var p = Poly1305(poly_key)
     var zeros16 = InlineArray[UInt8, 16](fill=0)
@@ -64,7 +69,7 @@ def _aead_core[encrypt: Bool](
     aad: Span[UInt8, ...],
     input: Span[UInt8, ...],
     output: Pointer[mut=True, UInt8, _, address_space=_],
-    tag: Pointer[mut=True, UInt8, _, address_space=_],
+    tag: Pointer[mut=True, UInt8, _, address_space=_]
 ) raises:
     var key_bytes = key.unsafe_ptr().unsafe_load[width=32, alignment=1](0)
     var nonce_bytes = InlineArray[UInt8, 12](fill=0)
@@ -81,20 +86,35 @@ def _aead_core[encrypt: Bool](
     )
     var poly_key_span = Span[UInt8, ...](unsafe_ptr=poly_key.unsafe_ptr(), length=32)
 
-    var cipher = ChaCha20(key_bytes, nonce_span, counter=1)
-    var src = input.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
-    cipher._stream_xor(src, output, len(input))
-
-    comptime if encrypt:
-        _aead_tag(
-            poly_key_span, aad,
-            Span[UInt8, ...](unsafe_ptr=output, length=len(input)), tag,
+    try:
+        var cipher = ChaCha20(key_bytes, nonce_span, counter=1)
+        var src = (
+            input.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutAnyOrigin]()
         )
-    else:
-        _aead_tag(poly_key_span, aad, input, tag)
-    var poly_key_ptr = poly_key.unsafe_ptr()
-    for i in range(32):
-        poly_key_ptr.unsafe_store[volatile=True](i, UInt8(0))
+        cipher._stream_xor(src, output, len(input))
+
+        comptime if encrypt:
+            _aead_tag(
+                poly_key_span,
+                aad,
+                Span[UInt8, ...](unsafe_ptr=output, length=len(input)),
+                tag,
+            )
+        else:
+            _aead_tag(poly_key_span, aad, input, tag)
+    finally:
+        volatile_wipe(poly_key.unsafe_ptr(), 32)
+        volatile_wipe(
+            Pointer(to=key_bytes).unsafe_mut_cast[True]().unsafe_bitcast[UInt8](),
+            32
+        )
+        volatile_wipe(Pointer(to=kw).unsafe_mut_cast[True]().unsafe_bitcast[UInt8](), 32)
+        volatile_wipe(
+            Pointer(to=block0).unsafe_mut_cast[True]().unsafe_bitcast[UInt8](),
+            64
+        )
 
 
 def chacha20_poly1305_encrypt(
@@ -103,7 +123,7 @@ def chacha20_poly1305_encrypt(
     aad: Span[UInt8, ...],
     plaintext: Span[UInt8, ...],
     ciphertext: Span[mut=True, UInt8, ...],
-    tag: Span[mut=True, UInt8, ...],
+    tag: Span[mut=True, UInt8, ...]
 ) raises:
     if len(key) != 32:
         raise Error("ChaCha20-Poly1305 key must be 32 bytes")
@@ -113,9 +133,7 @@ def chacha20_poly1305_encrypt(
         raise Error("ChaCha20-Poly1305 ciphertext output is too small")
     if len(tag) < 16:
         raise Error("ChaCha20-Poly1305 tag output is too small")
-    _aead_core[True](
-        key, nonce, aad, plaintext, ciphertext.unsafe_ptr(), tag.unsafe_ptr()
-    )
+    _aead_core[True](key, nonce, aad, plaintext, ciphertext.unsafe_ptr(), tag.unsafe_ptr())
 
 
 def chacha20_poly1305_decrypt(
@@ -124,7 +142,7 @@ def chacha20_poly1305_decrypt(
     aad: Span[UInt8, ...],
     ciphertext: Span[UInt8, ...],
     tag: Span[UInt8, ...],
-    plaintext: Span[mut=True, UInt8, ...],
+    plaintext: Span[mut=True, UInt8, ...]
 ) raises -> Bool:
     if len(key) != 32:
         raise Error("ChaCha20-Poly1305 key must be 32 bytes")
@@ -144,31 +162,38 @@ def chacha20_poly1305_decrypt(
     var nw = _chacha20_nonce_words(nonce_span)
     var block0 = chacha20_block_core(kw, 0, nw)
     var poly_key = InlineArray[UInt8, 32](fill=0)
-    poly_key.unsafe_ptr().unsafe_store[alignment=1](
-        0, bitcast[DType.uint8, 64](block0).slice[32]()
-    )
+    poly_key.unsafe_ptr().unsafe_store[alignment=1](0, bitcast[DType.uint8, 64](block0).slice[32]())
 
     var expected = InlineArray[UInt8, 16](fill=0)
-    _aead_tag(
-        Span[UInt8, ...](unsafe_ptr=poly_key.unsafe_ptr(), length=32),
-        aad, ciphertext, expected.unsafe_ptr(),
-    )
-    var diff: UInt8 = 0
-    for i in range(16):
-        diff |= expected[i] ^ tag[i]
-    if diff != 0:
-        var poly_key_ptr = poly_key.unsafe_ptr()
-        for i in range(32):
-            poly_key_ptr.unsafe_store[volatile=True](i, UInt8(0))
-        return False
+    try:
+        _aead_tag(
+            Span[UInt8, ...](unsafe_ptr=poly_key.unsafe_ptr(), length=32),
+            aad,
+            ciphertext,
+            expected.unsafe_ptr()
+        )
+        var diff: UInt8 = 0
+        for i in range(16):
+            diff |= expected[i] ^ tag[i]
+        if diff != 0:
+            return False
 
-    var cipher = ChaCha20(key_bytes, nonce_span, counter=1)
-    var src = ciphertext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
-    cipher._stream_xor(src, plaintext.unsafe_ptr(), len(ciphertext))
-    var poly_key_ptr = poly_key.unsafe_ptr()
-    for i in range(32):
-        poly_key_ptr.unsafe_store[volatile=True](i, UInt8(0))
-    return True
+        var cipher = ChaCha20(key_bytes, nonce_span, counter=1)
+        var src = ciphertext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
+        cipher._stream_xor(src, plaintext.unsafe_ptr(), len(ciphertext))
+        return True
+    finally:
+        volatile_wipe(poly_key.unsafe_ptr(), 32)
+        volatile_wipe(expected.unsafe_ptr(), 16)
+        volatile_wipe(
+            Pointer(to=key_bytes).unsafe_mut_cast[True]().unsafe_bitcast[UInt8](),
+            32
+        )
+        volatile_wipe(Pointer(to=kw).unsafe_mut_cast[True]().unsafe_bitcast[UInt8](), 32)
+        volatile_wipe(
+            Pointer(to=block0).unsafe_mut_cast[True]().unsafe_bitcast[UInt8](),
+            64
+        )
 
 
 def xchacha20_poly1305_encrypt(
@@ -177,7 +202,7 @@ def xchacha20_poly1305_encrypt(
     aad: Span[UInt8, ...],
     plaintext: Span[UInt8, ...],
     ciphertext: Span[mut=True, UInt8, ...],
-    tag: Span[mut=True, UInt8, ...],
+    tag: Span[mut=True, UInt8, ...]
 ) raises:
     if len(key) != 32:
         raise Error("XChaCha20-Poly1305 key must be 32 bytes")
@@ -193,7 +218,10 @@ def xchacha20_poly1305_encrypt(
         chacha20_poly1305_encrypt(
             Span[UInt8, ...](unsafe_ptr=sp, length=32),
             Span[UInt8, ...](unsafe_ptr=sp.unsafe_offset(32), length=12),
-            aad, plaintext, ciphertext, tag,
+            aad,
+            plaintext,
+            ciphertext,
+            tag
         )
     finally:
         for i in range(44):
@@ -206,7 +234,7 @@ def xchacha20_poly1305_decrypt(
     aad: Span[UInt8, ...],
     ciphertext: Span[UInt8, ...],
     tag: Span[UInt8, ...],
-    plaintext: Span[mut=True, UInt8, ...],
+    plaintext: Span[mut=True, UInt8, ...]
 ) raises -> Bool:
     if len(key) != 32:
         raise Error("XChaCha20-Poly1305 key must be 32 bytes")
@@ -221,7 +249,10 @@ def xchacha20_poly1305_decrypt(
         ok = chacha20_poly1305_decrypt(
             Span[UInt8, ...](unsafe_ptr=sp, length=32),
             Span[UInt8, ...](unsafe_ptr=sp.unsafe_offset(32), length=12),
-            aad, ciphertext, tag, plaintext,
+            aad,
+            ciphertext,
+            tag,
+            plaintext
         )
     finally:
         for i in range(44):
@@ -229,12 +260,14 @@ def xchacha20_poly1305_decrypt(
     return ok
 
 
-def _xchacha_subkey_nonce(key: Span[UInt8, ...], nonce: Span[UInt8, ...]) raises -> InlineArray[UInt8, 44]:
+def _xchacha_subkey_nonce(
+    key: Span[UInt8, ...], nonce: Span[UInt8, ...]
+) raises -> InlineArray[UInt8, 44]:
     var out = InlineArray[UInt8, 44](fill=0)
     hchacha20(
         key,
         Span[UInt8, ...](unsafe_ptr=nonce.unsafe_ptr(), length=16),
-        Span[mut=True, UInt8, ...](unsafe_ptr=out.unsafe_ptr(), length=32),
+        Span[mut=True, UInt8, ...](unsafe_ptr=out.unsafe_ptr(), length=32)
     )
     for i in range(8):
         out[36 + i] = nonce[16 + i]

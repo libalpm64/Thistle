@@ -4,7 +4,9 @@ from std.collections import List
 from std.sys import has_accelerator
 from thistle.sha2 import bytes_to_hex
 from thistle.aes import cpu_aes_ct_skey, AESExpandedKey
-from thistle.aes_gpu import aes_gpu_kernel_ecb, aes_gpu_kernel_ctr, aes_gpu_kernel_gcm_ctr
+from thistle.aes_gpu import (
+    aes_gpu_kernel_ecb, aes_gpu_kernel_ctr, aes_gpu_kernel_gcm_ctr
+)
 from max.gpu.host import DeviceContext
 from std.memory.unsafe_pointer import Pointer
 from std.memory import Layout, alloc
@@ -14,6 +16,7 @@ def byte_to_hex(b: UInt8) -> String:
     var hi = Int(b >> 4)
     var lo = Int(b & 0xF)
     return chr(48 + hi if hi < 10 else 87 + hi) + chr(48 + lo if lo < 10 else 87 + lo)
+
 
 @fieldwise_init
 struct TestResult(Copyable, Movable):
@@ -116,7 +119,7 @@ def test_aes_gpu_basic(json_data: PythonObject, py: PythonObject) raises -> Test
                 Int32(4),
                 Int32(rounds),
                 grid_dim=grid_dim,
-                block_dim=block_dim,
+                block_dim=block_dim
             )
             ctx.synchronize()
             _ = skey_buffer
@@ -211,7 +214,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
                 Int32(n_blocks),
                 Int32(rounds),
                 grid_dim=grid_dim,
-                block_dim=block_dim,
+                block_dim=block_dim
             )
         elif "CTR" in mode:
             var iv_hex = String(tv.get("iv", PythonObject()))
@@ -232,7 +235,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
                 nonce_buffer,
                 Int32(rounds),
                 grid_dim=grid_dim,
-                block_dim=block_dim,
+                block_dim=block_dim
             )
         elif "GCM" in mode:
             var nonce_hex = String(tv.get("nonce", PythonObject()))
@@ -257,7 +260,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
                 nonce_buffer,
                 Int32(rounds),
                 grid_dim=grid_dim,
-                block_dim=block_dim,
+                block_dim=block_dim
             )
         else:
             ctx.enqueue_function[aes_gpu_kernel_ecb](
@@ -267,7 +270,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
                 Int32(n_blocks),
                 Int32(rounds),
                 grid_dim=grid_dim,
-                block_dim=block_dim,
+                block_dim=block_dim
             )
         
         ctx.synchronize()
@@ -340,7 +343,8 @@ def main() raises:
         var json_data = load_json("tests/vectors/aes_test_vectors.json", py)
         var modes = ["AES-128-ECB", "AES-192-ECB", "AES-256-ECB", 
                      "AES-128-CTR", "AES-192-CTR", "AES-256-CTR",
-                     "AES-128-GCM", "AES-192-GCM", "AES-256-GCM"]
+                     "AES-128-GCM", "AES-192-GCM", "AES-256-GCM"
+        ]
         
         for mode in modes:
             print("Loading " + mode + " vectors...")

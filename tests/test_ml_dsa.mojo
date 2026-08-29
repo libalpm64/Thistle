@@ -22,8 +22,9 @@ from thistle.ml_dsa import (
     private_key_size,
     public_key_size,
     signature_size,
-    new_public_key,
+    new_public_key
 )
+
 
 def hex_to_bytes(s: String) -> List[UInt8]:
     var r = List[UInt8]()
@@ -350,7 +351,6 @@ def run_nist_sigver_file(prompt_path: String, expected_path: String, py: PythonO
     return passed, failed
 
 
-
 def run_external_api_smoke_tests() raises -> Tuple[Int, Int]:
     var passed = 0
     var failed = 0
@@ -370,14 +370,16 @@ def run_external_api_smoke_tests() raises -> Tuple[Int, Int]:
             passed += 1
 
         var sig_h = mldsa_sign_hedged(priv44, Span[UInt8, ...](msg), Span[UInt8, ...](ctx))
-        if not mldsa_verify(priv44.pub, Span[UInt8, ...](msg), Span[UInt8, ...](sig_h), Span[UInt8, ...](ctx)):
+        if not mldsa_verify(priv44.pub, Span[UInt8, ...](msg), Span[UInt8, ...](sig_h), Span[UInt8, ...](ctx)
+        ):
             print("external API: ML-DSA-44 hedged signature did not verify")
             failed += 1
         else:
             passed += 1
 
         var sig_d = mldsa_sign_deterministic(priv44, Span[UInt8, ...](msg), Span[UInt8, ...](ctx))
-        if not mldsa_verify(priv44.pub, Span[UInt8, ...](msg), Span[UInt8, ...](sig_d), Span[UInt8, ...](ctx)):
+        if not mldsa_verify(priv44.pub, Span[UInt8, ...](msg), Span[UInt8, ...](sig_d), Span[UInt8, ...](ctx)
+        ):
             print("external API: ML-DSA-44 deterministic signature did not verify")
             failed += 1
         else:

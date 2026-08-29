@@ -1,12 +1,11 @@
-"""
-AES-GPU implementation
-"""
+"""Provides GPU kernels for AES block and counter-mode operations."""
 
 from std.gpu import global_idx
 from std.memory import stack_allocation
 from std.memory.unsafe_pointer import Pointer
 from .aes import _ct_encrypt_blocks
 from .aes_ni import _write_gcm_counter
+
 
 @always_inline
 def add_counter_offset(counter: Pointer[mut=True, UInt8, _, address_space=_], offset: Int) -> None:
@@ -22,13 +21,15 @@ def add_counter_offset(counter: Pointer[mut=True, UInt8, _, address_space=_], of
         if new_val < old:
             carry += 1
 
+
 @always_inline
 def _gcm_counter_from_j0(
     j0: Pointer[mut=True, UInt8, _, address_space=_],
     block_index: Int,
-    counter: Pointer[mut=True, UInt8, _, address_space=_],
+    counter: Pointer[mut=True, UInt8, _, address_space=_]
 ) -> None:
     _write_gcm_counter(counter, j0, block_index)
+
 
 @always_inline
 def aes_gpu_kernel_ecb(
@@ -36,8 +37,10 @@ def aes_gpu_kernel_ecb(
     output_data: Pointer[mut=True, UInt8, MutUntrackedOrigin],
     skey: Pointer[mut=True, UInt64, MutUntrackedOrigin],
     n: Int32,
-    rounds: Int32,
+    rounds: Int32
 ) -> None:
+    if n <= 0 or (rounds != 10 and rounds != 12 and rounds != 14):
+        return
     var tid = global_idx.x
     var base_block = Int(tid) * 4
     var num_blocks = Int(n)
@@ -57,6 +60,7 @@ def aes_gpu_kernel_ecb(
             for j in range(16):
                 output_data[unsafe_offset=blk * 16 + j] = buf[unsafe_offset=k * 16 + j]
 
+
 @always_inline
 def aes_gpu_kernel_ctr(
     input_data: Pointer[mut=True, UInt8, MutUntrackedOrigin],
@@ -64,8 +68,10 @@ def aes_gpu_kernel_ctr(
     skey: Pointer[mut=True, UInt64, MutUntrackedOrigin],
     n: Int32,
     nonce: Pointer[mut=True, UInt8, MutUntrackedOrigin],
-    rounds: Int32,
+    rounds: Int32
 ) -> None:
+    if n <= 0 or (rounds != 10 and rounds != 12 and rounds != 14):
+        return
     var tid = global_idx.x
     var base_block = Int(tid) * 4
     var num_blocks = Int(n)
@@ -89,6 +95,7 @@ def aes_gpu_kernel_ctr(
             for j in range(16):
                 op[unsafe_offset=j] = bp[unsafe_offset=j] ^ buf[unsafe_offset=k * 16 + j]
 
+
 @always_inline
 def aes_gpu_kernel_gcm_ctr(
     input_data: Pointer[mut=True, UInt8, MutUntrackedOrigin],
@@ -96,8 +103,10 @@ def aes_gpu_kernel_gcm_ctr(
     skey: Pointer[mut=True, UInt64, MutUntrackedOrigin],
     n: Int32,
     j0: Pointer[mut=True, UInt8, MutUntrackedOrigin],
-    rounds: Int32,
+    rounds: Int32
 ) -> None:
+    if n <= 0 or (rounds != 10 and rounds != 12 and rounds != 14):
+        return
     var tid = global_idx.x
     var base_block = Int(tid) * 4
     var num_blocks = Int(n)

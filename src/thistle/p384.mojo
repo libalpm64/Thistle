@@ -7,7 +7,9 @@ from .utils import u64_nonzero_choice, u64_zero_choice
 from .sha2 import sha384_hash
 from .pbkdf2 import hmac_sha384
 from std.utils import StaticTuple
-from .weierstrass import Limbs, U384, Point, JacobianPoint, cmp as ws_cmp, sub_raw as ws_sub_raw, add_raw as ws_add_raw, select as ws_select, zero_choice as ws_zero_choice, add_mod as ws_add_mod, sub_mod as ws_sub_mod, from_be as ws_from_be, to_be as ws_to_be, mont_mul as ws_mont_mul, mont_sqr as ws_mont_sqr, to_mont as ws_to_mont, from_mont as ws_from_mont, mul_mod as ws_mul_mod, square_mod as ws_square_mod, is_on_curve as ws_is_on_curve, mul_small_mod as ws_mul_small_mod, jacobian_double_ct as ws_jacobian_double_ct, jacobian_infinity as ws_jacobian_infinity, select_jacobian_ct as ws_select_jacobian_ct, jacobian_add_affine_non_equal_ct as ws_jacobian_add_affine, pow_mod as ws_pow_mod, sqn as ws_sqn, inv_p as ws_inv_p, jacobian_to_affine as ws_jacobian_to_affine, scalar_mult as ws_scalar_mult, base_table_entry as ws_base_table_entry, scalar_mult_base as ws_scalar_mult_base, mod_inv_ct as ws_mod_inv_ct, reduce_mod as ws_reduce_mod, point_add as ws_point_add, rfc6979 as ws_rfc6979
+from .weierstrass import (
+    Limbs, U384, Point, JacobianPoint, cmp as ws_cmp, sub_raw as ws_sub_raw, add_raw as ws_add_raw, select as ws_select, zero_choice as ws_zero_choice, add_mod as ws_add_mod, sub_mod as ws_sub_mod, from_be as ws_from_be, to_be as ws_to_be, mont_mul as ws_mont_mul, mont_sqr as ws_mont_sqr, to_mont as ws_to_mont, from_mont as ws_from_mont, mul_mod as ws_mul_mod, square_mod as ws_square_mod, is_on_curve as ws_is_on_curve, mul_small_mod as ws_mul_small_mod, jacobian_double_ct as ws_jacobian_double_ct, jacobian_infinity as ws_jacobian_infinity, select_jacobian_ct as ws_select_jacobian_ct, jacobian_add_affine_non_equal_ct as ws_jacobian_add_affine, pow_mod as ws_pow_mod, sqn as ws_sqn, inv_p as ws_inv_p, jacobian_to_affine as ws_jacobian_to_affine, scalar_mult as ws_scalar_mult, base_table_entry as ws_base_table_entry, scalar_mult_base as ws_scalar_mult_base, mod_inv_ct as ws_mod_inv_ct, reduce_mod as ws_reduce_mod, point_add as ws_point_add, rfc6979 as ws_rfc6979
+)
 
 comptime P384_SIZE = 48
 comptime P384_POINT_SIZE = 97
@@ -24,7 +26,7 @@ def _p() -> U384:
         0xFFFFFFFFFFFFFFFE,
         0xFFFFFFFFFFFFFFFF,
         0xFFFFFFFFFFFFFFFF,
-        0xFFFFFFFFFFFFFFFF,
+        0xFFFFFFFFFFFFFFFF
     )
 
 
@@ -35,7 +37,7 @@ def _a() -> U384:
         0xFFFFFFFFFFFFFFFE,
         0xFFFFFFFFFFFFFFFF,
         0xFFFFFFFFFFFFFFFF,
-        0xFFFFFFFFFFFFFFFF,
+        0xFFFFFFFFFFFFFFFF
     )
 
 
@@ -46,7 +48,7 @@ def _b() -> U384:
         0x0314088F5013875A,
         0x181D9C6EFE814112,
         0x988E056BE3F82D19,
-        0xB3312FA7E23EE7E4,
+        0xB3312FA7E23EE7E4
     )
 
 
@@ -57,7 +59,7 @@ def _n() -> U384:
         0xC7634D81F4372DDF,
         0xFFFFFFFFFFFFFFFF,
         0xFFFFFFFFFFFFFFFF,
-        0xFFFFFFFFFFFFFFFF,
+        0xFFFFFFFFFFFFFFFF
     )
 
 
@@ -68,7 +70,7 @@ def _gx() -> U384:
         0x59F741E082542A38,
         0x6E1D3B628BA79B98,
         0x8EB1C71EF320AD74,
-        0xAA87CA22BE8B0537,
+        0xAA87CA22BE8B0537
     )
 
 
@@ -79,7 +81,7 @@ def _gy() -> U384:
         0xE9DA3113B5F0B8C0,
         0xF8F41DBD289A147C,
         0x5D9E98BF9292DC29,
-        0x3617DE4A96262C6F,
+        0x3617DE4A96262C6F
     )
 
 
@@ -91,7 +93,7 @@ def _sqrt_exp() -> U384:
         0xFFFFFFFFFFFFFFFF,
         0xFFFFFFFFFFFFFFFF,
         0xFFFFFFFFFFFFFFFF,
-        0x3FFFFFFFFFFFFFFF,
+        0x3FFFFFFFFFFFFFFF
     )
 
 
@@ -102,7 +104,7 @@ def _rr() -> U384:
         0xFFFFFFFE00000000,
         0x0000000200000000,
         0x0000000000000001,
-        0x0000000000000000,
+        0x0000000000000000
     )
 
 
@@ -113,7 +115,7 @@ def _one_mont() -> U384:
         0x0000000000000001,
         0x0000000000000000,
         0x0000000000000000,
-        0x0000000000000000,
+        0x0000000000000000
     )
 
 
@@ -419,7 +421,7 @@ def p384_public_key(
 def p384_ecdh(
     private_key: Span[UInt8, ...],
     public_key: Span[UInt8, ...],
-    output: Span[mut=True, UInt8, ...],
+    output: Span[mut=True, UInt8, ...]
 ) -> Bool:
     if len(private_key) != 48 or len(output) < P384_SIZE:
         return False
@@ -452,7 +454,7 @@ def _n_rr() -> U384:
         0xBC3E483AFCB82947,
         0xD40D49174AAB1CC5,
         0x3FB05B7A28266895,
-        0x0C84EE012B39BF21,
+        0x0C84EE012B39BF21
     )
 
 
@@ -463,7 +465,7 @@ def _n_one_mont() -> U384:
         0x389CB27E0BC8D220,
         0,
         0,
-        0,
+        0
     )
 
 
@@ -474,7 +476,7 @@ def _n_minus_2() -> U384:
         0xC7634D81F4372DDF,
         0xFFFFFFFFFFFFFFFF,
         0xFFFFFFFFFFFFFFFF,
-        0xFFFFFFFFFFFFFFFF,
+        0xFFFFFFFFFFFFFFFF
     )
 
 
@@ -526,12 +528,10 @@ def _rfc6979_p384(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip:
 def p384_ecdsa_sign_digest(
     private_key: Span[UInt8, ...],
     digest: Span[UInt8, ...],
-    signature: Span[mut=True, UInt8, ...],
+    signature: Span[mut=True, UInt8, ...]
 ) -> Bool:
-    if (
-        len(private_key) != 48 or len(digest) != 48
-        or len(signature) < P384_SIGNATURE_SIZE
-    ):
+    if len(private_key) != 48 or len(digest) != 48
+        or len(signature) < P384_SIGNATURE_SIZE:
         return False
     var signature_ptr = signature.unsafe_ptr()
     var d = _from_be(private_key)
@@ -573,7 +573,7 @@ def p384_ecdsa_sign_digest(
 def p384_ecdsa_sign(
     private_key: Span[UInt8, ...],
     message: Span[UInt8, ...],
-    signature: Span[mut=True, UInt8, ...],
+    signature: Span[mut=True, UInt8, ...]
 ) -> Bool:
     if len(signature) < P384_SIGNATURE_SIZE:
         return False
@@ -595,7 +595,7 @@ def _p384_add_public(a: P384Point, b: P384Point) -> P384Point:
 def p384_ecdsa_verify_digest(
     public_key: Span[UInt8, ...],
     digest: Span[UInt8, ...],
-    signature: Span[UInt8, ...],
+    signature: Span[UInt8, ...]
 ) -> Bool:
     if len(digest) != 48 or len(signature) != 96:
         return False
@@ -619,7 +619,7 @@ def p384_ecdsa_verify_digest(
 def p384_ecdsa_verify(
     public_key: Span[UInt8, ...],
     message: Span[UInt8, ...],
-    signature: Span[UInt8, ...],
+    signature: Span[UInt8, ...]
 ) -> Bool:
     var digest = sha384_hash(message)
     return p384_ecdsa_verify_digest(public_key, Span[UInt8, ...](digest), signature)
@@ -639,7 +639,7 @@ def p384_ecdsa_sign_der(
 
 def p384_ecdsa_verify_der(
     public_key: Span[UInt8, ...], message: Span[UInt8, ...],
-    signature: Span[UInt8, ...],
+    signature: Span[UInt8, ...]
 ) -> Bool:
     from .ecdsa_der import ecdsa_der_decode
     var raw = ecdsa_der_decode(signature, P384_SIZE)
@@ -657,7 +657,7 @@ def p384_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
             var public_key = List[UInt8](unsafe_uninit_length=97)
             if p384_public_key(
                 Span[UInt8, ...](private_key),
-                Span[mut=True, UInt8, ...](public_key),
+                Span[mut=True, UInt8, ...](public_key)
             ):
                 _wipe_u384(d)
                 return (private_key^, public_key^)

@@ -1,10 +1,14 @@
+"""Encodes and decodes ECDSA signatures using the DER format."""
+
 from std.collections import List
 
 
 def ecdsa_der_encode(
     signature: Span[UInt8, ...], size: Int
 ) raises -> List[UInt8]:
-    if size <= 0 or len(signature) != 2 * size:
+    # This codec intentionally supports only DER's one-byte length form.  A
+    # 60-byte scalar is the largest one whose two padded INTEGERs can fit.
+    if size <= 0 or size > 60 or len(signature) != 2 * size:
         raise Error("invalid ECDSA signature size")
     var r_start = 0
     while r_start < size - 1 and signature[r_start] == 0:
@@ -39,7 +43,7 @@ def ecdsa_der_encode(
 
 
 def ecdsa_der_decode(signature: Span[UInt8, ...], size: Int) -> List[UInt8]:
-    if size <= 0 or len(signature) < 6 or signature[0] != 0x30:
+    if size <= 0 or size > 60 or len(signature) < 6 or signature[0] != 0x30:
         return List[UInt8]()
     if signature[1] >= 0x80 or Int(signature[1]) != len(signature) - 2:
         return List[UInt8]()

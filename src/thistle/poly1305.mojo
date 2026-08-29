@@ -1,6 +1,4 @@
-"""
-Poly1305 per RFC 8439
-"""
+"""Implements the Poly1305 one-time authenticator from RFC 8439."""
 
 from std.memory import Pointer
 from std.collections import InlineArray
@@ -14,7 +12,7 @@ def _le64(ptr: Pointer[mut=False, UInt8, _, address_space=_], offset: Int) -> UI
     return (ptr.unsafe_offset(offset)).unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]()
 
 
-struct _RPower(Movable, Copyable, ImplicitlyCopyable):
+struct _RPower(Copyable, ImplicitlyCopyable, Movable):
     var r0: UInt64
     var r1: UInt64
     var r2: UInt64
@@ -31,13 +29,19 @@ struct _RPower(Movable, Copyable, ImplicitlyCopyable):
 
     @always_inline
     def __copyinit__(out self, copy: Self):
-        self.r0 = copy.r0; self.r1 = copy.r1; self.r2 = copy.r2
-        self.s1 = copy.s1; self.s2 = copy.s2
+        self.r0 = copy.r0
+        self.r1 = copy.r1
+        self.r2 = copy.r2
+        self.s1 = copy.s1
+        self.s2 = copy.s2
 
     @always_inline
     def __moveinit__(out self, deinit take: Self):
-        self.r0 = take.r0; self.r1 = take.r1; self.r2 = take.r2
-        self.s1 = take.s1; self.s2 = take.s2
+        self.r0 = take.r0
+        self.r1 = take.r1
+        self.r2 = take.r2
+        self.s1 = take.s1
+        self.s2 = take.s2
 
     @always_inline
     def wipe(mut self):
@@ -51,7 +55,7 @@ struct _RPower(Movable, Copyable, ImplicitlyCopyable):
 @always_inline
 def _mul_acc(
     h0: UInt64, h1: UInt64, h2: UInt64, r: _RPower,
-    mut d0: UInt128, mut d1: UInt128, mut d2: UInt128,
+    mut d0: UInt128, mut d1: UInt128, mut d2: UInt128
 ):
     d0 += UInt128(h0) * UInt128(r.r0) + UInt128(h1) * UInt128(r.s2) + UInt128(h2) * UInt128(r.s1)
     d1 += UInt128(h0) * UInt128(r.r1) + UInt128(h1) * UInt128(r.r0) + UInt128(h2) * UInt128(r.s2)
@@ -59,7 +63,8 @@ def _mul_acc(
 
 
 @always_inline
-def _reduce(mut h0: UInt64, mut h1: UInt64, mut h2: UInt64, d0: UInt128, d1: UInt128, d2: UInt128):
+def _reduce(mut h0: UInt64, mut h1: UInt64, mut h2: UInt64, d0: UInt128, d1: UInt128, d2: UInt128
+):
     var c = d0 >> 44
     h0 = d0.cast[DType.uint64]() & _M44
     var e1 = d1 + c
@@ -75,14 +80,15 @@ def _reduce(mut h0: UInt64, mut h1: UInt64, mut h2: UInt64, d0: UInt128, d1: UIn
 
 
 @always_inline
-def _limbs_at(ptr: Pointer[mut=False, UInt8, _, address_space=_], offset: Int, hibit: UInt64) -> SIMD[DType.uint64, 4]:
+def _limbs_at(ptr: Pointer[mut=False, UInt8, _, address_space=_], offset: Int, hibit: UInt64
+) -> SIMD[DType.uint64, 4]:
     var t0 = _le64(ptr, offset)
     var t1 = _le64(ptr, offset + 8)
     return SIMD[DType.uint64, 4](
         t0 & _M44,
         ((t0 >> 44) | (t1 << 20)) & _M44,
         ((t1 >> 24) & _M42) | hibit,
-        0,
+        0
     )
 
 
@@ -106,7 +112,7 @@ struct Poly1305:
     var powers8_ready: Bool
 
     def __init__(out self, key: Span[UInt8, ...]) raises:
-        if len(key) < 32:
+        if len(key) != 32:
             raise Error("Poly1305 key must be 32 bytes")
         var kp = key.unsafe_ptr()
         var t0 = _le64(kp, 0)
@@ -114,7 +120,7 @@ struct Poly1305:
         self.r = _RPower(
             t0 & 0xFFC0FFFFFFF,
             ((t0 >> 44) | (t1 << 20)) & 0xFFFFFC0FFFF,
-            (t1 >> 24) & 0x00FFFFFFC0F,
+            (t1 >> 24) & 0x00FFFFFFC0F
         )
         self.pad0 = _le64(kp, 16)
         self.pad1 = _le64(kp, 24)
@@ -186,7 +192,8 @@ struct Poly1305:
         _reduce(self.h0, self.h1, self.h2, d0, d1, d2)
 
     @no_inline
-    def _blocks8(mut self, ptr: Pointer[mut=False, UInt8, _, address_space=_], count8: Int):
+    def _blocks8(mut self, ptr: Pointer[mut=False, UInt8, _, address_space=_], count8: Int
+    ):
         var h0 = self.h0
         var h1 = self.h1
         var h2 = self.h2
@@ -218,7 +225,8 @@ struct Poly1305:
         self.h2 = h2
 
     @no_inline
-    def _blocks4(mut self, ptr: Pointer[mut=False, UInt8, _, address_space=_], count4: Int):
+    def _blocks4(mut self, ptr: Pointer[mut=False, UInt8, _, address_space=_], count4: Int
+    ):
         var h0 = self.h0
         var h1 = self.h1
         var h2 = self.h2
@@ -373,7 +381,7 @@ struct Poly1305:
 def poly1305_mac(
     key: Span[UInt8, ...],
     message: Span[UInt8, ...],
-    output: Span[mut=True, UInt8, ...],
+    output: Span[mut=True, UInt8, ...]
 ) raises:
     if len(output) < 16:
         raise Error("Poly1305 output needs at least 16 writable bytes")

@@ -1,8 +1,10 @@
-"""
-SHA-NI implementation In Mojo.
-"""
+"""Provides hardware-accelerated SHA-2 transforms."""
 
-from std.sys import llvm_intrinsic, CompilationTarget, prefetch, PrefetchOptions
+from std.sys import (
+    llvm_intrinsic,
+    inlined_assembly,
+    CompilationTarget, prefetch, PrefetchOptions
+)
 from std.memory import Pointer, bitcast
 from .utils import StackBuffer
 from std.builtin.simd import SIMD
@@ -34,18 +36,22 @@ comptime SHA256_K = SIMD[DType.uint32, 64](
     0xD6990624, 0xF40E3585, 0x106AA070, 0x19A4C116, 0x1E376C08,
     0x2748774C, 0x34B0BCB5, 0x391C0CB3, 0x4ED8AA4A, 0x5B9CCA4F,
     0x682E6FF3, 0x748F82EE, 0x78A5636F, 0x84C87814, 0x8CC70208,
-    0x90BEFFFA, 0xA4506CEB, 0xBEF9A3F7, 0xC67178F2,
+    0x90BEFFFA, 0xA4506CEB, 0xBEF9A3F7, 0xC67178F2
 )
 
 
 @always_inline
 def has_x86_sha_ni() -> Bool:
-    return CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]()
+    return (
+        CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]()
+    )
 
 
 @always_inline
 def has_arm_sha2() -> Bool:
-    return CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86()
+    return (
+        CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86()
+    )
 
 
 @always_inline("nodebug")
@@ -152,7 +158,7 @@ def _sha256ni_transform_arm(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...
             w[i & 3] = _arm_sha256su1(
                 _arm_sha256su0(w[i & 3], w[(i + 1) & 3]),
                 w[(i + 2) & 3],
-                w[(i + 3) & 3],
+                w[(i + 3) & 3]
             )
         var tmp = st0
         st0 = _arm_sha256h(st0, st1, wk)
@@ -266,6 +272,7 @@ def sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]:
 
     return output^
 
+
 def has_sha_ni() -> Bool:
     return has_x86_sha_ni() or has_arm_sha2()
 
@@ -273,7 +280,7 @@ def has_sha_ni() -> Bool:
 def sha256ni_transform_blocks(
     mut state: SIMD[DType.uint32, 8],
     data: Pointer[mut=False, UInt8, _, address_space=_],
-    nblocks: Int,
+    nblocks: Int
 ):
     comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86():
         var st0 = SIMD128(state[0], state[1], state[2], state[3])
@@ -298,7 +305,7 @@ def sha256ni_transform_blocks(
                     w[i & 3] = _arm_sha256su1(
                         _arm_sha256su0(w[i & 3], w[(i + 1) & 3]),
                         w[(i + 2) & 3],
-                        w[(i + 3) & 3],
+                        w[(i + 3) & 3]
                     )
                 var tmp = st0
                 st0 = _arm_sha256h(st0, st1, wk)
@@ -319,6 +326,40 @@ def sha256ni_transform_blocks(
 
 comptime SIMD64x2 = SIMD[DType.uint64, 2]
 
+
+@always_inline("nodebug")
+def _sha512_dit_begin() -> Int64:
+    """Enable ARM data-independent timing and return the prior DIT state."""
+    comptime if CompilationTarget.is_macos() and CompilationTarget.has_neon():
+        return inlined_assembly[
+            """
+            mrs x0, DIT
+            msr DIT, #1
+            sb
+            """,
+            Int64,
+            constraints="={x0},~{memory}",
+            has_side_effect=True
+        ]()
+    else:
+        return 0
+
+
+@always_inline("nodebug")
+def _sha512_dit_restore(previous: Int64):
+    """Restore the ARM DIT state saved by `_sha512_dit_begin`."""
+    comptime if CompilationTarget.is_macos() and CompilationTarget.has_neon():
+        _ = inlined_assembly[
+            """
+            msr DIT, x9
+            sb
+            """,
+            Int64,
+            constraints="={x0},0,{x9},~{memory}",
+            has_side_effect=True
+        ](Int64(0), previous)
+
+
 comptime SHA512NI_K = StaticTuple[UInt64, 80](
     0x428A2F98D728AE22, 0x7137449123EF65CD, 0xB5C0FBCFEC4D3B2F, 0xE9B5DBA58189DBBC, 0x3956C25BF348B538,
     0x59F111F1B605D019, 0x923F82A4AF194F9B, 0xAB1C5ED5DA6D8118, 0xD807AA98A3030242, 0x12835B0145706FBE,
@@ -335,7 +376,7 @@ comptime SHA512NI_K = StaticTuple[UInt64, 80](
     0x90BEFFFA23631E28, 0xA4506CEBDE82BDE9, 0xBEF9A3F7B2C67915, 0xC67178F2E372532B, 0xCA273ECEEA26619C,
     0xD186B8C721C0C207, 0xEADA7DD6CDE0EB1E, 0xF57D4F7FEE6ED178, 0x06F067AA72176FBA, 0x0A637DC5A2C898A6,
     0x113F9804BEF90DAE, 0x1B710B35131C471B, 0x28DB77F523047D84, 0x32CAAB7B40C72493, 0x3C9EBE0A15C9BEBC,
-    0x431D67C49C100D4C, 0x4CC5D4BECB3E42B6, 0x597F299CFC657E2A, 0x5FCB6FAB3AD6FAEC, 0x6C44198C4A475817,
+    0x431D67C49C100D4C, 0x4CC5D4BECB3E42B6, 0x597F299CFC657E2A, 0x5FCB6FAB3AD6FAEC, 0x6C44198C4A475817
 )
 
 
@@ -396,8 +437,9 @@ def prefetch_next_block512(ptr: Pointer[mut=False, UInt8, _, address_space=_]):
 def sha512ni_transform_blocks(
     mut state: SIMD[DType.uint64, 8],
     data: Pointer[mut=False, UInt8, _, address_space=_],
-    nblocks: Int,
+    nblocks: Int
 ):
+    var previous_dit = _sha512_dit_begin()
     var ab = SIMD64x2(state[0], state[1])
     var cd = SIMD64x2(state[2], state[3])
     var ef = SIMD64x2(state[4], state[5])
@@ -427,7 +469,7 @@ def sha512ni_transform_blocks(
                 w[t & 7] = _sha512su1(
                     _sha512su0(w[t & 7], w[(t + 1) & 7]),
                     w[(t + 7) & 7],
-                    _ext1(w[(t + 4) & 7], w[(t + 5) & 7]),
+                    _ext1(w[(t + 4) & 7], w[(t + 5) & 7])
                 )
             v[d] = _sha512h2(intermed, v[(d + 2) & 3], v[(d + 1) & 3])
             v[(d + 2) & 3] += intermed
@@ -440,3 +482,4 @@ def sha512ni_transform_blocks(
     state = SIMD[DType.uint64, 8](
         ab[0], ab[1], cd[0], cd[1], ef[0], ef[1], gh[0], gh[1]
     )
+    _sha512_dit_restore(previous_dit)

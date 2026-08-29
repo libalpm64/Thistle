@@ -1,27 +1,35 @@
-"""
-AES-NI implementation
-"""
+"""Provides AES hardware acceleration and AES-GCM contexts."""
 
 from std.collections import List, InlineArray
 from std.sys import llvm_intrinsic, CompilationTarget
 from std.memory import bitcast, unsafe_memset_zero, unsafe_memcpy, Pointer
 from std.os import abort
 from std.utils import StaticTuple
-from .aes import cpu_aes_encrypt, cpu_aes_ct_encrypt, cpu_aes_ct_encrypt16, cpu_aes_ct_skey, expand_key_128_into, expand_key_192_into, expand_key_256_into
+from .aes import (
+    cpu_aes_encrypt, cpu_aes_ct_encrypt, cpu_aes_ct_encrypt16, cpu_aes_ct_skey, expand_key_128_into, expand_key_192_into, expand_key_256_into,
+    _validate_aes_rounds,
+    _validate_aes_block_count
+)
 from .utils import StackBuffer, load_64be, store_64be, volatile_wipe
 
 comptime SIMD16 = SIMD[DType.uint8, 16]
 comptime SIMD128 = SIMD[DType.uint64, 2]
 
+
 @always_inline
 def has_arm_crypto() -> Bool:
-    return CompilationTarget.has_neon() and not CompilationTarget.is_x86() and (
-        CompilationTarget._has_feature["crypto"]() or CompilationTarget._has_feature["aes"]()
+    return (
+        CompilationTarget.has_neon() and not CompilationTarget.is_x86() and (
+        CompilationTarget._has_feature["crypto"]() or CompilationTarget._has_feature["aes"]())
     )
+
 
 @always_inline
 def has_x86_aes_ni() -> Bool:
-    return CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]()
+    return (
+        CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]()
+    )
+
 
 @always_inline
 def _aese(lhs: SIMD16, rhs: SIMD16) -> SIMD16:
@@ -32,6 +40,7 @@ def _aese(lhs: SIMD16, rhs: SIMD16) -> SIMD16:
     else:
         return SIMD16(0)
 
+
 @always_inline
 def _aesmc(state: SIMD16) -> SIMD16:
     comptime if has_arm_crypto():
@@ -40,6 +49,7 @@ def _aesmc(state: SIMD16) -> SIMD16:
         )
     else:
         return SIMD16(0)
+
 
 @always_inline
 def _mm_aesenc_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
@@ -50,6 +60,7 @@ def _mm_aesenc_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
     else:
         return SIMD128(0)
 
+
 @always_inline
 def _mm_aesenclast_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
     comptime if has_x86_aes_ni():
@@ -59,20 +70,23 @@ def _mm_aesenclast_si128(lhs: SIMD128, rhs: SIMD128) -> SIMD128:
     else:
         return SIMD128(0)
 
+
 @always_inline
 def _mm_loadu_si128(ptr: Pointer[mut=True, UInt8, _, address_space=_]) -> SIMD128:
     return ptr.unsafe_bitcast[UInt64]().unsafe_load[width=2, alignment=1]()
+
 
 @always_inline
 def _mm_storeu_si128(ptr: Pointer[mut=True, UInt8, _, address_space=_], data: SIMD128) -> None:
     var bytes: SIMD[DType.uint8, 16] = bitcast[DType.uint8, 16](data)
     ptr.unsafe_store[width=16, alignment=1](0, bytes)
 
+
 @always_inline
 def _write_gcm_counter(
     counter_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     j0_ptr: Pointer[mut=True, UInt8, _, address_space=_],
-    block_index: Int,
+    block_index: Int
 ) -> None:
     if block_index < 0:
         abort("GCM counter block_index cannot be negative")
@@ -91,6 +105,7 @@ def _write_gcm_counter(
     counter_ptr.unsafe_store(13, UInt8((ctr >> 16) & 0xFF))
     counter_ptr.unsafe_store(14, UInt8((ctr >> 8) & 0xFF))
     counter_ptr.unsafe_store(15, UInt8(ctr & 0xFF))
+
 
 @always_inline
 def _load_round_key(idx: Int, round_keys: Pointer[mut=True, UInt32, _, address_space=_]) -> SIMD128:
@@ -133,6 +148,7 @@ def x86_aes_encrypt_256(
     x86_aes_encrypt_256_direct(state, round_keys)
     _mm_storeu_si128(pt, state)
 
+
 @always_inline
 def x86_aes_encrypt_128_direct(
     mut state: SIMD128,
@@ -147,6 +163,7 @@ def x86_aes_encrypt_128_direct(
         state = _mm_aesenc_si128(state, keys[i])
     state = _mm_aesenclast_si128(state, keys[10])
 
+
 @always_inline
 def x86_aes_encrypt_192_direct(
     mut state: SIMD128,
@@ -160,6 +177,7 @@ def x86_aes_encrypt_192_direct(
     comptime for i in range(1, 12):
         state = _mm_aesenc_si128(state, keys[i])
     state = _mm_aesenclast_si128(state, keys[12])
+
 
 @always_inline
 def x86_aes_encrypt_256_direct(
@@ -182,9 +200,11 @@ def _arm_load_keys[N: Int](
 ) -> InlineArray[SIMD16, N]:
     var keys = InlineArray[SIMD16, N](fill=SIMD16(0))
     comptime for i in range(N):
-        var raw = (round_keys.unsafe_offset(i * 4)).unsafe_bitcast[UInt8]().unsafe_load[
+        var raw = (
+            (round_keys.unsafe_offset(i * 4)).unsafe_bitcast[UInt8]().unsafe_load[
             width=16, alignment=1
         ]()
+        )
         keys[i] = raw.shuffle[
             3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12
         ]()
@@ -228,17 +248,18 @@ def arm_aes_encrypt_256(
     var x = pt.unsafe_load[width=16, alignment=1](0)
     pt.unsafe_store[alignment=1](0, _arm_enc_block[14](x, keys))
 
+
 @always_inline
 def _arm_ecb_loop[NR: Int](
     input_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     output_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     round_keys: Pointer[mut=True, UInt32, _, address_space=_],
-    num_blocks: Int,
+    num_blocks: Int
 ) -> None:
     var keys = _arm_load_keys[NR + 1](round_keys)
     var i = 0
     while i + 4 <= num_blocks:
-        var p = input_ptr + i * 16
+        var p = input_ptr.unsafe_offset(i * 16)
         var b0 = p.unsafe_load[width=16, alignment=1](0)
         var b1 = p.unsafe_load[width=16, alignment=1](16)
         var b2 = p.unsafe_load[width=16, alignment=1](32)
@@ -252,15 +273,15 @@ def _arm_ecb_loop[NR: Int](
         b1 = _aese(b1, keys[NR - 1]) ^ keys[NR]
         b2 = _aese(b2, keys[NR - 1]) ^ keys[NR]
         b3 = _aese(b3, keys[NR - 1]) ^ keys[NR]
-        var q = output_ptr + i * 16
+        var q = output_ptr.unsafe_offset(i * 16)
         q.unsafe_store[alignment=1](0, b0)
         q.unsafe_store[alignment=1](16, b1)
         q.unsafe_store[alignment=1](32, b2)
         q.unsafe_store[alignment=1](48, b3)
         i += 4
     while i < num_blocks:
-        var x = (input_ptr + i * 16).unsafe_load[width=16, alignment=1](0)
-        (output_ptr + i * 16).unsafe_store[alignment=1](0, _arm_enc_block[NR](x, keys))
+        var x = input_ptr.unsafe_offset(i * 16).unsafe_load[width=16, alignment=1](0)
+        output_ptr.unsafe_offset(i * 16).unsafe_store[alignment=1](0, _arm_enc_block[NR](x, keys))
         i += 1
 
 
@@ -272,6 +293,8 @@ def arm_aes_ecb_kernel(
     num_blocks: Int,
     rounds: Int
 ) -> None:
+    _validate_aes_rounds(rounds)
+    _validate_aes_block_count(num_blocks)
     if rounds == 10:
         _arm_ecb_loop[10](input_ptr, output_ptr, round_keys, num_blocks)
     elif rounds == 12:
@@ -286,7 +309,7 @@ def _arm_cbc_loop[NR: Int](
     output_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     round_keys: Pointer[mut=True, UInt32, _, address_space=_],
     num_blocks: Int,
-    iv_ptr: Pointer[mut=True, UInt8, _, address_space=_],
+    iv_ptr: Pointer[mut=True, UInt8, _, address_space=_]
 ) -> None:
     var keys = _arm_load_keys[NR + 1](round_keys)
     var prev = iv_ptr.unsafe_load[width=16, alignment=1](0)
@@ -297,8 +320,8 @@ def _arm_cbc_loop[NR: Int](
         var x = src.unsafe_load[width=16, alignment=1](0) ^ prev
         prev = _arm_enc_block[NR](x, keys)
         dst.unsafe_store[alignment=1](0, prev)
-        src += 16
-        dst += 16
+        src = src.unsafe_offset(16)
+        dst = dst.unsafe_offset(16)
         i += 1
 
 
@@ -311,12 +334,15 @@ def arm_aes_cbc_kernel(
     iv_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
+    _validate_aes_rounds(rounds)
+    _validate_aes_block_count(num_blocks)
     if rounds == 10:
         _arm_cbc_loop[10](input_ptr, output_ptr, round_keys, num_blocks, iv_ptr)
     elif rounds == 12:
         _arm_cbc_loop[12](input_ptr, output_ptr, round_keys, num_blocks, iv_ptr)
     else:
         _arm_cbc_loop[14](input_ptr, output_ptr, round_keys, num_blocks, iv_ptr)
+
 
 @always_inline
 def arm_aes_xts_kernel(
@@ -328,6 +354,8 @@ def arm_aes_xts_kernel(
     tweak_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
+    _validate_aes_rounds(rounds)
+    _validate_aes_block_count(num_blocks)
     var tweak = tweak_ptr.unsafe_load[width=16, alignment=1](0)
     if rounds == 10:
         tweak = _arm_enc_block[10](tweak, _arm_load_keys[11](round_keys2))
@@ -369,6 +397,7 @@ def arm_aes_xts_kernel(
             )
             i += 1
 
+
 @always_inline
 def x86_aes_ecb_kernel(
     input_ptr: Pointer[mut=True, UInt8, _, address_space=_],
@@ -377,9 +406,11 @@ def x86_aes_ecb_kernel(
     num_blocks: Int,
     rounds: Int
 ) -> None:
+    _validate_aes_rounds(rounds)
+    _validate_aes_block_count(num_blocks)
     var i = 0
     while i < num_blocks:
-        var block = _mm_loadu_si128(input_ptr + i * 16)
+        var block = _mm_loadu_si128(input_ptr.unsafe_offset(i * 16))
         
         if rounds == 10:
             x86_aes_encrypt_128_direct(block, round_keys)
@@ -388,8 +419,9 @@ def x86_aes_ecb_kernel(
         else:
             x86_aes_encrypt_256_direct(block, round_keys)
         
-        _mm_storeu_si128(output_ptr + i * 16, block)
+        _mm_storeu_si128(output_ptr.unsafe_offset(i * 16), block)
         i += 1
+
 
 @always_inline
 def x86_aes_cbc_kernel(
@@ -400,11 +432,13 @@ def x86_aes_cbc_kernel(
     iv_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
+    _validate_aes_rounds(rounds)
+    _validate_aes_block_count(num_blocks)
     var prev_block = _mm_loadu_si128(iv_ptr)
     
     var i = 0
     while i < num_blocks:
-        var block = _mm_loadu_si128(input_ptr + i * 16)
+        var block = _mm_loadu_si128(input_ptr.unsafe_offset(i * 16))
         block = block ^ prev_block
         
         if rounds == 10:
@@ -414,9 +448,10 @@ def x86_aes_cbc_kernel(
         else:
             x86_aes_encrypt_256_direct(block, round_keys)
         
-        _mm_storeu_si128(output_ptr + i * 16, block)
+        _mm_storeu_si128(output_ptr.unsafe_offset(i * 16), block)
         prev_block = block
         i += 1
+
 
 @always_inline
 def _gf_mul2_xts_simd(val: SIMD128) -> SIMD128:
@@ -425,6 +460,7 @@ def _gf_mul2_xts_simd(val: SIMD128) -> SIMD128:
     var shifted_lo = val[0] << 1
     var shifted_hi = (val[1] << 1) | carry_lo_to_hi
     return SIMD128(shifted_lo ^ (msb * UInt64(0x87)), shifted_hi)
+
 
 @always_inline
 def x86_aes_xts_kernel(
@@ -436,6 +472,8 @@ def x86_aes_xts_kernel(
     tweak_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
+    _validate_aes_rounds(rounds)
+    _validate_aes_block_count(num_blocks)
     var tweak = _mm_loadu_si128(tweak_ptr)
     
     if rounds == 10:
@@ -447,7 +485,7 @@ def x86_aes_xts_kernel(
     
     var i = 0
     while i < num_blocks:
-        var in_block = _mm_loadu_si128(input_ptr + i * 16)
+        var in_block = _mm_loadu_si128(input_ptr.unsafe_offset(i * 16))
         var xored = in_block ^ tweak
         
         if rounds == 10:
@@ -458,10 +496,11 @@ def x86_aes_xts_kernel(
             x86_aes_encrypt_256_direct(xored, round_keys1)
         
         var result = xored ^ tweak
-        _mm_storeu_si128(output_ptr + i * 16, result)
+        _mm_storeu_si128(output_ptr.unsafe_offset(i * 16), result)
         
         tweak = _gf_mul2_xts_simd(tweak)
         i += 1
+
 
 @always_inline
 def aes_encrypt(
@@ -493,6 +532,7 @@ def aes_encrypt(
                 arm_aes_encrypt_256(pt, round_keys)
         else:
             cpu_aes_encrypt(pt, round_keys, rounds)
+
 
 @always_inline
 def aes_gcm_ctr_kernel(
@@ -564,7 +604,7 @@ def _arm_gcm_ctr_loop[NR: Int](
     output_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     round_keys: Pointer[mut=True, UInt32, _, address_space=_],
     num_blocks: Int,
-    j0_ptr: Pointer[mut=True, UInt8, _, address_space=_],
+    j0_ptr: Pointer[mut=True, UInt8, _, address_space=_]
 ) -> None:
     var keys = _arm_load_keys[NR + 1](round_keys)
     var ctr = StackBuffer[UInt8, 64]()
@@ -612,7 +652,7 @@ def _arm_gcm_fused_loop[NR: Int](
     num_blocks: Int,
     j0_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     mut gh: _GHash,
-    ghash_ciphertext: Bool,
+    ghash_ciphertext: Bool
 ) -> None:
     var keys = _arm_load_keys[NR + 1](round_keys)
     var y = SIMD128(_bitrev64(gh.y_hi), _bitrev64(gh.y_lo))
@@ -735,6 +775,7 @@ def _soft_gcm_ctr_kernel(
     volatile_wipe(skey.unsafe_ptr(), len(skey))
     volatile_wipe(kp, 256)
 
+
 @always_inline
 def has_aes_ni() -> Bool:
     return has_x86_aes_ni() or has_arm_crypto()
@@ -743,6 +784,7 @@ def has_aes_ni() -> Bool:
 # AES-GCM authenticated encryption (NIST SP 800-38D)
 
 comptime _GCM_MAX_INPUT_BYTES = 68719476704
+
 
 @always_inline("nodebug")
 def _bitrev64(v: UInt64) -> UInt64:
@@ -876,7 +918,8 @@ struct _GHash(Copyable, Movable):
         self.y_lo = z_lo
 
     @always_inline
-    def update(mut self, data: Pointer[mut=True, UInt8, _, address_space=_], length: Int):
+    def update(mut self, data: Pointer[mut=True, UInt8, _, address_space=_], length: Int
+    ):
         comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["aes"]() and not CompilationTarget.is_x86():
             self._update_pmull(data, length)
             return
@@ -884,7 +927,8 @@ struct _GHash(Copyable, Movable):
         self._update_soft(data, length)
 
     @always_inline
-    def _update_pmull(mut self, data: Pointer[mut=True, UInt8, _, address_space=_], length: Int):
+    def _update_pmull(mut self, data: Pointer[mut=True, UInt8, _, address_space=_], length: Int
+    ):
         var y = SIMD128(_bitrev64(self.y_hi), _bitrev64(self.y_lo))
         var off = 0
 
@@ -912,7 +956,8 @@ struct _GHash(Copyable, Movable):
         self.y_lo = _bitrev64(y[1])
 
     @always_inline
-    def _update_soft(mut self, data: Pointer[mut=True, UInt8, _, address_space=_], length: Int):
+    def _update_soft(mut self, data: Pointer[mut=True, UInt8, _, address_space=_], length: Int
+    ):
         var off = 0
         while off < length:
             var block = InlineArray[UInt8, 16](fill=0)
@@ -978,7 +1023,7 @@ def _gctr_and_ghash(
     output_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     length: Int,
     mut gh: _GHash,
-    ghash_ciphertext: Bool,
+    ghash_ciphertext: Bool
 ):
     var j0_buf = InlineArray[UInt8, 16](fill=0)
     for i in range(16):
@@ -1037,7 +1082,7 @@ def _gcm_core_keyed(
     output_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     length: Int,
     mut tag: InlineArray[UInt8, 16],
-    ghash_ciphertext: Bool,
+    ghash_ciphertext: Bool
 ) raises:
     var j0 = InlineArray[UInt8, 16](fill=0)
     _derive_j0(gh.h_hi, gh.h_lo, iv, j0)
@@ -1100,27 +1145,39 @@ struct AESGCMContext(Copyable, Movable):
         if n > _GCM_MAX_INPUT_BYTES:
             raise Error("plaintext too long for AES-GCM")
         var ciphertext = List[UInt8](unsafe_uninit_length=n)
-        var pt_ptr = plaintext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
+        var pt_ptr = (
+            plaintext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
+        )
         var tag = InlineArray[UInt8, 16](fill=0)
         var rk = self._rk.copy()
         var gh = self._gh0.copy()
 
-        _gcm_core_keyed(
-            rk.unsafe_ptr(), self._rounds, gh, iv, aad,
-            pt_ptr, ciphertext.unsafe_ptr(), n, tag,
-            ghash_ciphertext=True,
-        )
+        try:
+            _gcm_core_keyed(
+                rk.unsafe_ptr(),
+                self._rounds,
+                gh,
+                iv,
+                aad,
+                pt_ptr,
+                ciphertext.unsafe_ptr(),
+                n,
+                tag,
+                ghash_ciphertext=True,
+            )
 
-        var tag_out = List[UInt8](capacity=16)
-        for i in range(16):
-            tag_out.append(tag[i])
-        volatile_wipe(rk.unsafe_ptr(), 60)
-        volatile_wipe(Pointer(to=gh).unsafe_bitcast[UInt64](), 20)
-        return (ciphertext^, tag_out^)
+            var tag_out = List[UInt8](capacity=16)
+            for i in range(16):
+                tag_out.append(tag[i])
+            return (ciphertext^, tag_out^)
+        finally:
+            volatile_wipe(rk.unsafe_ptr(), 60)
+            volatile_wipe(Pointer(to=gh).unsafe_bitcast[UInt64](), 20)
+            volatile_wipe(tag.unsafe_ptr(), 16)
 
     def decrypt(
         self, iv: Span[UInt8, ...], ciphertext: Span[UInt8, ...],
-        aad: Span[UInt8, ...], tag: Span[UInt8, ...],
+        aad: Span[UInt8, ...], tag: Span[UInt8, ...]
     ) raises -> Tuple[List[UInt8], Bool]:
         if len(iv) == 0:
             raise Error("invalid iv size")
@@ -1130,32 +1187,41 @@ struct AESGCMContext(Copyable, Movable):
         if n > _GCM_MAX_INPUT_BYTES:
             raise Error("ciphertext too long for AES-GCM")
         var plaintext = List[UInt8](unsafe_uninit_length=n)
-        var ct_ptr = ciphertext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
+        var ct_ptr = (
+            ciphertext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
+        )
         var computed_tag = InlineArray[UInt8, 16](fill=0)
         var rk = self._rk.copy()
         var gh = self._gh0.copy()
 
-        _gcm_core_keyed(
-            rk.unsafe_ptr(), self._rounds, gh, iv, aad,
-            ct_ptr, plaintext.unsafe_ptr(), n, computed_tag,
-            ghash_ciphertext=False,
-        )
+        try:
+            _gcm_core_keyed(
+                rk.unsafe_ptr(),
+                self._rounds,
+                gh,
+                iv,
+                aad,
+                ct_ptr,
+                plaintext.unsafe_ptr(),
+                n,
+                computed_tag,
+                ghash_ciphertext=False,
+            )
 
-        var diff = UInt8(0)
-        for i in range(16):
-            diff |= computed_tag[i] ^ tag[i]
+            var diff = UInt8(0)
+            for i in range(16):
+                diff |= computed_tag[i] ^ tag[i]
 
-        if diff != 0:
-            var pt_ptr = plaintext.unsafe_ptr()
-            for i in range(n):
-                pt_ptr.unsafe_store[volatile=True](i, UInt8(0))
+            if diff != 0:
+                var pt_ptr = plaintext.unsafe_ptr()
+                for i in range(n):
+                    pt_ptr.unsafe_store[volatile=True](i, UInt8(0))
+                return (List[UInt8](), False)
+            return (plaintext^, True)
+        finally:
             volatile_wipe(rk.unsafe_ptr(), 60)
             volatile_wipe(Pointer(to=gh).unsafe_bitcast[UInt64](), 20)
-            return (List[UInt8](), False)
-
-        volatile_wipe(rk.unsafe_ptr(), 60)
-        volatile_wipe(Pointer(to=gh).unsafe_bitcast[UInt64](), 20)
-        return (plaintext^, True)
+            volatile_wipe(computed_tag.unsafe_ptr(), 16)
 
 
 def _valid_gcm_key(key: Span[UInt8, ...]) -> Bool:
@@ -1164,7 +1230,7 @@ def _valid_gcm_key(key: Span[UInt8, ...]) -> Bool:
 
 def aes_gcm_encrypt(
     key: Span[UInt8, ...], iv: Span[UInt8, ...],
-    plaintext: Span[UInt8, ...], aad: Span[UInt8, ...],
+    plaintext: Span[UInt8, ...], aad: Span[UInt8, ...]
 ) raises -> Tuple[List[UInt8], List[UInt8]]:
     var ctx = AESGCMContext(key)
     return ctx.encrypt(iv, plaintext, aad)
@@ -1172,7 +1238,7 @@ def aes_gcm_encrypt(
 
 def aes_gcm_decrypt(
     key: Span[UInt8, ...], iv: Span[UInt8, ...],
-    ciphertext: Span[UInt8, ...], aad: Span[UInt8, ...], tag: Span[UInt8, ...],
+    ciphertext: Span[UInt8, ...], aad: Span[UInt8, ...], tag: Span[UInt8, ...]
 ) raises -> Tuple[List[UInt8], Bool]:
     var ctx = AESGCMContext(key)
     return ctx.decrypt(iv, ciphertext, aad, tag)

@@ -1,7 +1,4 @@
-"""
-SHA-3 (Keccak) + shake128/shake256 Implementation in Mojo
-FIPS 202
-"""
+"""Implements SHA-3 and SHAKE as specified by FIPS 202."""
 
 from std.collections import List
 from std.memory import Pointer, unsafe_memcpy, unsafe_memset_zero
@@ -25,8 +22,9 @@ comptime KECCAK_RC = StaticTuple[UInt64, 24](
     0x8000000000008002, 0x8000000000000080,
     0x000000000000800A, 0x800000008000000A,
     0x8000000080008081, 0x8000000000008080,
-    0x0000000080000001, 0x8000000080008008,
+    0x0000000080000001, 0x8000000080008008
 )
+
 
 @always_inline
 def rotl64[n: Int](x: UInt64) -> UInt64:
@@ -368,10 +366,13 @@ struct SHA3Context(Movable):
 
 
 @always_inline
-def sha3_absorb_block(state: Pointer[mut=True, UInt64, _, address_space=_], block: Pointer[mut=False, UInt8, _, address_space=_], rate_bytes: Int):
+def sha3_absorb_block(state: Pointer[mut=True, UInt64, _, address_space=_], block: Pointer[mut=False, UInt8, _, address_space=_], rate_bytes: Int
+):
     var full_lanes = rate_bytes // 8
     for i in range(full_lanes):
-        state[unsafe_offset=i] ^= block.unsafe_offset(i * 8).unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]()
+        state[unsafe_offset=i] ^= (
+            block.unsafe_offset(i * 8).unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]()
+        )
     keccak_f1600(state)
 
 
@@ -431,7 +432,7 @@ def sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
         unsafe_memcpy(
             dest=output.unsafe_ptr().unsafe_offset(offset),
             src=ctx.state.ptr().unsafe_bitcast[UInt8](),
-            count=limit,
+            count=limit
         )
 
         offset += limit
@@ -442,7 +443,8 @@ def sha3_final(mut ctx: SHA3Context, output_len_bytes: Int) -> List[UInt8]:
 
 
 @always_inline
-def sha3_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], output_len_bytes: Int):
+def sha3_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], output_len_bytes: Int
+):
     if output_len_bytes < 0 or output_len_bytes > output.capacity():
         abort("SHA-3 output length exceeds destination capacity")
     output.clear()
@@ -468,7 +470,7 @@ def sha3_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], o
         unsafe_memcpy(
             dest=output.ptr().unsafe_offset(offset),
             src=ctx.state.ptr().unsafe_bitcast[UInt8](),
-            count=limit,
+            count=limit
         )
 
         offset += limit
@@ -484,7 +486,8 @@ def sha3_hash(rate_bits: Int, data: Span[UInt8, ...], output_len: Int) -> List[U
 
 
 @always_inline
-def sha3_hash_into(mut output: StackBuffer[UInt8, ...], rate_bits: Int, data: Span[UInt8, ...], output_len: Int):
+def sha3_hash_into(mut output: StackBuffer[UInt8, ...], rate_bits: Int, data: Span[UInt8, ...], output_len: Int
+):
     var ctx = SHA3Context(rate_bits)
     sha3_update(ctx, data)
     sha3_final_into(ctx, output, output_len)
@@ -571,7 +574,7 @@ def shake_squeeze_prefix_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt
         unsafe_memcpy(
             dest=output.ptr().unsafe_offset(offset),
             src=ctx.state.ptr().unsafe_bitcast[UInt8](),
-            count=limit,
+            count=limit
         )
 
         offset += limit
@@ -582,7 +585,6 @@ def shake_squeeze_prefix_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt
 @always_inline
 def shake_advance(mut ctx: SHA3Context):
     keccak_f1600(ctx.state.ptr())
-
 
 
 @always_inline
@@ -604,7 +606,7 @@ def shake_final(mut ctx: SHA3Context, output_len: Int) -> List[UInt8]:
         unsafe_memcpy(
             dest=output.unsafe_ptr().unsafe_offset(offset),
             src=ctx.state.ptr().unsafe_bitcast[UInt8](),
-            count=limit,
+            count=limit
         )
 
         offset += limit
@@ -632,7 +634,7 @@ def shake_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], 
         unsafe_memcpy(
             dest=output.ptr().unsafe_offset(offset),
             src=ctx.state.ptr().unsafe_bitcast[UInt8](),
-            count=limit,
+            count=limit
         )
 
         offset += limit
@@ -648,11 +650,11 @@ def shake_hash(rate_bits: Int, data: Span[UInt8, ...], output_len: Int) -> List[
 
 
 @always_inline
-def shake_hash_into(mut output: StackBuffer[UInt8, ...], rate_bits: Int, data: Span[UInt8, ...], output_len: Int):
+def shake_hash_into(mut output: StackBuffer[UInt8, ...], rate_bits: Int, data: Span[UInt8, ...], output_len: Int
+):
     var ctx = SHA3Context(rate_bits)
     sha3_update(ctx, data)
     shake_final_into(ctx, output, output_len)
-
 
 
 def shake128(data: Span[UInt8, ...], output_len_bytes: Int) -> List[UInt8]:
@@ -664,10 +666,12 @@ def shake256(data: Span[UInt8, ...], output_len_bytes: Int) -> List[UInt8]:
 
 
 @always_inline
-def shake128_into(mut output: StackBuffer[UInt8, ...], data: Span[UInt8, ...], output_len_bytes: Int):
+def shake128_into(mut output: StackBuffer[UInt8, ...], data: Span[UInt8, ...], output_len_bytes: Int
+):
     shake_hash_into(output, 1344, data, output_len_bytes)
 
 
 @always_inline
-def shake256_into(mut output: StackBuffer[UInt8, ...], data: Span[UInt8, ...], output_len_bytes: Int):
+def shake256_into(mut output: StackBuffer[UInt8, ...], data: Span[UInt8, ...], output_len_bytes: Int
+):
     shake_hash_into(output, 1088, data, output_len_bytes)

@@ -1,44 +1,59 @@
-"""
-AES CPU implementation
-"""
+"""Implements AES encryption and key expansion for CPU callers."""
 
 from std.bit import byte_swap
 from std.memory import unsafe_memset_zero
+from std.os import abort
 from std.utils import StaticTuple
 from .utils import StackBuffer, volatile_wipe
 
 comptime ROUNDS_128: Int = 10
 
+
+@always_inline
+def _validate_aes_rounds(rounds: Int):
+    if rounds != 10 and rounds != 12 and rounds != 14:
+        abort("AES rounds must be 10, 12, or 14")
+
+
+@always_inline
+def _validate_aes_block_count(num_blocks: Int):
+    if num_blocks < 0:
+        abort("AES block count cannot be negative")
+
+
 @always_inline
 def _ct_encrypt1(
     block: Pointer[mut=True, UInt8, _, address_space=_],
     skey: List[UInt64],
-    rounds: Int,
+    rounds: Int
 ) -> None:
     var buf = InlineArray[UInt8, 64](fill=0)
     var bp = buf.unsafe_ptr()
     for i in range(16):
         bp[unsafe_offset=i] = block[unsafe_offset=i]
-    cpu_aes_ct_encrypt4(bp, skey, rounds)
+    _ct_encrypt_blocks[1](bp, skey.unsafe_ptr(), rounds)
     for i in range(16):
         block[unsafe_offset=i] = bp[unsafe_offset=i]
 
+
 @always_inline
 def cpu_aes_encrypt(
     pt_bytes: Pointer[mut=True, UInt8, _, address_space=_],
-    round_keys: Pointer[mut=True, UInt32, _, address_space=_],
+    round_keys: Pointer[mut=True, UInt32, _, address_space=_]
 ) -> None:
     cpu_aes_encrypt(pt_bytes, round_keys, 10)
+
 
 @always_inline
 def cpu_aes_encrypt(
     pt_bytes: Pointer[mut=True, UInt8, _, address_space=_],
     round_keys: Pointer[mut=True, UInt32, _, address_space=_],
-    rounds: Int,
+    rounds: Int
 ) -> None:
     var skey = cpu_aes_ct_skey(round_keys, rounds)
     _ct_encrypt1(pt_bytes, skey, rounds)
     volatile_wipe(skey.unsafe_ptr(), len(skey))
+
 
 @always_inline
 def cpu_aes_ecb_kernel(
@@ -48,6 +63,7 @@ def cpu_aes_ecb_kernel(
     num_blocks: Int,
     rounds: Int
 ) -> None:
+    _validate_aes_block_count(num_blocks)
     var skey = cpu_aes_ct_skey(round_keys, rounds)
     var scratch = InlineArray[UInt8, 256](fill=0)
     var sp = scratch.unsafe_ptr()
@@ -58,12 +74,13 @@ def cpu_aes_ecb_kernel(
             n = 16
         for j in range(n * 16):
             sp[unsafe_offset=j] = input_ptr[unsafe_offset=i * 16 + j]
-        cpu_aes_ct_encrypt16(sp, skey, rounds)
+        _ct_encrypt_blocks[4](sp, skey.unsafe_ptr(), rounds)
         for j in range(n * 16):
             output_ptr[unsafe_offset=i * 16 + j] = sp[unsafe_offset=j]
         i += n
     volatile_wipe(skey.unsafe_ptr(), len(skey))
     volatile_wipe(sp, 256)
+
 
 @always_inline
 def cpu_aes_cbc_kernel(
@@ -74,6 +91,7 @@ def cpu_aes_cbc_kernel(
     iv_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
+    _validate_aes_block_count(num_blocks)
     var skey = cpu_aes_ct_skey(round_keys, rounds)
     var prev_block = StaticTuple[UInt8, 16](
         iv_ptr[unsafe_offset=0], iv_ptr[unsafe_offset=1], iv_ptr[unsafe_offset=2], iv_ptr[unsafe_offset=3],
@@ -98,11 +116,12 @@ def cpu_aes_cbc_kernel(
         i += 1
     volatile_wipe(skey.unsafe_ptr(), len(skey))
 
+
 @always_inline
 def _ctr_write_block(
     dst: Pointer[mut=True, UInt8, _, address_space=_],
     nonce_ptr: Pointer[mut=True, UInt8, _, address_space=_],
-    offset: Int,
+    offset: Int
 ) -> None:
     for j in range(16):
         dst.unsafe_store(j, nonce_ptr[unsafe_offset=j])
@@ -124,6 +143,7 @@ def cpu_aes_ctr_kernel(
     nonce_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
+    _validate_aes_block_count(num_blocks)
     var skey = cpu_aes_ct_skey(round_keys, rounds)
     var ks = InlineArray[UInt8, 256](fill=0)
     var kp = ks.unsafe_ptr()
@@ -134,7 +154,7 @@ def cpu_aes_ctr_kernel(
             n = 16
         for k in range(16):
             _ctr_write_block(kp.unsafe_offset(k * 16), nonce_ptr, i + (k if k < n else 0))
-        cpu_aes_ct_encrypt16(kp, skey, rounds)
+        _ct_encrypt_blocks[4](kp, skey.unsafe_ptr(), rounds)
         for k in range(n):
             var in_block = input_ptr.unsafe_offset((i + k) * 16)
             var out_block = output_ptr.unsafe_offset((i + k) * 16)
@@ -143,6 +163,7 @@ def cpu_aes_ctr_kernel(
         i += n
     volatile_wipe(skey.unsafe_ptr(), len(skey))
     volatile_wipe(kp, 256)
+
 
 @always_inline
 def cpu_xts_mul_alpha_inplace(tweak_ptr: Pointer[mut=True, UInt8, _, address_space=_]) -> None:
@@ -154,6 +175,7 @@ def cpu_xts_mul_alpha_inplace(tweak_ptr: Pointer[mut=True, UInt8, _, address_spa
         t0 = t0 ^ UInt8(0x87)
     tweak_ptr.unsafe_store(0, t0)
 
+
 @always_inline
 def cpu_aes_xts_kernel(
     input_ptr: Pointer[mut=True, UInt8, _, address_space=_],
@@ -164,6 +186,7 @@ def cpu_aes_xts_kernel(
     tweak_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
+    _validate_aes_block_count(num_blocks)
     var skey1 = cpu_aes_ct_skey(round_keys1, rounds)
     var skey2 = cpu_aes_ct_skey(round_keys2, rounds)
     var tweak = StackBuffer[UInt8, 16]()
@@ -194,6 +217,7 @@ def cpu_aes_xts_kernel(
     volatile_wipe(skey2.unsafe_ptr(), len(skey2))
     volatile_wipe(wp, 16)
 
+
 @always_inline
 def sub_word(w: UInt32) -> UInt32:
     var blk = InlineArray[UInt8, 16](fill=0)
@@ -220,9 +244,10 @@ comptime RCON: StaticTuple[UInt8, 11] = StaticTuple[UInt8, 11](
     0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36, 0x6c
 )
 
+
 def expand_key_128_into(
     key_bytes: Pointer[mut=False, UInt8, _, address_space=_],
-    w: Pointer[mut=True, UInt32, _, address_space=_],
+    w: Pointer[mut=True, UInt32, _, address_space=_]
 ) raises -> None:
     for i in range(4):
         var key_val: UInt32 = 0
@@ -237,9 +262,10 @@ def expand_key_128_into(
             temp ^= UInt32(RCON._unsafe_ref(i // 4 - 1)) << 24
         w.unsafe_store(i, w.unsafe_load(i - 4) ^ temp)
 
+
 def expand_key_192_into(
     key_bytes: Pointer[mut=False, UInt8, _, address_space=_],
-    w: Pointer[mut=True, UInt32, _, address_space=_],
+    w: Pointer[mut=True, UInt32, _, address_space=_]
 ) raises -> None:
     for i in range(6):
         var key_val: UInt32 = 0
@@ -254,9 +280,10 @@ def expand_key_192_into(
             temp ^= UInt32(RCON._unsafe_ref(i // 6 - 1)) << 24
         w.unsafe_store(i, w.unsafe_load(i - 6) ^ temp)
 
+
 def expand_key_256_into(
     key_bytes: Pointer[mut=False, UInt8, _, address_space=_],
-    w: Pointer[mut=True, UInt32, _, address_space=_],
+    w: Pointer[mut=True, UInt32, _, address_space=_]
 ) raises -> None:
     for i in range(8):
         var key_val: UInt32 = 0
@@ -272,6 +299,7 @@ def expand_key_256_into(
         elif i % 8 == 4:
             temp = sub_word(temp)
         w.unsafe_store(i, w.unsafe_load(i - 8) ^ temp)
+
 
 struct AESExpandedKey(Movable):
     """Owned AES-128/192/256 round-key schedule, wiped on destruction."""
@@ -329,6 +357,7 @@ def expand_key_256(key: Span[UInt8, ...]) raises -> AESExpandedKey:
         raise Error("AES-256 keys must contain exactly 32 bytes")
     return AESExpandedKey(key)
 
+
 struct AESKey:
     var _data: StackBuffer[UInt8, 16]
     var _round_keys: StackBuffer[UInt32, 44]
@@ -364,7 +393,7 @@ struct AESKey:
 @always_inline
 def _ct_interleave_in[W: Int](
     w0: SIMD[DType.uint64, W], w1: SIMD[DType.uint64, W],
-    w2: SIMD[DType.uint64, W], w3: SIMD[DType.uint64, W],
+    w2: SIMD[DType.uint64, W], w3: SIMD[DType.uint64, W]
 ) -> Tuple[SIMD[DType.uint64, W], SIMD[DType.uint64, W]]:
     var x0 = w0
     var x1 = w1
@@ -394,7 +423,7 @@ def _ct_interleave_out[W: Int](
     q0: SIMD[DType.uint64, W], q1: SIMD[DType.uint64, W]
 ) -> Tuple[
     SIMD[DType.uint64, W], SIMD[DType.uint64, W],
-    SIMD[DType.uint64, W], SIMD[DType.uint64, W],
+    SIMD[DType.uint64, W], SIMD[DType.uint64, W]
 ]:
     var x0 = q0 & 0x00FF00FF00FF00FF
     var x1 = q1 & 0x00FF00FF00FF00FF
@@ -424,7 +453,7 @@ def _ct_swapn[W: Int](
     var sv = SIMD[DType.uint64, W](s)
     return (
         (x & cl) | ((y & cl) << sv),
-        ((x & ~cl) >> sv) | (y & ~cl),
+        ((x & ~cl) >> sv) | (y & ~cl)
     )
 
 
@@ -645,6 +674,7 @@ def _ct_mix_columns[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
 def cpu_aes_ct_skey(
     round_keys: Pointer[mut=True, UInt32, _, address_space=_], rounds: Int
 ) -> List[UInt64]:
+    _validate_aes_rounds(rounds)
     var skey = List[UInt64](capacity=(rounds + 1) * 8)
     for r in range(rounds + 1):
         var w0 = SIMD[DType.uint64, 1](UInt64(byte_swap(round_keys.unsafe_load(r * 4))))
@@ -684,7 +714,7 @@ def _ct_store_le32(p: Pointer[mut=True, UInt8, _, address_space=_], off: Int, w:
 def _ct_encrypt_blocks[W: Int](
     blocks: Pointer[mut=True, UInt8, _, address_space=_],
     skp: Pointer[mut=False, UInt64, _, address_space=_],
-    rounds: Int,
+    rounds: Int
 ) -> None:
     var q = InlineArray[SIMD[DType.uint64, W], 8](fill=0)
     for i in range(4):
@@ -730,30 +760,36 @@ def _ct_encrypt_blocks[W: Int](
 def cpu_aes_ct_encrypt4(
     blocks: Pointer[mut=True, UInt8, _, address_space=_],
     skey: List[UInt64],
-    rounds: Int,
+    rounds: Int
 ) -> None:
+    _validate_aes_rounds(rounds)
+    if len(skey) < (rounds + 1) * 8:
+        abort("AES bitsliced key schedule is too short")
     _ct_encrypt_blocks[1](blocks, skey.unsafe_ptr(), rounds)
 
 
 def cpu_aes_ct_encrypt16(
     blocks: Pointer[mut=True, UInt8, _, address_space=_],
     skey: List[UInt64],
-    rounds: Int,
+    rounds: Int
 ) -> None:
+    _validate_aes_rounds(rounds)
+    if len(skey) < (rounds + 1) * 8:
+        abort("AES bitsliced key schedule is too short")
     _ct_encrypt_blocks[4](blocks, skey.unsafe_ptr(), rounds)
 
 
 def cpu_aes_ct_encrypt(
     pt_bytes: Pointer[mut=True, UInt8, _, address_space=_],
     round_keys: Pointer[mut=True, UInt32, _, address_space=_],
-    rounds: Int = 10,
+    rounds: Int = 10
 ) -> None:
     var skey = cpu_aes_ct_skey(round_keys, rounds)
     var buf = InlineArray[UInt8, 64](fill=0)
     var bp = buf.unsafe_ptr()
     for i in range(16):
         bp[unsafe_offset=i] = pt_bytes[unsafe_offset=i]
-    cpu_aes_ct_encrypt4(bp, skey, rounds)
+    _ct_encrypt_blocks[1](bp, skey.unsafe_ptr(), rounds)
     for i in range(16):
         pt_bytes[unsafe_offset=i] = bp[unsafe_offset=i]
     volatile_wipe(skey.unsafe_ptr(), len(skey))

@@ -1,7 +1,4 @@
-"""
-PBKDF2 (Password-Based Key Derivation Function 2) Implementation in Mojo
-SP 800-132 / FIPS 140-2 / RFC 8018
-"""
+"""Implements PBKDF2 and HMAC-SHA-2 from RFC 8018."""
 from std.collections import List
 from std.memory import unsafe_memcpy, Pointer
 from .utils import StackBuffer
@@ -14,7 +11,7 @@ from .sha2 import (
     sha256_final_to_buffer,
     sha512_update,
     sha512_final_to_buffer,
-    sha512_final_with_len,
+    sha512_final_with_len
 )
 
 comptime PBKDF2_SHA256_MAX_DKLEN: Int = 0xFFFFFFFF * 32
@@ -27,8 +24,10 @@ def _secure_zero(ptr: Pointer[mut=True, UInt8, _, address_space=_], count: Int):
     for i in range(count):
         ptr.unsafe_store[volatile=True](i, UInt8(0))
 
+
 @always_inline
-def _xor_block[WIDTH: Int](dst: Pointer[mut=True, UInt8, _, address_space=_], src: Pointer[mut=True, UInt8, _, address_space=_]):
+def _xor_block[WIDTH: Int](dst: Pointer[mut=True, UInt8, _, address_space=_], src: Pointer[mut=True, UInt8, _, address_space=_]
+):
     var d = dst.unsafe_bitcast[UInt64]().unsafe_load[width=WIDTH, alignment=1]()
     var s = src.unsafe_bitcast[UInt64]().unsafe_load[width=WIDTH, alignment=1]()
     dst.unsafe_bitcast[UInt64]().unsafe_store[width=WIDTH, alignment=1](0, d ^ s)
@@ -72,6 +71,7 @@ def _pbkdf2_derive[H: HMACer](mut h: H, salt: Span[UInt8, ...], iterations: Int,
     _secure_zero(t_block.unsafe_ptr(), 64)
     _secure_zero(input_block.unsafe_ptr(), 64)
     return derived_key^
+
 
 struct PBKDF2SHA256(HMACer):
     comptime BLOCK = 64
@@ -151,6 +151,7 @@ struct PBKDF2SHA256(HMACer):
     def derive(mut self, salt: Span[UInt8, ...], iterations: Int, dklen: Int) raises -> List[UInt8]:
         return _pbkdf2_derive(self, salt, iterations, dklen)
 
+
 def pbkdf2_hmac_sha256(
     password: Span[UInt8, ...], salt: Span[UInt8, ...], iterations: Int, dkLen: Int
 ) raises -> List[UInt8]:
@@ -162,6 +163,7 @@ def pbkdf2_hmac_sha256(
         raise Error("PBKDF2-SHA256 dkLen exceeds the RFC 8018 limit")
     var ctx = PBKDF2SHA256(password)
     return ctx.derive(salt, iterations, dkLen)
+
 
 struct PBKDF2SHA512(HMACer):
     comptime BLOCK = 128
@@ -241,6 +243,7 @@ struct PBKDF2SHA512(HMACer):
     def derive(mut self, salt: Span[UInt8, ...], iterations: Int, dklen: Int) raises -> List[UInt8]:
         return _pbkdf2_derive(self, salt, iterations, dklen)
 
+
 def pbkdf2_hmac_sha512(
     password: Span[UInt8, ...], salt: Span[UInt8, ...], iterations: Int, dkLen: Int
 ) raises -> List[UInt8]:
@@ -253,6 +256,7 @@ def pbkdf2_hmac_sha512(
     var ctx = PBKDF2SHA512(password)
     return ctx.derive(salt, iterations, dkLen)
 
+
 def hmac_sha256(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
     var ctx = PBKDF2SHA256(key)
     ctx.hmac(data)
@@ -260,6 +264,7 @@ def hmac_sha256(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
     for i in range(32):
         result.append(ctx.u_block[i])
     return result^
+
 
 def hmac_sha512(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
     var ctx = PBKDF2SHA512(key)

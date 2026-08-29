@@ -1,3 +1,5 @@
+"""Provides operating-system-backed cryptographically secure randomness."""
+
 from std.collections import List
 from std.memory import Pointer
 from std.sys import CompilationTarget, inlined_assembly
@@ -12,7 +14,7 @@ def _getrandom_linux_x86(buf: Pointer[mut=True, UInt8, _, address_space=_], leng
             "syscall",
             Int64,
             constraints="={rax},0,{rdi},{rsi},{rdx},~{rcx},~{r11},~{memory}",
-            has_side_effect=True,
+            has_side_effect=True
         ](Int64(318), Int64(Int(buf)), Int64(length), Int64(0))
     )
 
@@ -32,7 +34,7 @@ def _getrandom_linux_arm(buf: Pointer[mut=True, UInt8, _, address_space=_], leng
             """,
             Int64,
             constraints="=&{x0},{x9},{x10},~{x1},~{x2},~{x8},~{memory}",
-            has_side_effect=True,
+            has_side_effect=True
         ](Int64(Int(buf)), Int64(length))
     )
 
@@ -56,7 +58,7 @@ def _getentropy_macos_arm(buf: Pointer[mut=True, UInt8, _, address_space=_], len
             """,
             Int64,
             constraints="=&{x0},{x9},{x10},~{x1},~{x16},~{cc},~{memory}",
-            has_side_effect=True,
+            has_side_effect=True
         ](Int64(Int(buf)), Int64(length))
     )
 
@@ -71,6 +73,8 @@ def _fill_linux_x86(buf: Pointer[mut=True, UInt8, _, address_space=_], length: I
             raise Error("getrandom syscall failed")
         if ret == 0:
             raise Error("getrandom returned zero bytes")
+        if ret > length - offset:
+            raise Error("getrandom returned too many bytes")
         offset += ret
 
 
@@ -84,6 +88,8 @@ def _fill_linux_arm(buf: Pointer[mut=True, UInt8, _, address_space=_], length: I
             raise Error("getrandom syscall failed")
         if ret == 0:
             raise Error("getrandom returned zero bytes")
+        if ret > length - offset:
+            raise Error("getrandom returned too many bytes")
         offset += ret
 
 
@@ -93,6 +99,8 @@ def _fill_macos_arm(buf: Pointer[mut=True, UInt8, _, address_space=_], length: I
         var chunk = min(256, length - offset)
         var ret = _getentropy_macos_arm(buf.unsafe_offset(offset), chunk)
         if ret < 0:
+            if ret == -4:  # EINTR
+                continue
             raise Error("getentropy syscall failed")
         if ret != 0:
             raise Error("getentropy returned unexpected value")

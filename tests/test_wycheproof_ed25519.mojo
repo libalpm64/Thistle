@@ -6,6 +6,7 @@ from std.collections import List
 from std.python import Python
 from thistle.ed25519 import ed25519_verify
 
+
 def hex_to_bytes(s: String) -> List[UInt8]:
     var r = List[UInt8]()
     var b = s.as_bytes()
@@ -19,7 +20,8 @@ def hex_to_bytes(s: String) -> List[UInt8]:
     return r^
 
 
-def run_case(tc_id: String, pk_hex: String, msg_hex: String, sig_hex: String, expected_valid: Bool) -> Bool:
+def run_case(tc_id: String, pk_hex: String, msg_hex: String, sig_hex: String, expected_valid: Bool
+) -> Bool:
     var pk = hex_to_bytes(pk_hex)
     var msg = hex_to_bytes(msg_hex)
     var sig = hex_to_bytes(sig_hex)
