@@ -109,17 +109,15 @@ def _write_gcm_counter(
 
 @always_inline
 def _load_round_key(idx: Int, round_keys: Pointer[mut=True, UInt32, _, address_space=_]) -> SIMD128:
-    var w0 = round_keys.unsafe_load(idx * 4)
-    var w1 = round_keys.unsafe_load(idx * 4 + 1)
-    var w2 = round_keys.unsafe_load(idx * 4 + 2)
-    var w3 = round_keys.unsafe_load(idx * 4 + 3)
-    var bytes = SIMD[DType.uint8, 16](
-        UInt8(w0 >> 24), UInt8(w0 >> 16), UInt8(w0 >> 8), UInt8(w0),
-        UInt8(w1 >> 24), UInt8(w1 >> 16), UInt8(w1 >> 8), UInt8(w1),
-        UInt8(w2 >> 24), UInt8(w2 >> 16), UInt8(w2 >> 8), UInt8(w2),
-        UInt8(w3 >> 24), UInt8(w3 >> 16), UInt8(w3 >> 8), UInt8(w3)
+    var raw = (
+        round_keys.unsafe_offset(idx * 4).unsafe_bitcast[UInt8]().unsafe_load[
+            width=16, alignment=1
+        ]()
     )
-    return bitcast[DType.uint64, 2](bytes.to_bits())
+    var bytes = raw.shuffle[
+        3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12
+    ]()
+    return bitcast[DType.uint64, 2](bytes)
 
 
 def x86_aes_encrypt_128(
@@ -399,6 +397,65 @@ def arm_aes_xts_kernel(
 
 
 @always_inline
+def _x86_aes_ecb_loop[NR: Int](
+    input_ptr: Pointer[mut=True, UInt8, _, address_space=_],
+    output_ptr: Pointer[mut=True, UInt8, _, address_space=_],
+    round_keys: Pointer[mut=True, UInt32, _, address_space=_],
+    num_blocks: Int
+) -> None:
+    # Load and byte-swap the key schedule once, then interleave eight
+    # independent blocks to hide AESENC latency on x86.
+    var keys = StaticTuple[SIMD128, NR + 1]()
+    comptime for r in range(NR + 1):
+        keys[r] = _load_round_key(r, round_keys)
+
+    var i = 0
+    while i + 8 <= num_blocks:
+        var b0 = _mm_loadu_si128(input_ptr.unsafe_offset((i + 0) * 16)) ^ keys[0]
+        var b1 = _mm_loadu_si128(input_ptr.unsafe_offset((i + 1) * 16)) ^ keys[0]
+        var b2 = _mm_loadu_si128(input_ptr.unsafe_offset((i + 2) * 16)) ^ keys[0]
+        var b3 = _mm_loadu_si128(input_ptr.unsafe_offset((i + 3) * 16)) ^ keys[0]
+        var b4 = _mm_loadu_si128(input_ptr.unsafe_offset((i + 4) * 16)) ^ keys[0]
+        var b5 = _mm_loadu_si128(input_ptr.unsafe_offset((i + 5) * 16)) ^ keys[0]
+        var b6 = _mm_loadu_si128(input_ptr.unsafe_offset((i + 6) * 16)) ^ keys[0]
+        var b7 = _mm_loadu_si128(input_ptr.unsafe_offset((i + 7) * 16)) ^ keys[0]
+        comptime for r in range(1, NR):
+            b0 = _mm_aesenc_si128(b0, keys[r])
+            b1 = _mm_aesenc_si128(b1, keys[r])
+            b2 = _mm_aesenc_si128(b2, keys[r])
+            b3 = _mm_aesenc_si128(b3, keys[r])
+            b4 = _mm_aesenc_si128(b4, keys[r])
+            b5 = _mm_aesenc_si128(b5, keys[r])
+            b6 = _mm_aesenc_si128(b6, keys[r])
+            b7 = _mm_aesenc_si128(b7, keys[r])
+        b0 = _mm_aesenclast_si128(b0, keys[NR])
+        b1 = _mm_aesenclast_si128(b1, keys[NR])
+        b2 = _mm_aesenclast_si128(b2, keys[NR])
+        b3 = _mm_aesenclast_si128(b3, keys[NR])
+        b4 = _mm_aesenclast_si128(b4, keys[NR])
+        b5 = _mm_aesenclast_si128(b5, keys[NR])
+        b6 = _mm_aesenclast_si128(b6, keys[NR])
+        b7 = _mm_aesenclast_si128(b7, keys[NR])
+        _mm_storeu_si128(output_ptr.unsafe_offset((i + 0) * 16), b0)
+        _mm_storeu_si128(output_ptr.unsafe_offset((i + 1) * 16), b1)
+        _mm_storeu_si128(output_ptr.unsafe_offset((i + 2) * 16), b2)
+        _mm_storeu_si128(output_ptr.unsafe_offset((i + 3) * 16), b3)
+        _mm_storeu_si128(output_ptr.unsafe_offset((i + 4) * 16), b4)
+        _mm_storeu_si128(output_ptr.unsafe_offset((i + 5) * 16), b5)
+        _mm_storeu_si128(output_ptr.unsafe_offset((i + 6) * 16), b6)
+        _mm_storeu_si128(output_ptr.unsafe_offset((i + 7) * 16), b7)
+        i += 8
+
+    while i < num_blocks:
+        var block = _mm_loadu_si128(input_ptr.unsafe_offset(i * 16)) ^ keys[0]
+        comptime for r in range(1, NR):
+            block = _mm_aesenc_si128(block, keys[r])
+        block = _mm_aesenclast_si128(block, keys[NR])
+        _mm_storeu_si128(output_ptr.unsafe_offset(i * 16), block)
+        i += 1
+
+
+@always_inline
 def x86_aes_ecb_kernel(
     input_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     output_ptr: Pointer[mut=True, UInt8, _, address_space=_],
@@ -408,19 +465,12 @@ def x86_aes_ecb_kernel(
 ) -> None:
     _validate_aes_rounds(rounds)
     _validate_aes_block_count(num_blocks)
-    var i = 0
-    while i < num_blocks:
-        var block = _mm_loadu_si128(input_ptr.unsafe_offset(i * 16))
-        
-        if rounds == 10:
-            x86_aes_encrypt_128_direct(block, round_keys)
-        elif rounds == 12:
-            x86_aes_encrypt_192_direct(block, round_keys)
-        else:
-            x86_aes_encrypt_256_direct(block, round_keys)
-        
-        _mm_storeu_si128(output_ptr.unsafe_offset(i * 16), block)
-        i += 1
+    if rounds == 10:
+        _x86_aes_ecb_loop[10](input_ptr, output_ptr, round_keys, num_blocks)
+    elif rounds == 12:
+        _x86_aes_ecb_loop[12](input_ptr, output_ptr, round_keys, num_blocks)
+    else:
+        _x86_aes_ecb_loop[14](input_ptr, output_ptr, round_keys, num_blocks)
 
 
 @always_inline

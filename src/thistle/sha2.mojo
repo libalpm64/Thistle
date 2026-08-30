@@ -49,22 +49,22 @@ comptime SHA512_K = StaticTuple[UInt64, 80](
 
 @always_inline
 def ch32(x: UInt32, y: UInt32, z: UInt32) -> UInt32:
-    return (x & y) ^ ((~x) & z)
+    return z ^ (x & (y ^ z))
 
 
 @always_inline
 def maj32(x: UInt32, y: UInt32, z: UInt32) -> UInt32:
-    return (x & y) ^ (x & z) ^ (y & z)
+    return (x & y) ^ (z & (x ^ y))
 
 
 @always_inline
 def ch64(x: UInt64, y: UInt64, z: UInt64) -> UInt64:
-    return (x & y) ^ ((~x) & z)
+    return z ^ (x & (y ^ z))
 
 
 @always_inline
 def maj64(x: UInt64, y: UInt64, z: UInt64) -> UInt64:
-    return (x & y) ^ (x & z) ^ (y & z)
+    return (x & y) ^ (z & (x ^ y))
 
 
 @always_inline

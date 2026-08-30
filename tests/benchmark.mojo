@@ -3,7 +3,7 @@ from std.collections import List
 from max.algorithm import parallelize
 from std.random import random_ui64, seed
 from std.math import ceildiv
-from std.sys import has_accelerator
+from std.sys import has_accelerator, CompilationTarget
 from std.memory import Layout, alloc
 
 from thistle.argon2 import Argon2id
@@ -20,12 +20,17 @@ from thistle.sha3 import sha3_256
 from thistle.aes import (
     AESKey, cpu_aes_ct_encrypt16, cpu_aes_ct_skey, ROUNDS_128, expand_key_128
 )
+from thistle.aes_ni import has_aes_ni, x86_aes_ecb_kernel
 from thistle.x25519 import x25519
 from thistle.ed25519 import (
     ed25519_sign, ed25519_verify, ed25519_generate_public_key
 )
-from thistle.p256 import p256_ecdsa_sign
-from thistle.p384 import p384_public_key, p384_ecdsa_sign
+from thistle.p256 import (
+    p256_public_key, p256_ecdsa_sign, p256_ecdsa_verify
+)
+from thistle.p384 import (
+    p384_public_key, p384_ecdsa_sign, p384_ecdsa_verify
+)
 from thistle.utils import StackInlineArray
 from std.utils import StaticTuple
 
@@ -71,20 +76,39 @@ def benchmark_x25519(duration_secs: Float64) raises -> String:
 
 
 def benchmark_p384(duration_secs: Float64) -> String:
+    var scalar256 = InlineArray[UInt8, 32](fill=0)
+    var out256 = InlineArray[UInt8, 65](fill=0)
+    scalar256[31] = 7
+    var scalar256_span = Span[UInt8, ...](scalar256)
+    _ = p256_public_key(
+        scalar256_span, Span[mut=True, UInt8, ...](out256)
+    )
+    var count256 = 0
+    var start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        _ = p256_public_key(
+            scalar256_span, Span[mut=True, UInt8, ...](out256)
+        )
+        count256 += 1
+    var duration256 = perf_counter() - start
+
     var scalar = InlineArray[UInt8, 48](fill=0)
     var out = InlineArray[UInt8, 97](fill=0)
     scalar[47] = 7
     var scalar_span = Span[UInt8, ...](scalar)
     _ = p384_public_key(scalar_span, Span[mut=True, UInt8, ...](out))
     var count = 0
-    var start = perf_counter()
+    start = perf_counter()
     while perf_counter() - start < duration_secs:
         _ = p384_public_key(scalar_span, Span[mut=True, UInt8, ...](out))
         count += 1
     var duration = perf_counter() - start
     var ops = Float64(count) / duration
     return (
-        "p384-public-key | throughput: " + String(ops) + " ops/s, ops: " + String(count) + ", time: " + String(duration) + "s"
+        "p256-public-key | throughput: "
+        + String(Float64(count256) / duration256) + " ops/s, ops: "
+        + String(count256) + ", time: " + String(duration256) + "s\n"
+        + "p384-public-key | throughput: " + String(ops) + " ops/s, ops: " + String(count) + ", time: " + String(duration) + "s"
     )
 
 
@@ -94,6 +118,8 @@ def benchmark_ecdsa(duration_secs: Float64) -> String:
     var message = InlineArray[UInt8, 64](fill=7)
     var p256_sig = InlineArray[UInt8, 64](fill=0)
     var p384_sig = InlineArray[UInt8, 96](fill=0)
+    var p256_pk = InlineArray[UInt8, 65](fill=0)
+    var p384_pk = InlineArray[UInt8, 97](fill=0)
     var msg = Span[UInt8, ...](message)
 
     var p256_count = 0
@@ -118,12 +144,47 @@ def benchmark_ecdsa(duration_secs: Float64) -> String:
         p384_count += 1
     var p384_time = perf_counter() - start
 
-    return (
+    _ = p256_public_key(
+        Span[UInt8, ...](p256_key), Span[mut=True, UInt8, ...](p256_pk)
+    )
+    _ = p384_public_key(
+        Span[UInt8, ...](p384_key), Span[mut=True, UInt8, ...](p384_pk)
+    )
+    var p256_verify_count = 0
+    var p256_verify_failures = 0
+    start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        if not p256_ecdsa_verify(
+            Span[UInt8, ...](p256_pk), msg, Span[UInt8, ...](p256_sig)
+        ):
+            p256_verify_failures += 1
+        p256_verify_count += 1
+    var p256_verify_time = perf_counter() - start
+
+    var p384_verify_count = 0
+    var p384_verify_failures = 0
+    start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        if not p384_ecdsa_verify(
+            Span[UInt8, ...](p384_pk), msg, Span[UInt8, ...](p384_sig)
+        ):
+            p384_verify_failures += 1
+        p384_verify_count += 1
+    var p384_verify_time = perf_counter() - start
+
+    var result = (
         "p256-ecdsa-sign | throughput: "
         + String(Float64(p256_count) / p256_time) + " ops/s\n"
         + "p384-ecdsa-sign | throughput: "
-        + String(Float64(p384_count) / p384_time) + " ops/s"
+        + String(Float64(p384_count) / p384_time) + " ops/s\n"
+        + "p256-ecdsa-verify | throughput: "
+        + String(Float64(p256_verify_count) / p256_verify_time) + " ops/s\n"
+        + "p384-ecdsa-verify | throughput: "
+        + String(Float64(p384_verify_count) / p384_verify_time) + " ops/s"
     )
+    if p256_verify_failures + p384_verify_failures > 0:
+        result += " [" + String(p256_verify_failures + p384_verify_failures) + " FAILED VERIFICATIONS]"
+    return result
 
 
 def benchmark_ed25519(duration_secs: Float64) raises -> String:
@@ -448,6 +509,37 @@ def benchmark_aes_cpu(duration_secs: Float64) raises -> String:
     )
 
 
+def benchmark_aes_ni(duration_secs: Float64) raises -> String:
+    comptime if not CompilationTarget.is_x86():
+        return "aes-128-ni | (x86 only)"
+    if not has_aes_ni():
+        return "aes-128-ni | (NI not available)"
+    var key = AESKey(TEST_KEY)
+    var round_keys = key.round_keys()
+    var num_blocks = 65536
+    var size = num_blocks * 16
+    var input = alloc(Layout[UInt8](count=size)).unsafe_leak()
+    var output = alloc(Layout[UInt8](count=size)).unsafe_leak()
+    for i in range(size):
+        input.unsafe_store(i, TEST_PT[i % 16])
+
+    x86_aes_ecb_kernel(input, output, round_keys, num_blocks, ROUNDS_128)
+    for i in range(16):
+        if output.unsafe_load(i) != TEST_CT[i]:
+            raise Error("AES-NI ECB benchmark self-test failed")
+    var count = 0
+    var start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        x86_aes_ecb_kernel(input, output, round_keys, num_blocks, ROUNDS_128)
+        count += 1
+    var duration = perf_counter() - start
+    var mbps = Float64(count * size) / (1024 * 1024) / duration
+
+    input.unsafe_free()
+    output.unsafe_free()
+    return "aes-128-ni | throughput: " + String(mbps) + " mb/s, chunks: " + String(count) + ", time: " + String(duration) + "s"
+
+
 def benchmark_aes_gpu_ecb() raises -> String:
     comptime
     if not has_accelerator():
@@ -711,6 +803,7 @@ def main() raises:
     print(benchmark_chacha20(1024 * 1024, duration))
     print(benchmark_kcipher2(1024 * 1024, duration))
     print(benchmark_aes_cpu(duration))
+    print(benchmark_aes_ni(duration))
     comptime
     if has_accelerator():
         print(benchmark_aes_gpu_ecb())

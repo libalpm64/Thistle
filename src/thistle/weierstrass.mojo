@@ -640,12 +640,22 @@ def scalar_mult[N: Int, N0: UInt64](k: Limbs[N], p: Point[N], mod: Limbs[N], rr:
 
 @always_inline
 def mod_inv_ct[N: Int, N0: UInt64](x: Limbs[N], m: Limbs[N], rr: Limbs[N], m_minus2: Limbs[N], one_mont: Limbs[N]) -> Limbs[N]:
-    var res = one_mont
+    # Fixed-window exponentiation for x^(m-2).
     var base = to_mont[N, N0](x, rr, m)
-    for i in range(N * 64 - 1, -1, -1):
-        res = mont_mul[N, N0](res, res, m)
-        var prod = mont_mul[N, N0](res, base, m)
-        res = select(res, prod, m_minus2.bit(i))
+    var powers = InlineArray[Limbs[N], 16](fill=Limbs[N].zero())
+    powers[0] = one_mont
+    powers[1] = base
+    for i in range(2, 16):
+        powers[i] = mont_mul[N, N0](powers[i - 1], base, m)
+
+    var res = one_mont
+    for nibble_idx in range(N * 16 - 1, -1, -1):
+        comptime for _ in range(4):
+            res = mont_sqr[N, N0](res, m)
+        var limb_idx = nibble_idx >> 4
+        var shift = UInt64((nibble_idx & 15) * 4)
+        var digit = Int((m_minus2.limbs[limb_idx] >> shift) & UInt64(0xF))
+        res = mont_mul[N, N0](res, powers[digit], m)
     return from_mont[N, N0](res, m)
 
 
