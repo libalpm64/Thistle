@@ -8,7 +8,7 @@ from std.builtin.dtype import DType
 from std.sys import CompilationTarget
 from std.utils import StaticTuple
 from std.os import abort
-from .sha_ni import sha512ni_transform_blocks, sha256ni_transform_blocks
+from .sha_ni import sha512ni_transform_blocks, sha256ni_transform_blocks, sha256ni_hash
 from .utils import bytes_to_hex, string_to_bytes, load_32be, load_64be
 
 comptime SHA256_K = SIMD[DType.uint32, 64](
@@ -329,6 +329,11 @@ def sha256_final(mut ctx: SHA256Context) -> List[UInt8]:
 
 
 def sha256_hash(data: Span[UInt8, ...]) -> List[UInt8]:
+    # SHA256Context currently produces pathological x86
+    # codegen in Mojo 1.0 Despite having SHA instructions.
+    comptime if (CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86()) or (CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]()):
+        return sha256ni_hash(data)
+
     var ctx = SHA256Context()
     sha256_update(ctx, data)
     return sha256_final(ctx)
