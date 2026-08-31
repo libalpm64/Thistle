@@ -2,11 +2,12 @@
 Generic Weierstrass limb operations for P-256 (N=4) and P-384 (N=6).
 """
 
+from std.collections import InlineArray
 from std.utils import StaticTuple
 from std.memory import Pointer
 from std.os import abort
 from .utils import u64_nonzero_choice, u64_zero_choice, volatile_wipe
-from .pbkdf2 import hmac_sha256, hmac_sha384
+from .pbkdf2 import RFC6979HMAC, HMACSHA256State, HMACSHA384State
 
 
 comptime _MASK64 = UInt128(0xFFFFFFFFFFFFFFFF)
@@ -516,6 +517,40 @@ def jacobian_double_ct[N: Int, N0: UInt64](p: JacobianPoint[N], mod: Limbs[N], r
     return JacobianPoint[N](x3, y3, z3, False)
 
 
+@no_inline
+def jacobian_add[N: Int, N0: UInt64](
+    p: JacobianPoint[N], q: JacobianPoint[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]
+) -> JacobianPoint[N]:
+    var z1z1 = mont_sqr[N, N0](p.z, mod)
+    var z2z2 = mont_sqr[N, N0](q.z, mod)
+    var u1 = mont_mul[N, N0](p.x, z2z2, mod)
+    var u2 = mont_mul[N, N0](q.x, z1z1, mod)
+    var s1 = mont_mul[N, N0](p.y, mont_mul[N, N0](q.z, z2z2, mod), mod)
+    var s2 = mont_mul[N, N0](q.y, mont_mul[N, N0](p.z, z1z1, mod), mod)
+    var h = sub_mod(u2, u1, mod)
+    var r = sub_mod(s2, s1, mod)
+
+    var h2 = mont_sqr[N, N0](h, mod)
+    var h3 = mont_mul[N, N0](h2, h, mod)
+    var u1h2 = mont_mul[N, N0](u1, h2, mod)
+    var x3 = sub_mod(sub_mod(mont_sqr[N, N0](r, mod), h3, mod), mul_small_mod(u1h2, 2, mod), mod)
+    var y3 = sub_mod(mont_mul[N, N0](r, sub_mod(u1h2, x3, mod), mod), mont_mul[N, N0](s1, h3, mod), mod)
+    var z3 = mont_mul[N, N0](h, mont_mul[N, N0](p.z, q.z, mod), mod)
+    var generic = JacobianPoint[N](x3, y3, z3, False)
+
+    var doubled = jacobian_double_ct[N, N0](p, mod, rr)
+    var infinity = jacobian_infinity(one_mont)
+    var same = zero_choice(h) & zero_choice(r)
+    var opposite = zero_choice(h) & (zero_choice(r) ^ UInt64(1))
+    var p_is_inf = zero_choice(p.z)
+    var q_is_inf = zero_choice(q.z)
+    var result = select_jacobian_ct(generic, doubled, same)
+    result = select_jacobian_ct(result, infinity, opposite)
+    result = select_jacobian_ct(result, q, p_is_inf)
+    result = select_jacobian_ct(result, p, q_is_inf)
+    return result
+
+
 @always_inline
 def select_jacobian_ct[N: Int](a: JacobianPoint[N], b: JacobianPoint[N], choice: UInt64) -> JacobianPoint[N]:
     return JacobianPoint[N](select(a.x, b.x, choice), select(a.y, b.y, choice), select(a.z, b.z, choice), False)
@@ -597,6 +632,15 @@ def jacobian_infinity[N: Int](one_mont: Limbs[N]) -> JacobianPoint[N]:
 
 @always_inline
 def scalar_mult[N: Int, N0: UInt64](k: Limbs[N], p: Point[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]) -> Point[N]:
+    return jacobian_to_affine[N, N0](
+        scalar_mult_jacobian[N, N0](k, p, mod, rr, one_mont), mod, rr
+    )
+
+
+@no_inline
+def scalar_mult_jacobian[N: Int, N0: UInt64](
+    k: Limbs[N], p: Point[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]
+) -> JacobianPoint[N]:
     var pm = Point[N](to_mont[N, N0](p.x, rr, mod), to_mont[N, N0](p.y, rr, mod), False)
     var jac = InlineArray[JacobianPoint[N], 15](fill=JacobianPoint[N]())
     jac[0] = JacobianPoint[N](pm.x, pm.y, one_mont, False)
@@ -635,7 +679,100 @@ def scalar_mult[N: Int, N0: UInt64](k: Limbs[N], p: Point[N], mod: Limbs[N], rr:
             qy = select(qy, ty[i], hit)
         var added = jacobian_add_affine_non_equal_ct[N, N0](acc, Point[N](qx, qy, False), mod, rr, one_mont)
         acc = select_jacobian_ct(acc, added, u64_nonzero_choice(d))
-    return jacobian_to_affine[N, N0](acc, mod, rr)
+    return acc
+
+
+@always_inline
+def _window_bits[N: Int](k: Limbs[N], start: Int) -> UInt64:
+    var value: UInt64 = 0
+    for j in range(6):
+        var bit_index = start + j
+        if bit_index >= 0 and bit_index < N * 64:
+            value |= k.bit(bit_index) << UInt64(j)
+    return value
+
+
+@always_inline
+def _booth_recode_w5(value: UInt64) -> UInt64:
+    var sign = ~((value >> 5) - UInt64(1))
+    var digit = (UInt64(64) - value - UInt64(1))
+    digit = (digit & sign) | (value & ~sign)
+    digit = (digit >> 1) + (digit & UInt64(1))
+    return (digit << 1) + (sign & UInt64(1))
+
+
+@always_inline
+def _window_bits_w7[N: Int](k: Limbs[N], start: Int) -> UInt64:
+    var value: UInt64 = 0
+    for j in range(8):
+        var bit_index = start + j
+        if bit_index >= 0 and bit_index < N * 64:
+            value |= k.bit(bit_index) << UInt64(j)
+    return value
+
+
+@always_inline
+def _booth_recode_w7(value: UInt64) -> UInt64:
+    var sign = ~((value >> 7) - UInt64(1))
+    var digit = UInt64(256) - value - UInt64(1)
+    digit = (digit & sign) | (value & ~sign)
+    digit = (digit >> 1) + (digit & UInt64(1))
+    return (digit << 1) + (sign & UInt64(1))
+
+
+@no_inline
+def scalar_mult_jacobian_w5[N: Int, N0: UInt64](
+    k: Limbs[N], p: Point[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]
+) -> JacobianPoint[N]:
+    var pm = Point[N](to_mont[N, N0](p.x, rr, mod), to_mont[N, N0](p.y, rr, mod), False)
+    var jac = InlineArray[JacobianPoint[N], 16](fill=JacobianPoint[N]())
+    jac[0] = JacobianPoint[N](pm.x, pm.y, one_mont, False)
+    jac[1] = jacobian_double_ct[N, N0](jac[0], mod, rr)
+    for i in range(2, 16):
+        jac[i] = jacobian_add_affine_non_equal_ct[N, N0](jac[i - 1], pm, mod, rr, one_mont)
+
+    var prefix = InlineArray[Limbs[N], 16](fill=Limbs[N].zero())
+    prefix[0] = jac[0].z
+    for i in range(1, 16):
+        prefix[i] = mont_mul[N, N0](prefix[i - 1], jac[i].z, mod)
+    var inv_acc = inv_p[N, N0](prefix[15], mod, rr)
+    var tx = InlineArray[Limbs[N], 16](fill=Limbs[N].zero())
+    var ty = InlineArray[Limbs[N], 16](fill=Limbs[N].zero())
+    for jj in range(16):
+        var j = 15 - jj
+        var zinv = inv_acc
+        if j > 0:
+            zinv = mont_mul[N, N0](inv_acc, prefix[j - 1], mod)
+            inv_acc = mont_mul[N, N0](inv_acc, jac[j].z, mod)
+        var zinv2 = mont_sqr[N, N0](zinv, mod)
+        tx[j] = mont_mul[N, N0](jac[j].x, zinv2, mod)
+        ty[j] = mont_mul[N, N0](jac[j].y, mont_mul[N, N0](zinv2, zinv, mod), mod)
+
+    var acc = jacobian_infinity(one_mont)
+    for window in range((N * 64) // 5 + 1):
+        if window != 0:
+            acc = jacobian_double_ct[N, N0](acc, mod, rr)
+            acc = jacobian_double_ct[N, N0](acc, mod, rr)
+            acc = jacobian_double_ct[N, N0](acc, mod, rr)
+            acc = jacobian_double_ct[N, N0](acc, mod, rr)
+            acc = jacobian_double_ct[N, N0](acc, mod, rr)
+        var recoded = _booth_recode_w5(
+            _window_bits[N](k, 5 * ((N * 64) // 5 - window) - 1)
+        )
+        var magnitude = recoded >> 1
+        var qx = Limbs[N].zero()
+        var qy = Limbs[N].zero()
+        for i in range(16):
+            var hit = u64_zero_choice(UInt64(i + 1) ^ magnitude)
+            qx = select(qx, tx[i], hit)
+            qy = select(qy, ty[i], hit)
+        var neg_qy = sub_mod(Limbs[N].zero(), qy, mod)
+        qy = select(qy, neg_qy, recoded & UInt64(1))
+        var added = jacobian_add_affine_non_equal_ct[N, N0](
+            acc, Point[N](qx, qy, False), mod, rr, one_mont
+        )
+        acc = select_jacobian_ct(acc, added, u64_nonzero_choice(magnitude))
+    return acc
 
 
 @always_inline
@@ -705,6 +842,15 @@ def base_table_entry[N: Int](tptr: Pointer[UInt64, _], j: Int, d: UInt64) -> Poi
 @always_inline
 def scalar_mult_base[N: Int, N0: UInt64](tptr: Pointer[UInt64, _], k: Limbs[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]
 ) -> Point[N]:
+    return jacobian_to_affine[N, N0](
+        scalar_mult_base_jacobian[N, N0](tptr, k, mod, rr, one_mont), mod, rr
+    )
+
+
+@no_inline
+def scalar_mult_base_jacobian[N: Int, N0: UInt64](
+    tptr: Pointer[UInt64, _], k: Limbs[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]
+) -> JacobianPoint[N]:
     var acc = jacobian_infinity(one_mont)
     for i in range(1, N * 16, 2):
         var d = (k.limbs[i >> 4] >> UInt64(4 * (i & 15))) & UInt64(0xF)
@@ -720,18 +866,12 @@ def scalar_mult_base[N: Int, N0: UInt64](tptr: Pointer[UInt64, _], k: Limbs[N], 
         var q = base_table_entry[N](tptr, i >> 1, d)
         var added = jacobian_add_affine_non_equal_ct[N, N0](acc, q, mod, rr, one_mont)
         acc = select_jacobian_ct(acc, added, u64_nonzero_choice(d))
-    return jacobian_to_affine[N, N0](acc, mod, rr)
+    return acc
 
 
-@always_inline
-def _hmac[N: Int](key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
-    if N == 4:
-        return hmac_sha256(key, data)
-    else:
-        return hmac_sha384(key, data)
-
-
-def rfc6979[N: Int](private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int, n: Limbs[N]) -> Limbs[N]:
+def _rfc6979_impl[N: Int, H: RFC6979HMAC & Deinitable](
+    private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int, n: Limbs[N]
+) -> Limbs[N]:
     if len(private_key) != N * 8 or len(digest) != N * 8:
         abort("RFC 6979 inputs must match the curve scalar size")
     if skip < 0:
@@ -739,54 +879,65 @@ def rfc6979[N: Int](private_key: Span[UInt8, ...], digest: Span[UInt8, ...], ski
     var h1 = reduce_mod(from_be[N](digest), n)
     var h1_bytes = InlineArray[UInt8, N * 8](fill=0)
     to_be(h1, h1_bytes.unsafe_ptr())
-    var k = List[UInt8](length=N * 8, fill=0)
-    var v = List[UInt8](length=N * 8, fill=1)
-    var seed = List[UInt8](capacity=N * 8 * 3 + 1)
+    var k = InlineArray[UInt8, N * 8](fill=0)
+    var v = InlineArray[UInt8, N * 8](fill=1)
+    var next_k = InlineArray[UInt8, N * 8](fill=0)
+    var next_v = InlineArray[UInt8, N * 8](fill=0)
+    var seed = InlineArray[UInt8, N * 8 * 3 + 1](fill=0)
+    var seed_len = N * 8 * 3 + 1
+
     for i in range(N * 8):
-        seed.append(v[i])
-    seed.append(0)
+        seed[i] = v[i]
+        seed[N * 8 + 1 + i] = private_key[i]
+        seed[N * 8 + 1 + N * 8 + i] = h1_bytes[i]
+    seed[N * 8] = 0
+    var hmac = H(Span[UInt8, ...](k))
+    hmac.hmac_into(
+        Span[UInt8, ...](unsafe_ptr=seed.unsafe_ptr(), length=seed_len),
+        next_k.unsafe_ptr()
+    )
     for i in range(N * 8):
-        seed.append(private_key[i])
+        k[i] = next_k[i]
+        next_k.unsafe_ptr().unsafe_store[volatile=True](i, UInt8(0))
+    var hmac1 = H(Span[UInt8, ...](k))
+    hmac1.hmac_into(Span[UInt8, ...](v), next_v.unsafe_ptr())
     for i in range(N * 8):
-        seed.append(h1_bytes[i])
-    var next_k: List[UInt8]
-    var next_v: List[UInt8]
-    next_k = _hmac[N](Span[UInt8, ...](k), Span[UInt8, ...](seed))
-    volatile_wipe(k.unsafe_ptr(), len(k))
-    k = next_k^
-    next_v = _hmac[N](Span[UInt8, ...](k), Span[UInt8, ...](v))
-    volatile_wipe(v.unsafe_ptr(), len(v))
-    v = next_v^
-    volatile_wipe(seed.unsafe_ptr(), len(seed))
-    seed.clear()
+        v[i] = next_v[i]
+        next_v.unsafe_ptr().unsafe_store[volatile=True](i, UInt8(0))
+
     for i in range(N * 8):
-        seed.append(v[i])
-    seed.append(1)
+        seed[i] = v[i]
+        seed[N * 8 + 1 + i] = private_key[i]
+        seed[N * 8 + 1 + N * 8 + i] = h1_bytes[i]
+    seed[N * 8] = 1
+    hmac1.hmac_into(
+        Span[UInt8, ...](unsafe_ptr=seed.unsafe_ptr(), length=seed_len),
+        next_k.unsafe_ptr()
+    )
     for i in range(N * 8):
-        seed.append(private_key[i])
+        k[i] = next_k[i]
+        next_k.unsafe_ptr().unsafe_store[volatile=True](i, UInt8(0))
+    var hmac2 = H(Span[UInt8, ...](k))
+    hmac2.hmac_into(Span[UInt8, ...](v), next_v.unsafe_ptr())
     for i in range(N * 8):
-        seed.append(h1_bytes[i])
-    next_k = _hmac[N](Span[UInt8, ...](k), Span[UInt8, ...](seed))
-    volatile_wipe(k.unsafe_ptr(), len(k))
-    k = next_k^
-    next_v = _hmac[N](Span[UInt8, ...](k), Span[UInt8, ...](v))
-    volatile_wipe(v.unsafe_ptr(), len(v))
-    v = next_v^
+        v[i] = next_v[i]
+        next_v.unsafe_ptr().unsafe_store[volatile=True](i, UInt8(0))
+
     var accepted = 0
     while True:
-        next_v = _hmac[N](Span[UInt8, ...](k), Span[UInt8, ...](v))
-        volatile_wipe(v.unsafe_ptr(), len(v))
-        v = next_v^
-        var candidate = from_be[N](Span[UInt8, ...](v))
+        hmac2.hmac_into(Span[UInt8, ...](v), next_k.unsafe_ptr())
+        for i in range(N * 8):
+            v[i] = next_v[i]
+            next_v.unsafe_ptr().unsafe_store[volatile=True](i, UInt8(0))
+        var candidate = from_be[N](Span[UInt8, ...](unsafe_ptr=next_k.unsafe_ptr(), length=N * 8))
         if not candidate.is_zero() and cmp(candidate, n) < 0:
             if accepted == skip:
-                volatile_wipe(k.unsafe_ptr(), len(k))
-                volatile_wipe(v.unsafe_ptr(), len(v))
-                volatile_wipe(seed.unsafe_ptr(), len(seed))
-                var hp = h1_bytes.unsafe_ptr()
-                for i in range(N * 8):
-                    hp.unsafe_store[volatile=True](i, UInt8(0))
-                # wipe h1
+                volatile_wipe(k.unsafe_ptr(), N * 8)
+                volatile_wipe(v.unsafe_ptr(), N * 8)
+                volatile_wipe(seed.unsafe_ptr(), seed_len)
+                volatile_wipe(next_k.unsafe_ptr(), N * 8)
+                volatile_wipe(next_v.unsafe_ptr(), N * 8)
+                volatile_wipe(h1_bytes.unsafe_ptr(), N * 8)
                 var h_ptr = Pointer(to=h1).unsafe_bitcast[UInt64]()
                 for i in range(N):
                     h_ptr.unsafe_store[volatile=True](i, UInt64(0))
@@ -796,17 +947,31 @@ def rfc6979[N: Int](private_key: Span[UInt8, ...], digest: Span[UInt8, ...], ski
         var c_ptr = Pointer(to=candidate).unsafe_bitcast[UInt64]()
         for i in range(N):
             c_ptr.unsafe_store[volatile=True](i, UInt64(0))
-        volatile_wipe(seed.unsafe_ptr(), len(seed))
-        seed.clear()
+        volatile_wipe(next_k.unsafe_ptr(), N * 8)
         for i in range(N * 8):
-            seed.append(v[i])
-        seed.append(0)
-        next_k = _hmac[N](Span[UInt8, ...](k), Span[UInt8, ...](seed))
-        volatile_wipe(k.unsafe_ptr(), len(k))
-        k = next_k^
-        next_v = _hmac[N](Span[UInt8, ...](k), Span[UInt8, ...](v))
-        volatile_wipe(v.unsafe_ptr(), len(v))
-        v = next_v^
+            seed[i] = v[i]
+            seed[N * 8 + 1 + i] = private_key[i]
+            seed[N * 8 + 1 + N * 8 + i] = h1_bytes[i]
+        seed[N * 8] = 0
+        hmac2.hmac_into(
+            Span[UInt8, ...](unsafe_ptr=seed.unsafe_ptr(), length=seed_len),
+            next_k.unsafe_ptr()
+        )
+        for i in range(N * 8):
+            k[i] = next_k[i]
+            next_k.unsafe_ptr().unsafe_store[volatile=True](i, UInt8(0))
+        var hmac_next = H(Span[UInt8, ...](k))
+        hmac_next.hmac_into(Span[UInt8, ...](v), next_v.unsafe_ptr())
+        for i in range(N * 8):
+            v[i] = next_v[i]
+            next_v.unsafe_ptr().unsafe_store[volatile=True](i, UInt8(0))
+
+
+def rfc6979[N: Int](private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int, n: Limbs[N]) -> Limbs[N]:
+    comptime if N == 4:
+        return _rfc6979_impl[N, HMACSHA256State](private_key, digest, skip, n)
+    else:
+        return _rfc6979_impl[N, HMACSHA384State](private_key, digest, skip, n)
 
 
 @always_inline

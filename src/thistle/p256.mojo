@@ -2,13 +2,13 @@
 NIST P-256 / secp256r1 implementation.
 """
 
-from .p256_table import p256_base_table
+from .p256_table import p256_w7_fill
 from .utils import u64_nonzero_choice, u64_zero_choice
 from .sha2 import sha256_hash
 from .pbkdf2 import hmac_sha256
 from std.utils import StaticTuple
 from .weierstrass import (
-    Limbs, U256, Point, JacobianPoint, cmp as ws_cmp, sub_raw as ws_sub_raw, add_raw as ws_add_raw, select as ws_select, zero_choice as ws_zero_choice, add_mod as ws_add_mod, sub_mod as ws_sub_mod, from_be as ws_from_be, to_be as ws_to_be, mont_mul as ws_mont_mul, mont_sqr as ws_mont_sqr, to_mont as ws_to_mont, from_mont as ws_from_mont, mul_mod as ws_mul_mod, square_mod as ws_square_mod, is_on_curve as ws_is_on_curve, mul_small_mod as ws_mul_small_mod, jacobian_double_ct as ws_jacobian_double_ct, jacobian_infinity as ws_jacobian_infinity, select_jacobian_ct as ws_select_jacobian_ct, jacobian_add_affine_non_equal_ct as ws_jacobian_add_affine, pow_mod as ws_pow_mod, sqn as ws_sqn, inv_p as ws_inv_p, jacobian_to_affine as ws_jacobian_to_affine, scalar_mult as ws_scalar_mult, base_table_entry as ws_base_table_entry, scalar_mult_base as ws_scalar_mult_base, mod_inv_ct as ws_mod_inv_ct, reduce_mod as ws_reduce_mod, point_add as ws_point_add, rfc6979 as ws_rfc6979
+    Limbs, U256, Point, JacobianPoint, cmp as ws_cmp, sub_raw as ws_sub_raw, add_raw as ws_add_raw, select as ws_select, zero_choice as ws_zero_choice, add_mod as ws_add_mod, sub_mod as ws_sub_mod, from_be as ws_from_be, to_be as ws_to_be, mont_mul as ws_mont_mul, mont_sqr as ws_mont_sqr, to_mont as ws_to_mont, from_mont as ws_from_mont, mul_mod as ws_mul_mod, square_mod as ws_square_mod, is_on_curve as ws_is_on_curve, mul_small_mod as ws_mul_small_mod, jacobian_double_ct as ws_jacobian_double_ct, jacobian_add as ws_jacobian_add, jacobian_infinity as ws_jacobian_infinity, select_jacobian_ct as ws_select_jacobian_ct, jacobian_add_affine_non_equal_ct as ws_jacobian_add_affine, pow_mod as ws_pow_mod, sqn as ws_sqn, inv_p as ws_inv_p, jacobian_to_affine as ws_jacobian_to_affine, scalar_mult_jacobian_w5 as ws_scalar_mult_jacobian_w5, reduce_mod as ws_reduce_mod, point_add as ws_point_add, rfc6979 as ws_rfc6979
 )
 
 comptime P256_SIZE = 32
@@ -330,24 +330,93 @@ def _jacobian_to_affine(p: P256JacobianPoint) -> P256Point:
 
 
 def _scalar_mult(k: U256, p: P256Point) -> P256Point:
-    var pl = Point[4](p.x, p.y, p.infinity)
-    var res = ws_scalar_mult[4, _N0](k, pl, _p(), _rr(), _one_mont())
-    return P256Point(res.x, res.y, res.infinity)
+    return _jacobian_to_affine(_scalar_mult_jacobian(k, p))
 
 
 @always_inline
-def _base_table_entry(
+def _scalar_mult_jacobian(k: U256, p: P256Point) -> P256JacobianPoint:
+    var pl = Point[4](p.x, p.y, p.infinity)
+    var res = ws_scalar_mult_jacobian_w5[4, _N0](k, pl, _p(), _rr(), _one_mont())
+    return P256JacobianPoint(res.x, res.y, res.z, res.infinity)
+
+
+@always_inline
+def _base_table_entry_w7(
     tptr: Pointer[UInt64, _], j: Int, d: UInt64
 ) -> P256Point:
-    var res = ws_base_table_entry[4](tptr, j, d)
-    return P256Point(res.x, res.y, res.infinity)
+    var qx = U256()
+    var qy = U256()
+    for t in range(1, 65):
+        var hit = u64_zero_choice(UInt64(t) ^ d)
+        var base = (j * 64 + (t - 1)) * 8
+        var ex = U256()
+        var ey = U256()
+        for i in range(4):
+            ex.limbs[i] = tptr[unsafe_offset=base + i]
+            ey.limbs[i] = tptr[unsafe_offset=base + 4 + i]
+        qx = ws_select(qx, ex, hit)
+        qy = ws_select(qy, ey, hit)
+    return P256Point(qx, qy, False)
 
 
-def _scalar_mult_base(k: U256) -> P256Point:
-    var table = p256_base_table()
+@always_inline
+def _window_bits_w7(k: U256, start: Int) -> UInt64:
+    var value: UInt64 = 0
+    for j in range(8):
+        var bit_index = start + j
+        if bit_index >= 0 and bit_index < 256:
+            value |= k.bit(bit_index) << UInt64(j)
+    return value
+
+
+@always_inline
+def _booth_recode_w7(value: UInt64) -> UInt64:
+    var sign = ~((value >> 7) - UInt64(1))
+    var digit = UInt64(256) - value - UInt64(1)
+    digit = (digit & sign) | (value & ~sign)
+    digit = (digit >> 1) + (digit & UInt64(1))
+    return (digit << 1) + (sign & UInt64(1))
+
+
+@no_inline
+def _scalar_mult_base_jacobian_w7(k: U256) -> P256JacobianPoint:
+    var table = InlineArray[UInt64, 18944](uninitialized=True)
     var tptr = table.unsafe_ptr()
-    var res = ws_scalar_mult_base[4, _N0](tptr, k, _p(), _rr(), _one_mont())
-    return P256Point(res.x, res.y, res.infinity)
+    p256_w7_fill(tptr)
+
+    var acc = _jacobian_infinity()
+    for j in range(37):
+        var recoded = _booth_recode_w7(_window_bits_w7(k, 7 * j - 1))
+        var magnitude = recoded >> 1
+        var q = _base_table_entry_w7(tptr, j, magnitude)
+        var neg_y = _sub_mod(_p(), q.y, _p())
+        q.y = ws_select(q.y, neg_y, recoded & UInt64(1))
+        var gp = JacobianPoint[4](acc.x, acc.y, acc.z, acc.infinity)
+        var gq = Point[4](q.x, q.y, q.infinity)
+        var sum = ws_jacobian_add_affine[4, _N0](
+            gp, gq, _p(), _rr(), _one_mont()
+        )
+        var sum_p = P256JacobianPoint(sum.x, sum.y, sum.z, sum.infinity)
+        acc = _select_jacobian_ct(acc, sum_p, u64_nonzero_choice(magnitude))
+    return acc
+
+
+@always_inline
+def _scalar_mult_base(k: U256) -> P256Point:
+    return _jacobian_to_affine(_scalar_mult_base_jacobian_w7(k))
+
+
+@always_inline
+def _scalar_mult_base_jacobian(k: U256) -> P256JacobianPoint:
+    return _scalar_mult_base_jacobian_w7(k)
+
+
+@always_inline
+def _jacobian_add(p: P256JacobianPoint, q: P256JacobianPoint) -> P256JacobianPoint:
+    var gp = JacobianPoint[4](p.x, p.y, p.z, p.infinity)
+    var gq = JacobianPoint[4](q.x, q.y, q.z, q.infinity)
+    var res = ws_jacobian_add[4, _N0](gp, gq, _p(), _rr(), _one_mont())
+    return P256JacobianPoint(res.x, res.y, res.z, res.infinity)
 
 
 def p256_decode_uncompressed(point: Span[UInt8, ...]) -> P256Point:
@@ -460,15 +529,6 @@ def _n_one_mont() -> U256:
     )
 
 
-def _n_minus_2() -> U256:
-    return U256(
-        0xF3B9CAC2FC63254F,
-        0xBCE6FAADA7179E84,
-        0xFFFFFFFFFFFFFFFF,
-        0xFFFFFFFF00000000
-    )
-
-
 @always_inline
 def _n_mont_mul(a: U256, b: U256) -> U256:
     return ws_mont_mul[4, _ORDER_N0](a, b, _n())
@@ -489,8 +549,38 @@ def _n_mul(a: U256, b: U256) -> U256:
     return ws_mont_mul[4, _ORDER_N0](ws_to_mont[4, _ORDER_N0](a, _n_rr(), _n()), b, _n())
 
 
+@always_inline
+def _n_sqn(x: U256, count: Int) -> U256:
+    return ws_sqn[4, _ORDER_N0](x, count, _n())
+
+
 def _n_inv(x: U256) -> U256:
-    return ws_mod_inv_ct[4, _ORDER_N0](x, _n(), _n_rr(), _n_minus_2(), _n_one_mont())
+    var table = InlineArray[U256, 14](fill=U256())
+    table[0] = _n_to_mont(x)
+    table[1] = _n_mont_mul(table[0], table[0])
+    table[2] = _n_mont_mul(table[0], table[1])
+    table[3] = _n_mont_mul(table[2], table[1])
+    table[4] = _n_mont_mul(table[3], table[1])
+    table[5] = _n_mont_mul(table[3], table[3])
+    table[6] = _n_mont_mul(table[5], table[3])
+    table[7] = _n_mont_mul(_n_mont_mul(table[5], table[5]), table[0])
+    table[8] = _n_mont_mul(table[7], table[7])
+    table[9] = _n_mont_mul(table[8], table[3])
+    table[10] = _n_mont_mul(table[8], table[7])
+    table[11] = _n_mont_mul(_n_sqn(table[10], 2), table[2])
+    table[12] = _n_mont_mul(_n_sqn(table[11], 8), table[11])
+    table[13] = _n_mont_mul(_n_sqn(table[12], 16), table[12])
+
+    var out = _n_mont_mul(_n_sqn(table[13], 64), table[13])
+    var chain_p = StaticTuple[Int, 27](
+        32, 6, 5, 4, 5, 5, 4, 3, 3, 5, 9, 6, 2, 5, 6, 5, 4, 5, 5, 3, 10, 2, 5, 5, 3, 7, 6
+    )
+    var chain_i = StaticTuple[Int, 27](
+        13, 9, 4, 2, 6, 7, 3, 3, 3, 4, 9, 6, 0, 0, 6, 4, 4, 4, 3, 2, 9, 2, 2, 2, 0, 7, 6
+    )
+    for i in range(27):
+        out = _n_mont_mul(_n_sqn(out, chain_p[i]), table[chain_i[i]])
+    return _n_from_mont(out)
 
 
 @always_inline
@@ -599,7 +689,9 @@ def p256_ecdsa_verify_digest(
     var w = _n_inv(s)
     var u1 = _n_mul(z, w)
     var u2 = _n_mul(r, w)
-    var point = _p256_add_public(_scalar_mult_base(u1), _scalar_mult(u2, q))
+    var p1 = _scalar_mult_base_jacobian(u1)
+    var p2 = _scalar_mult_jacobian(u2, q)
+    var point = _jacobian_to_affine(_jacobian_add(p1, p2))
     if point.infinity:
         return False
     return _eq(_reduce_n(point.x), r)

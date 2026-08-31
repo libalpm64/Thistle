@@ -8,7 +8,7 @@ from .sha2 import sha384_hash
 from .pbkdf2 import hmac_sha384
 from std.utils import StaticTuple
 from .weierstrass import (
-    Limbs, U384, Point, JacobianPoint, cmp as ws_cmp, sub_raw as ws_sub_raw, add_raw as ws_add_raw, select as ws_select, zero_choice as ws_zero_choice, add_mod as ws_add_mod, sub_mod as ws_sub_mod, from_be as ws_from_be, to_be as ws_to_be, mont_mul as ws_mont_mul, mont_sqr as ws_mont_sqr, to_mont as ws_to_mont, from_mont as ws_from_mont, mul_mod as ws_mul_mod, square_mod as ws_square_mod, is_on_curve as ws_is_on_curve, mul_small_mod as ws_mul_small_mod, jacobian_double_ct as ws_jacobian_double_ct, jacobian_infinity as ws_jacobian_infinity, select_jacobian_ct as ws_select_jacobian_ct, jacobian_add_affine_non_equal_ct as ws_jacobian_add_affine, pow_mod as ws_pow_mod, sqn as ws_sqn, inv_p as ws_inv_p, jacobian_to_affine as ws_jacobian_to_affine, scalar_mult as ws_scalar_mult, base_table_entry as ws_base_table_entry, scalar_mult_base as ws_scalar_mult_base, mod_inv_ct as ws_mod_inv_ct, reduce_mod as ws_reduce_mod, point_add as ws_point_add, rfc6979 as ws_rfc6979
+    Limbs, U384, Point, JacobianPoint, cmp as ws_cmp, sub_raw as ws_sub_raw, add_raw as ws_add_raw, select as ws_select, zero_choice as ws_zero_choice, add_mod as ws_add_mod, sub_mod as ws_sub_mod, from_be as ws_from_be, to_be as ws_to_be, mont_mul as ws_mont_mul, mont_sqr as ws_mont_sqr, to_mont as ws_to_mont, from_mont as ws_from_mont, mul_mod as ws_mul_mod, square_mod as ws_square_mod, is_on_curve as ws_is_on_curve, mul_small_mod as ws_mul_small_mod, jacobian_double_ct as ws_jacobian_double_ct, jacobian_add as ws_jacobian_add, jacobian_infinity as ws_jacobian_infinity, select_jacobian_ct as ws_select_jacobian_ct, jacobian_add_affine_non_equal_ct as ws_jacobian_add_affine, pow_mod as ws_pow_mod, sqn as ws_sqn, inv_p as ws_inv_p, jacobian_to_affine as ws_jacobian_to_affine, scalar_mult_jacobian_w5 as ws_scalar_mult_jacobian_w5, scalar_mult_base as ws_scalar_mult_base, scalar_mult_base_jacobian as ws_scalar_mult_base_jacobian, base_table_entry as ws_base_table_entry, mod_inv_ct as ws_mod_inv_ct, reduce_mod as ws_reduce_mod, point_add as ws_point_add, rfc6979 as ws_rfc6979
 )
 
 comptime P384_SIZE = 48
@@ -335,9 +335,14 @@ def _jacobian_to_affine(p: P384JacobianPoint) -> P384Point:
 
 
 def _scalar_mult(k: U384, p: P384Point) -> P384Point:
+    return _jacobian_to_affine(_scalar_mult_jacobian(k, p))
+
+
+@always_inline
+def _scalar_mult_jacobian(k: U384, p: P384Point) -> P384JacobianPoint:
     var pl = Point[6](p.x, p.y, p.infinity)
-    var res = ws_scalar_mult[6, _N0](k, pl, _p(), _rr(), _one_mont())
-    return P384Point(res.x, res.y, res.infinity)
+    var res = ws_scalar_mult_jacobian_w5[6, _N0](k, pl, _p(), _rr(), _one_mont())
+    return P384JacobianPoint(res.x, res.y, res.z, res.infinity)
 
 
 @always_inline
@@ -353,6 +358,22 @@ def _scalar_mult_base(k: U384) -> P384Point:
     var tptr = table.unsafe_ptr()
     var res = ws_scalar_mult_base[6, _N0](tptr, k, _p(), _rr(), _one_mont())
     return P384Point(res.x, res.y, res.infinity)
+
+
+@always_inline
+def _scalar_mult_base_jacobian(k: U384) -> P384JacobianPoint:
+    var table = p384_base_table()
+    var tptr = table.unsafe_ptr()
+    var res = ws_scalar_mult_base_jacobian[6, _N0](tptr, k, _p(), _rr(), _one_mont())
+    return P384JacobianPoint(res.x, res.y, res.z, res.infinity)
+
+
+@always_inline
+def _jacobian_add(p: P384JacobianPoint, q: P384JacobianPoint) -> P384JacobianPoint:
+    var gp = JacobianPoint[6](p.x, p.y, p.z, p.infinity)
+    var gq = JacobianPoint[6](q.x, q.y, q.z, q.infinity)
+    var res = ws_jacobian_add[6, _N0](gp, gq, _p(), _rr(), _one_mont())
+    return P384JacobianPoint(res.x, res.y, res.z, res.infinity)
 
 
 def p384_decode_uncompressed(point: Span[UInt8, ...]) -> P384Point:
@@ -610,7 +631,9 @@ def p384_ecdsa_verify_digest(
     var w = _n_inv(s)
     var u1 = _n_mul(z, w)
     var u2 = _n_mul(r, w)
-    var point = _p384_add_public(_scalar_mult_base(u1), _scalar_mult(u2, q))
+    var p1 = _scalar_mult_base_jacobian(u1)
+    var p2 = _scalar_mult_jacobian(u2, q)
+    var point = _jacobian_to_affine(_jacobian_add(p1, p2))
     if point.infinity:
         return False
     return _eq(_reduce_n(point.x), r)
