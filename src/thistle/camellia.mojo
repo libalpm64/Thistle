@@ -7,7 +7,7 @@ from std.os import abort
 from std.sys import llvm_intrinsic
 from std.utils import StaticTuple
 from .aes import _ct_sbox, _ct_ortho, _ctr_write_block
-from .utils import transpose8x8
+from .utils import transpose8x8, volatile_wipe
 from .aes_ni import (
     _aese,
     _mm_aesenclast_si128,
@@ -535,6 +535,7 @@ def _flinv_scalar(y: UInt64, ke: UInt64) -> UInt64:
 
 
 struct CamelliaCipher:
+    """Camellia with 18 or 24 Feistel rounds plus FL and FLINV mixing"""
     var kw: SIMD[DType.uint64, 4]
     var k: InlineArray[UInt64, 24]
     var ke: InlineArray[UInt64, 6]
@@ -857,8 +858,8 @@ def _f_bs(
     mut r: InlineArray[_U8x16, 8],
     k: UInt64
 ):
-    # Byte-sliced F on 16 blocks, k is the pre-byte-swapped subkey
-    # (byte j = t_{j+1}). P-function in CSE form:
+    # Runs byte sliced F on 16 blocks with the subkey already byte swapped
+    # P function written out so the compiler can fold the xors
     # y_{4+i} = a_{i,i+1} ^ (s ^ x_{5+i}), y_i = x_i ^ a_{i+2,i+3} ^ ...
     var y = InlineArray[_U8x16, 8](fill=_U8x16(0))
     comptime for j in range(8):
@@ -885,10 +886,9 @@ def _f_bs(
 
 @always_inline
 def _fl_rot_bs(mut h: InlineArray[_U8x16, 8], ke: UInt64):
-    # FL step x2 ^= rotl1(x1 & k1). Layout: h[0..3] = x1 bytes MSB first,
-    # h[4..7] = x2; ke is big-endian, k1 = ke bytes 7..4, k2 = 3..0.
-    # rotl1 32-bit word t0t1t2t3 splits pb register
-    # out_i = (t_i << 1) | (t_{i+1 mod 4} >> 7), t3 wraps t0.
+    # FL mixes x2 with x1 and key and the layout keeps x1 first then x2
+    # ke is big endian with the high half first then the low half
+    # rotl by one splits across words with wrap from last to first
     var t0 = h[0] & _splat_byte(ke, 7)
     var t1 = h[1] & _splat_byte(ke, 6)
     var t2 = h[2] & _splat_byte(ke, 5)
@@ -1199,6 +1199,7 @@ def camellia_cbc_decrypt_kernel(
             output_ptr.unsafe_store[alignment=1]((i + b) * 16, out)
             prev = ctp.unsafe_load[width=16, alignment=1](b * 16)
         i += n
+    volatile_wipe(ptp, 1024)
 
 
 def camellia_ctr_kernel(
@@ -1270,3 +1271,4 @@ def camellia_ctr_kernel(
                     ^ kp.unsafe_load[width=16, alignment=1](b * 16)
                 )
             i += n
+    volatile_wipe(kp, 512)

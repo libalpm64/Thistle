@@ -3,6 +3,7 @@
 from std.collections import List
 from std.algorithm.functional import vectorize
 from std.builtin.globals import global_constant
+from std.sys import inlined_assembly
 from std.sys import simd_width_of
 from std.os import abort
 from thistle.sha3 import (
@@ -124,6 +125,7 @@ def _zeta(i: Int) -> Int16:
 
 
 struct Poly(Copyable, Movable):
+    """Polynomial of degree 255 holding coefficients mod 3329"""
     var coeffs: InlineArray[Int16, N]
 
     @always_inline
@@ -157,6 +159,8 @@ struct Polyvec(Copyable, Movable):
 
 @always_inline
 def montgomery_reduce(a: Int32) -> Int16:
+    """Reduces a value into Montgomery form using QINV"""
+    # Montgomery reduction multiplies by QINV then shifts down by 16
     # QINV = -3327 = q^-1 mod 2^16.
     var t = Int16(a) * Int16(-3327)
     return Int16((a - Int32(t) * Int32(Q)) >> 16)
@@ -170,6 +174,8 @@ def montgomery_reduce_simd[w: Int](a: SIMD[DType.int32, w]) -> SIMD[DType.int16,
 
 @always_inline
 def barrett_reduce(a: Int16) -> Int16:
+    """Brings a coefficient back into range with Barrett reduction"""
+    # Barrett reduction scales by V then subtracts off a multiple of q
     comptime V: Int16 = Int16(((1 << 26) + Q // 2) // Q)
     var t = Int16((Int32(V) * Int32(a) + (1 << 25)) >> 26)
     t *= Int16(Q)
@@ -278,6 +284,8 @@ def poly_cbd_eta2(mut r: Poly, buf: Span[UInt8, ...]) raises:
 
 
 def ntt(mut r: InlineArray[Int16, N]):
+    """Number theoretic transform mod 3329 with 7 layers of butterflies using bit reversed zetas
+    Each butterfly multiplies by its zeta then writes the sum and the difference"""
     comptime W = simd_width_of[DType.int16]()
     var ptr = r.unsafe_ptr()
 
@@ -306,6 +314,8 @@ def ntt(mut r: InlineArray[Int16, N]):
 
 
 def invntt(mut r: InlineArray[Int16, N]):
+    """Inverse transform that undoes the NTT by walking the layers backwards
+    It adds pairs with Barrett reduction then scales everything by 1441"""
     comptime F: Int16 = 1441
     comptime W = simd_width_of[DType.int16]()
     var ptr = r.unsafe_ptr()
@@ -1464,7 +1474,11 @@ def _ct_is_zero_u8(x: UInt8) -> UInt8:
 
 @always_inline
 def _ct_select_u8(a: UInt8, b: UInt8, choice: UInt8) -> UInt8:
-    var mask = UInt8(0) - (choice & 1)
+    # Keeps the mask opaque so the compiler cannot turn it into a branch
+    # loading through a selected pointer would leak which side was picked
+    var mask = UInt8(inlined_assembly[
+        "", UInt32, constraints="=r,0", has_side_effect=True
+    ](UInt32(0) - UInt32(choice & 1)))
     return a ^ (mask & (a ^ b))
 
 
@@ -1545,11 +1559,12 @@ def mlkem_keygen_seed(seed: Span[UInt8, ...], parameter_set: String) raises -> T
         zero_stack_u8(dk_buf)
 
 
-# FIPS 203 ML-KEM.KeyGen(): fresh d || z, then deterministic expansion.
+# FIPS 203 ML-KEM KeyGen starts from fresh random seed then expands deterministically
 
 
 def mlkem_keygen(parameter_set: String
 ) raises -> Tuple[List[UInt8], List[UInt8]]:
+    """Generates a fresh keypair by sampling the matrix and adding noise"""
     var seed = random_bytes(2 * SYMBYTES)
     try:
         return mlkem_keygen_seed(Span[UInt8, ...](seed), parameter_set)
@@ -1579,21 +1594,25 @@ def _mlkem_keygen_random_k[k: Int]() raises -> Tuple[List[UInt8], List[UInt8]]:
 
 
 def mlkem512_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
+    """Just runs the generic keygen with k set to 2"""
     return _mlkem_keygen_random_k[K_512]()
 
 
 def mlkem768_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
+    """Just runs the generic keygen with k set to 3"""
     return _mlkem_keygen_random_k[K_768]()
 
 
 def mlkem1024_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
+    """Just runs the generic keygen with k set to 4"""
     return _mlkem_keygen_random_k[K_1024]()
 
 
-# FIPS 203 ML-KEM.Encaps(): fresh m, returns (ciphertext, shared_secret, ok).
+# Encaps samples fresh randomness then runs the deterministic path
 
 
 def mlkem_encaps(ek_bytes: Span[UInt8, ...], parameter_set: String) raises -> Tuple[List[UInt8], List[UInt8], Bool]:
+    """Encapsulates a fresh shared secret for the given public key"""
     var m = random_bytes(SYMBYTES)
     try:
         var result = mlkem_encaps_seed(ek_bytes, Span[UInt8, ...](m), parameter_set)
@@ -1626,14 +1645,17 @@ def _mlkem_encaps_random_k[k: Int](ek_bytes: Span[UInt8, ...]) raises -> Tuple[L
 
 
 def mlkem512_encaps(ek_bytes: Span[UInt8, ...]) raises -> Tuple[List[UInt8], List[UInt8], Bool]:
+    """Just runs the generic encaps with k set to 2"""
     return _mlkem_encaps_random_k[K_512](ek_bytes)
 
 
 def mlkem768_encaps(ek_bytes: Span[UInt8, ...]) raises -> Tuple[List[UInt8], List[UInt8], Bool]:
+    """Just runs the generic encaps with k set to 3"""
     return _mlkem_encaps_random_k[K_768](ek_bytes)
 
 
 def mlkem1024_encaps(ek_bytes: Span[UInt8, ...]) raises -> Tuple[List[UInt8], List[UInt8], Bool]:
+    """Just runs the generic encaps with k set to 4"""
     return _mlkem_encaps_random_k[K_1024](ek_bytes)
 
 
@@ -1710,8 +1732,7 @@ def mlkem_encaps_seed_into_k[k: Int](mut ciphertext_out: StackBuffer[UInt8, CIPH
 
 
 def mlkem_encaps_seed_vector_order(ek_bytes: Span[UInt8, ...], m: Span[UInt8, ...], parameter_set: String) raises -> Tuple[List[UInt8], List[UInt8], Bool]:
-    # KAT/vector order: (shared_secret, ciphertext, ok).
-    # Use mlkem_encaps_seed() for the FIPS/RFC external order.
+    # Test vectors want shared secret first so use the normal encaps for standard order
     var shared_buf = StackBuffer[UInt8, SYMBYTES]()
     var ciphertext_buf = StackBuffer[UInt8, CIPHERTEXTBYTES_MAX]()
     if not mlkem_encaps_seed_into(ciphertext_buf, shared_buf, ek_bytes, m, parameter_set):
@@ -1733,7 +1754,7 @@ def mlkem_encaps_seed_vector(ek_bytes: Span[UInt8, ...], m: Span[UInt8, ...], pa
 
 
 def mlkem_encaps_seed(ek_bytes: Span[UInt8, ...], m: Span[UInt8, ...], parameter_set: String) raises -> Tuple[List[UInt8], List[UInt8], Bool]:
-    # FIPS/RFC order: (ciphertext, shared_secret, ok).
+    # Returns ciphertext first to match the standard
     var result = mlkem_encaps_seed_vector_order(ek_bytes, m, parameter_set)
     if not result[2]:
         return (List[UInt8](), List[UInt8](), False)
@@ -1835,6 +1856,7 @@ def mlkem_decaps_into_k[k: Int](mut shared_out: StackBuffer[UInt8, SYMBYTES], dk
 
 def mlkem_decaps(dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...], parameter_set: String
 ) raises -> Tuple[List[UInt8], Bool]:
+    """Recovers the shared secret with implicit rejection on failure"""
     var shared_buf = StackBuffer[UInt8, SYMBYTES]()
     if not mlkem_decaps_into(shared_buf, dk_bytes, ciphertext, parameter_set):
         zero_stack_u8(shared_buf)
@@ -1848,6 +1870,7 @@ def mlkem_decaps(dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...], param
 
 
 def mlkem512_decaps(dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...]) raises -> Tuple[List[UInt8], Bool]:
+    """Just runs the generic decaps with k set to 2"""
     var shared_buf = StackBuffer[UInt8, SYMBYTES]()
     if not mlkem_decaps_into_k[K_512](shared_buf, dk_bytes, ciphertext):
         zero_stack_u8(shared_buf)
@@ -1860,6 +1883,7 @@ def mlkem512_decaps(dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...]) ra
 
 
 def mlkem768_decaps(dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...]) raises -> Tuple[List[UInt8], Bool]:
+    """Just runs the generic decaps with k set to 3"""
     var shared_buf = StackBuffer[UInt8, SYMBYTES]()
     if not mlkem_decaps_into_k[K_768](shared_buf, dk_bytes, ciphertext):
         zero_stack_u8(shared_buf)
@@ -1872,6 +1896,7 @@ def mlkem768_decaps(dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...]) ra
 
 
 def mlkem1024_decaps(dk_bytes: Span[UInt8, ...], ciphertext: Span[UInt8, ...]) raises -> Tuple[List[UInt8], Bool]:
+    """Just runs the generic decaps with k set to 4"""
     var shared_buf = StackBuffer[UInt8, SYMBYTES]()
     if not mlkem_decaps_into_k[K_1024](shared_buf, dk_bytes, ciphertext):
         zero_stack_u8(shared_buf)

@@ -3,6 +3,7 @@ KCipher-2 stream cipher implemented in Mojo.
 """
 
 from std.memory import bitcast
+from std.bit import byte_swap
 from .utils import transpose8x8
 from .aes_ni import (
     _aese,
@@ -302,6 +303,7 @@ def nlf(a: UInt32, b: UInt32, c: UInt32, d: UInt32) -> UInt32:
 
 
 struct KCipher2:
+    """KCipher-2 stream from a 128 bit key and IV with two registers and a small tail buffer"""
     var a0: UInt32
     var a1: UInt32
     var a2: UInt32
@@ -323,27 +325,8 @@ struct KCipher2:
     var l2: UInt32
     var r2: UInt32
 
-    def __init__(out self):
-        self.a0 = 0
-        self.a1 = 0
-        self.a2 = 0
-        self.a3 = 0
-        self.a4 = 0
-        self.b0 = 0
-        self.b1 = 0
-        self.b2 = 0
-        self.b3 = 0
-        self.b4 = 0
-        self.b5 = 0
-        self.b6 = 0
-        self.b7 = 0
-        self.b8 = 0
-        self.b9 = 0
-        self.b10 = 0
-        self.l1 = 0
-        self.r1 = 0
-        self.l2 = 0
-        self.r2 = 0
+    var _pending: UInt64
+    var _pending_bytes: Int
 
     def __init__(
         out self, key: SIMD[DType.uint32, 4], iv: SIMD[DType.uint32, 4]
@@ -368,6 +351,8 @@ struct KCipher2:
         self.r1 = 0
         self.l2 = 0
         self.r2 = 0
+        self._pending = 0
+        self._pending_bytes = 0
         self._init(key, iv)
 
     def __deinit__(deinit self):
@@ -376,6 +361,7 @@ struct KCipher2:
         var p = Pointer(to=self).unsafe_bitcast[UInt32]()
         for i in range(20):
             p.unsafe_store[volatile=True](i, UInt32(0))
+        Pointer(to=self._pending).unsafe_store[volatile=True](0, UInt64(0))
 
     def _key_expansion(
         mut self, key: SIMD[DType.uint32, 4], iv: SIMD[DType.uint32, 4]
@@ -559,57 +545,58 @@ struct KCipher2:
     def encrypt_inplace[
         origin: Origin[mut=True]
     ](mut self, mut data: Span[mut=True, UInt8, origin]):
-        var len_data = len(data)
-        var data_ptr = data.unsafe_ptr()
+        # bytes go out big endian per RFC 7008 and leftover bytes carry to the next call
+        var offset = 0
+        while self._pending_bytes > 0 and offset < len(data):
+            data[offset] ^= UInt8(self._pending >> 56)
+            self._pending <<= 8
+            self._pending_bytes -= 1
+            offset += 1
+
+        var len_data = len(data) - offset
+        var data_ptr = data.unsafe_ptr().unsafe_offset(offset)
         var data_u64 = data_ptr.unsafe_bitcast[UInt64]()
         var num_u64 = len_data // 8
         var i = 0
 
         while i + 3 < num_u64:
-            var ks0 = self.stream()
+            var ks0 = byte_swap(self.stream())
             self._next_normal()
-            var ks1 = self.stream()
+            var ks1 = byte_swap(self.stream())
             self._next_normal()
-            var ks2 = self.stream()
+            var ks2 = byte_swap(self.stream())
             self._next_normal()
-            var ks3 = self.stream()
+            var ks3 = byte_swap(self.stream())
             self._next_normal()
-            (data_u64.unsafe_offset(i)).unsafe_store[alignment=1](
-                (data_u64.unsafe_offset(i)).unsafe_load[width=1, alignment=1]() ^ ks0
+            data_u64.unsafe_offset(i).unsafe_store[alignment=1](
+                data_u64.unsafe_offset(i).unsafe_load[alignment=1]() ^ ks0
             )
-            (data_u64.unsafe_offset(i).unsafe_offset(1)).unsafe_store[alignment=1](
-                (data_u64.unsafe_offset(i).unsafe_offset(1)).unsafe_load[width=1, alignment=1]() ^ ks1
+            data_u64.unsafe_offset(i + 1).unsafe_store[alignment=1](
+                data_u64.unsafe_offset(i + 1).unsafe_load[alignment=1]() ^ ks1
             )
-            (data_u64.unsafe_offset(i).unsafe_offset(2)).unsafe_store[alignment=1](
-                (data_u64.unsafe_offset(i).unsafe_offset(2)).unsafe_load[width=1, alignment=1]() ^ ks2
+            data_u64.unsafe_offset(i + 2).unsafe_store[alignment=1](
+                data_u64.unsafe_offset(i + 2).unsafe_load[alignment=1]() ^ ks2
             )
-            (data_u64.unsafe_offset(i).unsafe_offset(3)).unsafe_store[alignment=1](
-                (data_u64.unsafe_offset(i).unsafe_offset(3)).unsafe_load[width=1, alignment=1]() ^ ks3
+            data_u64.unsafe_offset(i + 3).unsafe_store[alignment=1](
+                data_u64.unsafe_offset(i + 3).unsafe_load[alignment=1]() ^ ks3
             )
             i += 4
 
         while i < num_u64:
-            var ks = self.stream()
+            var ks = byte_swap(self.stream())
             self._next_normal()
-            (data_u64.unsafe_offset(i)).unsafe_store[alignment=1](
-                (data_u64.unsafe_offset(i)).unsafe_load[width=1, alignment=1]() ^ ks
+            data_u64.unsafe_offset(i).unsafe_store[alignment=1](
+                data_u64.unsafe_offset(i).unsafe_load[alignment=1]() ^ ks
             )
             i += 1
 
-        var offset = num_u64 * 8
-        if offset < len_data:
-            var z = self.stream()
+        offset += num_u64 * 8
+        if offset < len(data):
+            self._pending = self.stream()
             self._next_normal()
-            var ks = SIMD[DType.uint8, 8](
-                UInt8(z),
-                UInt8(z >> 8),
-                UInt8(z >> 16),
-                UInt8(z >> 24),
-                UInt8(z >> 32),
-                UInt8(z >> 40),
-                UInt8(z >> 48),
-                UInt8(z >> 56)
-            )
-
-            for j in range(len_data - offset):
-                data[offset + j] ^= ks[j]
+            self._pending_bytes = 8
+            while offset < len(data):
+                data[offset] ^= UInt8(self._pending >> 56)
+                self._pending <<= 8
+                self._pending_bytes -= 1
+                offset += 1

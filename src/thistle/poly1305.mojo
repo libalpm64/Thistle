@@ -3,6 +3,7 @@
 from std.memory import Pointer
 from std.collections import InlineArray
 
+# limb masks for a 44 44 and 42 bit split
 comptime _M44: UInt64 = 0xFFFFFFFFFFF
 comptime _M42: UInt64 = 0x3FFFFFFFFFF
 
@@ -93,6 +94,7 @@ def _limbs_at(ptr: Pointer[mut=False, UInt8, _, address_space=_], offset: Int, h
 
 
 struct Poly1305:
+    """Poly1305 that keeps r mod 2 to the 130 minus 5 in three limbs and batches with Horner"""
     var r: _RPower
     var r2: _RPower
     var r3: _RPower
@@ -383,6 +385,7 @@ def poly1305_mac(
     message: Span[UInt8, ...],
     output: Span[mut=True, UInt8, ...]
 ) raises:
+    """one shot Poly1305 that clamps r then folds each block in and adds s at the end"""
     if len(output) < 16:
         raise Error("Poly1305 output needs at least 16 writable bytes")
     var p = Poly1305(key)

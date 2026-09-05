@@ -116,7 +116,7 @@ def compress_internal[
     flags: UInt8,
     out_ptr: Pointer[mut=True, SIMD[DType.uint32, w], _, address_space=_]
 ):
-    """BLAKE3 compression: 7 rounds of G with message permutation."""
+    """Runs 7 rounds of G with message permutation for BLAKE3 compression"""
     var v: StackInlineArray[SIMD[DType.uint32, w], 16] = [
         cv[0], cv[1], cv[2], cv[3], cv[4], cv[5], cv[6], cv[7],
         UInt32(0x6A09E667), UInt32(0xBB67AE85), UInt32(0x3C6EF372), UInt32(0xA54FF53A),
@@ -243,6 +243,7 @@ def compress_internal_16way(
 
 # fmt: on
 struct Hasher:
+    """BLAKE3 tree hasher splitting input into 1KiB chunks with 7 rounds of G"""
     var key: SIMD[DType.uint32, 8]
     var original_key: SIMD[DType.uint32, 8]
     var cv_stack: StackInlineArray[SIMD[DType.uint32, 8], 54]
@@ -367,7 +368,6 @@ struct Hasher:
 
     @always_inline
     def finalize(self, out_len: Int, out out_buf: List[UInt8]) raises:
-        """Finalize the hash and return the output."""
         if out_len < 0:
             raise Error("BLAKE3 output length must be non-negative")
         out_buf = {unsafe_uninit_length=out_len}
@@ -436,6 +436,7 @@ struct Hasher:
 
 @always_inline
 def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> List[UInt8]:
+    """BLAKE3 output of any length batching 64 chunks in parallel past 64KiB"""
     if out_len < 0:
         raise Error("BLAKE3 output length must be non-negative")
     var d = input
@@ -601,4 +602,5 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
 
 
 def blake3_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> List[UInt8]:
+    """same as blake3_parallel_hash defaulting to 32 bytes"""
     return blake3_parallel_hash(input, out_len)

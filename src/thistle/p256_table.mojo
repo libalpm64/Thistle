@@ -1,3 +1,4 @@
+# P-256 precomputed comb table for fast scalar multiplication
 from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
 from std.memory import Pointer

@@ -27,7 +27,56 @@ from thistle.poly1305 import Poly1305
 from thistle.x25519 import x25519, x25519_checked
 
 
+def test_chacha_streaming() raises:
+    var nonce = List[UInt8](length=12, fill=0)
+    var key = SIMD[DType.uint8, 32](0)
+    for length in [0, 1, 63, 64, 65, 255, 256, 257, 511, 512, 513, 767, 768, 769, 1025, 1601]:
+        var whole = List[UInt8](length=length, fill=0xA5)
+        var reference = ChaCha20(key, Span[UInt8, ...](nonce))
+        var whole_span = Span[mut=True, UInt8, ...](whole)
+        reference.encrypt_inplace(whole_span)
+        for split_at in [0, 1, 7, 63, 64, 65, 255, 256, 511, 768]:
+            if split_at > length:
+                continue
+            var split = List[UInt8](length=length, fill=0xA5)
+            var cipher = ChaCha20(key, Span[UInt8, ...](nonce))
+            var first = Span[mut=True, UInt8, ...](unsafe_ptr=split.unsafe_ptr(), length=split_at)
+            var rest = Span[mut=True, UInt8, ...](unsafe_ptr=split.unsafe_ptr().unsafe_offset(split_at), length=length - split_at)
+            cipher.encrypt_inplace(first)
+            cipher.encrypt_inplace(rest)
+            for i in range(length):
+                if split[i] != whole[i]:
+                    raise Error("ChaCha20 chunk boundaries changed ciphertext")
+
+    var final_block = List[UInt8](length=64, fill=0)
+    var cipher = ChaCha20(key, Span[UInt8, ...](nonce), UInt32(0xFFFFFFFF))
+    var first = Span[mut=True, UInt8, ...](unsafe_ptr=final_block.unsafe_ptr(), length=1)
+    cipher.encrypt_inplace(first)
+    var excessive = List[UInt8](length=64, fill=0xA5)
+    var excessive_span = Span[mut=True, UInt8, ...](excessive)
+    var rejected = False
+    try:
+        cipher.encrypt_inplace(excessive_span)
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("ChaCha20 accepted data beyond its remaining keystream")
+    for i in range(64):
+        if excessive[i] != 0xA5:
+            raise Error("ChaCha20 changed output on counter exhaustion")
+    var rest = Span[mut=True, UInt8, ...](unsafe_ptr=final_block.unsafe_ptr().unsafe_offset(1), length=63)
+    cipher.encrypt_inplace(rest)
+    rejected = False
+    try:
+        cipher.encrypt_inplace(first)
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("ChaCha20 reused its counter after exhaustion")
+
+
 def main() raises:
+    test_chacha_streaming()
     var empty = List[UInt8]()
     var short = List[UInt8](length=15, fill=0)
     var rejected = False
@@ -151,27 +200,6 @@ def main() raises:
         nonce_affects_stream |= stream_a[i] != stream_b[i]
     if not nonce_affects_stream:
         raise Error("ChaCha20 ignored the final nonce byte")
-
-    # The final UInt32 counter value is valid once, but the reusable context
-    # must remember exhaustion so a later call cannot reuse counter zero.
-    var last_counter_cipher = ChaCha20(
-        chacha_key, Span[UInt8, ...](nonce_a), UInt32(0xFFFFFFFF)
-    )
-    var one_byte = List[UInt8](length=1, fill=0)
-    var one_byte_out = List[UInt8](length=1, fill=0)
-    var one_byte_out_span = Span[mut=True, UInt8, ...](one_byte_out)
-    last_counter_cipher.encrypt_into(
-        Span[UInt8, ...](one_byte), one_byte_out_span
-    )
-    rejected = False
-    try:
-        last_counter_cipher.encrypt_into(
-            Span[UInt8, ...](one_byte), one_byte_out_span
-        )
-    except:
-        rejected = True
-    if not rejected:
-        raise Error("ChaCha20 reused its counter after exhaustion")
 
     var ed_private = List[UInt8](length=32, fill=1)
     var ed_public_short = List[UInt8](length=31, fill=0)

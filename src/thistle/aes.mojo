@@ -41,6 +41,7 @@ def cpu_aes_encrypt(
     pt_bytes: Pointer[mut=True, UInt8, _, address_space=_],
     round_keys: Pointer[mut=True, UInt32, _, address_space=_]
 ) -> None:
+    """AES-128 encrypt runs 10 rounds of SubBytes ShiftRows MixColumns and AddRoundKey"""
     cpu_aes_encrypt(pt_bytes, round_keys, 10)
 
 
@@ -50,6 +51,7 @@ def cpu_aes_encrypt(
     round_keys: Pointer[mut=True, UInt32, _, address_space=_],
     rounds: Int
 ) -> None:
+    """encrypts with AES bitsliced for 10 12 or 14 rounds depending on key size"""
     var skey = cpu_aes_ct_skey(round_keys, rounds)
     _ct_encrypt1(pt_bytes, skey, rounds)
     volatile_wipe(skey.unsafe_ptr(), len(skey))
@@ -63,6 +65,7 @@ def cpu_aes_ecb_kernel(
     num_blocks: Int,
     rounds: Int
 ) -> None:
+    """encrypts each block on its own in batches of 16 and runs in linear time"""
     _validate_aes_block_count(num_blocks)
     var skey = cpu_aes_ct_skey(round_keys, rounds)
     var scratch = InlineArray[UInt8, 256](fill=0)
@@ -91,6 +94,7 @@ def cpu_aes_cbc_kernel(
     iv_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
+    """chains each plaintext block with the last ciphertext so blocks run in order"""
     _validate_aes_block_count(num_blocks)
     var skey = cpu_aes_ct_skey(round_keys, rounds)
     var prev_block = StaticTuple[UInt8, 16](
@@ -143,6 +147,7 @@ def cpu_aes_ctr_kernel(
     nonce_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
+    """turns AES into a stream by xoring plaintext with encrypted counters"""
     _validate_aes_block_count(num_blocks)
     var skey = cpu_aes_ct_skey(round_keys, rounds)
     var ks = InlineArray[UInt8, 256](fill=0)
@@ -167,6 +172,7 @@ def cpu_aes_ctr_kernel(
 
 @always_inline
 def cpu_xts_mul_alpha_inplace(tweak_ptr: Pointer[mut=True, UInt8, _, address_space=_]) -> None:
+    """doubles the XTS tweak in GF 128 with poly 0x87"""
     var carry = (tweak_ptr.unsafe_load(15) & 0x80) != 0
     for i in range(15, 0, -1):
         tweak_ptr.unsafe_store(i, (tweak_ptr.unsafe_load(i) << UInt8(1)) | (tweak_ptr.unsafe_load(i - 1) >> UInt8(7)))
@@ -186,6 +192,7 @@ def cpu_aes_xts_kernel(
     tweak_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
+    """xors each block with its tweak then encrypts and steps the tweak forward"""
     _validate_aes_block_count(num_blocks)
     var skey1 = cpu_aes_ct_skey(round_keys1, rounds)
     var skey2 = cpu_aes_ct_skey(round_keys2, rounds)
@@ -220,6 +227,7 @@ def cpu_aes_xts_kernel(
 
 @always_inline
 def sub_word(w: UInt32) -> UInt32:
+    """runs 4 bytes through the S-box using the Boyar-Peralta circuit"""
     var blk = InlineArray[UInt8, 16](fill=0)
     var bp = blk.unsafe_ptr()
     bp[unsafe_offset=0] = UInt8((w >> 24) & 0xff)
@@ -249,6 +257,7 @@ def expand_key_128_into(
     key_bytes: Pointer[mut=False, UInt8, _, address_space=_],
     w: Pointer[mut=True, UInt32, _, address_space=_]
 ) raises -> None:
+    """expands a 16 byte key into 10 rounds with RotWord SubWord and Rcon"""
     for i in range(4):
         var key_val: UInt32 = 0
         for j in range(4):
@@ -267,6 +276,7 @@ def expand_key_192_into(
     key_bytes: Pointer[mut=False, UInt8, _, address_space=_],
     w: Pointer[mut=True, UInt32, _, address_space=_]
 ) raises -> None:
+    """expands a 24 byte key into 12 rounds with RotWord SubWord and Rcon"""
     for i in range(6):
         var key_val: UInt32 = 0
         for j in range(4):
@@ -285,6 +295,7 @@ def expand_key_256_into(
     key_bytes: Pointer[mut=False, UInt8, _, address_space=_],
     w: Pointer[mut=True, UInt32, _, address_space=_]
 ) raises -> None:
+    """expands a 32 byte key into 14 rounds with an extra SubWord halfway"""
     for i in range(8):
         var key_val: UInt32 = 0
         for j in range(4):
@@ -302,7 +313,7 @@ def expand_key_256_into(
 
 
 struct AESExpandedKey(Movable):
-    """Owned AES-128/192/256 round-key schedule, wiped on destruction."""
+    """holds the expanded key with room for up to 14 rounds"""
 
     var _round_keys: StackBuffer[UInt32, 60]
     var rounds: Int
@@ -341,24 +352,28 @@ struct AESExpandedKey(Movable):
 
 
 def expand_key_128(key: Span[UInt8, ...]) raises -> AESExpandedKey:
+    """Just wraps expand_key_128_into for 16 byte keys"""
     if len(key) != 16:
         raise Error("AES-128 keys must contain exactly 16 bytes")
     return AESExpandedKey(key)
 
 
 def expand_key_192(key: Span[UInt8, ...]) raises -> AESExpandedKey:
+    """Just wraps expand_key_192_into for 24 byte keys"""
     if len(key) != 24:
         raise Error("AES-192 keys must contain exactly 24 bytes")
     return AESExpandedKey(key)
 
 
 def expand_key_256(key: Span[UInt8, ...]) raises -> AESExpandedKey:
+    """Just wraps expand_key_256_into for 32 byte keys"""
     if len(key) != 32:
         raise Error("AES-256 keys must contain exactly 32 bytes")
     return AESExpandedKey(key)
 
 
 struct AESKey:
+    """keeps a 16 byte key and its 44 expanded words and wipes them on drop"""
     var _data: StackBuffer[UInt8, 16]
     var _round_keys: StackBuffer[UInt32, 44]
     
@@ -395,6 +410,7 @@ def _ct_interleave_in[W: Int](
     w0: SIMD[DType.uint64, W], w1: SIMD[DType.uint64, W],
     w2: SIMD[DType.uint64, W], w3: SIMD[DType.uint64, W]
 ) -> Tuple[SIMD[DType.uint64, W], SIMD[DType.uint64, W]]:
+    """folds four 32 bit words into two sliced halves"""
     var x0 = w0
     var x1 = w1
     var x2 = w2
@@ -459,6 +475,7 @@ def _ct_swapn[W: Int](
 
 @always_inline
 def _ct_ortho[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
+    """transposes eight 64 bit words with 1 2 and 4 bit swaps"""
     var p01 = _ct_swapn(0x5555555555555555, 1, q[0], q[1])
     var p23 = _ct_swapn(0x5555555555555555, 1, q[2], q[3])
     var p45 = _ct_swapn(0x5555555555555555, 1, q[4], q[5])
@@ -483,6 +500,7 @@ def _ct_ortho[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
 
 @always_inline
 def _ct_sbox[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
+    """runs the AES S-box bitsliced with Boyar-Peralta inversion so it stays constant time"""
     var x0 = q[7]
     var x1 = q[6]
     var x2 = q[5]
@@ -624,6 +642,7 @@ def _ct_sbox[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
 
 @always_inline
 def _ct_shift_rows[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
+    """rotates each row left by its row number"""
     comptime for i in range(8):
         var x = q[i]
         q[i] = (
@@ -644,6 +663,7 @@ def _ct_rotr32[W: Int](x: SIMD[DType.uint64, W]) -> SIMD[DType.uint64, W]:
 
 @always_inline
 def _ct_mix_columns[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
+    """mixes each column in GF 256 without branching"""
     var q0 = q[0]
     var q1 = q[1]
     var q2 = q[2]
@@ -674,6 +694,7 @@ def _ct_mix_columns[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
 def cpu_aes_ct_skey(
     round_keys: Pointer[mut=True, UInt32, _, address_space=_], rounds: Int
 ) -> List[UInt64]:
+    """builds the bitsliced key with 8 words per round plus one"""
     _validate_aes_rounds(rounds)
     var skey = List[UInt64](capacity=(rounds + 1) * 8)
     for r in range(rounds + 1):
@@ -716,6 +737,7 @@ def _ct_encrypt_blocks[W: Int](
     skp: Pointer[mut=False, UInt64, _, address_space=_],
     rounds: Int
 ) -> None:
+    """encrypts blocks bitsliced starting with AddKey then looping S-box Shift Mix and AddKey"""
     var q = InlineArray[SIMD[DType.uint64, W], 8](fill=0)
     for i in range(4):
         var w0 = SIMD[DType.uint64, W](0)
@@ -784,6 +806,7 @@ def cpu_aes_ct_encrypt(
     round_keys: Pointer[mut=True, UInt32, _, address_space=_],
     rounds: Int = 10
 ) -> None:
+    """encrypts one block bitsliced in one go and keeps control flow unbroken"""
     var skey = cpu_aes_ct_skey(round_keys, rounds)
     var buf = InlineArray[UInt8, 64](fill=0)
     var bp = buf.unsafe_ptr()

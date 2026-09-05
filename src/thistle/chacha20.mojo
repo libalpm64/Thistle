@@ -4,6 +4,7 @@ from std.memory import bitcast
 from std.memory.unsafe_pointer import Pointer
 from std.bit import rotate_bits_left
 
+# sigma words for expand 32-byte k kept little endian
 comptime CHACHA_CONSTANTS = SIMD[DType.uint32, 4](
     0x61707865, 0x3320646E, 0x79622D32, 0x6B206574
 )
@@ -57,7 +58,7 @@ def simd_quarter_round(
     d: SIMD[DType.uint32, 4]
 ) -> Tuple[SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4]
 ]:
-    
+    """one ChaCha quarter round doing adds xors and rotates by 16 12 8 and 7"""
     var aa = a
     var bb = b
     var cc = c
@@ -124,7 +125,7 @@ def simd_double_round(
     row3: SIMD[DType.uint32, 4]
 ) -> Tuple[SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4]
 ]:
-
+    """does a column round plus a diagonal round which is 2 of the 20 total"""
     var rr0 = row0
     var rr1 = row1
     var rr2 = row2
@@ -472,7 +473,7 @@ def chacha20_block_core(
     counter: UInt32,
     nonce: SIMD[DType.uint32, 4]
 ) -> SIMD[DType.uint32, 16]:
-
+    """builds one ChaCha20 block with 20 rounds then adds the input back"""
     var row0 = CHACHA_CONSTANTS
     var row1 = SIMD[DType.uint32, 4](key[0], key[1], key[2], key[3])
     var row2 = SIMD[DType.uint32, 4](key[4], key[5], key[6], key[7])
@@ -558,7 +559,7 @@ def _chacha20_nonce_words(nonce: Span[UInt8, ...]) raises -> SIMD[DType.uint32, 
 def chacha20_block(
     key: SIMD[DType.uint8, 32], counter: UInt32, nonce: Span[UInt8, ...]
 ) raises -> SIMD[DType.uint8, 64]:
-
+    """makes 64 bytes of keystream with 20 ARX rounds for the given counter"""
     var key_words = bitcast[DType.uint32, 8](key)
     var nonce_words = _chacha20_nonce_words(nonce)
     var state = chacha20_block_core(key_words, counter, nonce_words)
@@ -578,10 +579,13 @@ def _xor_block64(
 
 
 struct ChaCha20:
+    """streaming ChaCha20 crunching 12 or 8 or 4 blocks at once then scalar for the tail"""
     var key: SIMD[DType.uint32, 8]
     var nonce: SIMD[DType.uint32, 4]
     var counter: UInt32
     var exhausted: Bool
+    var _pending: SIMD[DType.uint8, 64]
+    var _pending_pos: Int
 
     def __init__(
         out self,
@@ -593,6 +597,8 @@ struct ChaCha20:
         self.nonce = _chacha20_nonce_words(nonce_bytes)
         self.counter = counter
         self.exhausted = False
+        self._pending = SIMD[DType.uint8, 64](0)
+        self._pending_pos = 64
 
     def __deinit__(deinit self):
         var kp = Pointer(to=self.key).unsafe_mut_cast[True]().unsafe_bitcast[UInt8]()
@@ -603,12 +609,16 @@ struct ChaCha20:
             np.unsafe_store[volatile=True](i, UInt8(0))
         Pointer(to=self.counter).unsafe_mut_cast[True]().unsafe_store[volatile=True](0, UInt32(0))
         Pointer(to=self.exhausted).unsafe_mut_cast[True]().unsafe_bitcast[UInt8]().unsafe_store[volatile=True](0, UInt8(0))
+        Pointer(to=self._pending).unsafe_bitcast[UInt8]().unsafe_store[volatile=True](
+            0, SIMD[DType.uint8, 64](0)
+        )
 
     def _check_counter_space(self, data_len: Int) raises:
         if data_len < 0:
             raise Error("ChaCha20 input length cannot be negative")
-        var blocks_needed = UInt64(data_len // 64)
-        if data_len % 64 != 0:
+        var fresh_bytes = max(0, data_len - (64 - self._pending_pos))
+        var blocks_needed = UInt64(fresh_bytes // 64)
+        if fresh_bytes % 64 != 0:
             blocks_needed += 1
         if self.exhausted and blocks_needed > 0:
             raise Error("ChaCha20 counter is exhausted, use a new nonce")
@@ -626,8 +636,14 @@ struct ChaCha20:
         self._check_counter_space(length)
         var block_idx = 0
         var offset = 0
+        while self._pending_pos < 64 and offset < length:
+            dst[unsafe_offset=offset] = src[unsafe_offset=offset] ^ self._pending[self._pending_pos]
+            self._pending_pos += 1
+            offset += 1
+        if offset == length:
+            return
 
-        if 256 <= length:
+        if 256 <= length - offset:
             var rows = _quad_rows_init(self.key, self.counter, self.nonce)
             var i3 = rows[3]
             while offset + 768 <= length:
@@ -669,9 +685,10 @@ struct ChaCha20:
             var keystream = _chacha20_block_scalar(
                 self.key, self.counter + UInt32(block_idx), self.nonce
             )
-            var ks_u8 = bitcast[DType.uint8, 64](keystream)
+            self._pending = bitcast[DType.uint8, 64](keystream)
+            self._pending_pos = length - offset
             for i in range(length - offset):
-                (dst.unsafe_offset(offset).unsafe_offset(i)).unsafe_store(0, (src.unsafe_offset(offset).unsafe_offset(i)).unsafe_load(0) ^ ks_u8[i])
+                (dst.unsafe_offset(offset).unsafe_offset(i)).unsafe_store(0, (src.unsafe_offset(offset).unsafe_offset(i)).unsafe_load(0) ^ self._pending[i])
             block_idx += 1
 
         var next_counter = UInt64(self.counter) + UInt64(block_idx)

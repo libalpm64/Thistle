@@ -1,6 +1,4 @@
-"""
-Generic Weierstrass limb operations for P-256 (N=4) and P-384 (N=6).
-"""
+"""Small limb helpers that power both P-256 and P-384"""
 
 from std.collections import InlineArray
 from std.utils import StaticTuple
@@ -14,6 +12,7 @@ comptime _MASK64 = UInt128(0xFFFFFFFFFFFFFFFF)
 
 
 struct Limbs[N: Int](Copyable, ImplicitlyCopyable, Movable):
+    """Little endian number in N limbs with adds and compares that scale with N"""
     var limbs: StaticTuple[UInt64, Self.N]
 
     def __init__(out self):
@@ -160,6 +159,7 @@ def to_be[N: Int](x: Limbs[N], output: Pointer[mut=True, UInt8, _, address_space
 
 
 struct Point[N: Int](Copyable, ImplicitlyCopyable, Movable):
+    """Affine point with x and y that live on the short Weierstrass curve"""
     var x: Limbs[Self.N]
     var y: Limbs[Self.N]
     var infinity: Bool
@@ -176,6 +176,7 @@ struct Point[N: Int](Copyable, ImplicitlyCopyable, Movable):
 
 
 struct JacobianPoint[N: Int](Copyable, ImplicitlyCopyable, Movable):
+    """Jacobian point that hides division behind Z until you go back to affine"""
     var x: Limbs[Self.N]
     var y: Limbs[Self.N]
     var z: Limbs[Self.N]
@@ -212,10 +213,12 @@ def _p256_final_sub(
 
 @always_inline
 def _p256_mont_mul(a: Limbs[4], b: Limbs[4], p: Limbs[4]) -> Limbs[4]:
-    """P-256 field Montgomery multiply specialized for its sparse prime."""
-    # For P-256, -p^-1 mod 2^64 is 1 and multiplication by each
-    # reduction digit folds into shifts and adds.  Keeping this path avoids a
-    # measurable regression from the generic CIOS multiplier.
+    """Montgomery multiply with R at two to the 256 that folds with CIOS and skips the multiply since N0 is 1
+    Sparse prime shape lets the reduction fold into shifts and adds
+    Work grows with the square of the limb count"""
+    # For P-256 minus p inverse is one so each reduction digit folds with shifts and adds
+    # Keeping this path avoids a slowdown you would feel from generic CIOS
+    # N0 is one since minus p inverse is one with R at two to the 256 for the fold
     var a0 = a.limbs[0]
     var a1 = a.limbs[1]
     var a2 = a.limbs[2]
@@ -300,7 +303,7 @@ def _p256_mont_mul(a: Limbs[4], b: Limbs[4], p: Limbs[4]) -> Limbs[4]:
 
 @always_inline
 def _p256_mont_sqr(a: Limbs[4], p: Limbs[4]) -> Limbs[4]:
-    """P-256 field Montgomery square using symmetry in the product."""
+    """P-256 Montgomery square that reuses symmetry to do less work"""
     var a0 = a.limbs[0]
     var a1 = a.limbs[1]
     var a2 = a.limbs[2]
@@ -388,6 +391,10 @@ def _p256_mont_sqr(a: Limbs[4], p: Limbs[4]) -> Limbs[4]:
 
 @always_inline
 def mont_mul[N: Int, N0: UInt64](a: Limbs[N], b: Limbs[N], p: Limbs[N]) -> Limbs[N]:
+    """Montgomery multiply that folds the reduction digit into the accumulator then shifts
+    Takes the fast shift and add path when N0 is 1 and generic CIOS otherwise with R at two to the 256
+    Work grows with the square of the limb count"""
+    # Fold each reduction digit into the accumulator the Montgomery way
     comptime if N == 4 and N0 == UInt64(1):
         var a4 = Limbs[4](
             a.limbs[0], a.limbs[1], a.limbs[2], a.limbs[3]
@@ -457,6 +464,8 @@ def square_mod[N: Int, N0: UInt64](a: Limbs[N], p: Limbs[N], rr: Limbs[N]) -> Li
 
 @always_inline
 def mont_sqr[N: Int, N0: UInt64](a: Limbs[N], p: Limbs[N]) -> Limbs[N]:
+    """Montgomery square that halves the cross terms on the P-256 fast path"""
+    # P-256 squares halve the cross terms then reduce
     comptime if N == 4 and N0 == UInt64(1):
         var a4 = Limbs[4](
             a.limbs[0], a.limbs[1], a.limbs[2], a.limbs[3]
@@ -507,6 +516,7 @@ def mul_small_mod[N: Int](x: Limbs[N], c: UInt64, p: Limbs[N]) -> Limbs[N]:
 
 @always_inline
 def jacobian_double_ct[N: Int, N0: UInt64](p: JacobianPoint[N], mod: Limbs[N], rr: Limbs[N]) -> JacobianPoint[N]:
+    """Jacobian doubling for a equals minus three in about eight multiplies"""
     var delta = mont_sqr[N, N0](p.z, mod)
     var gamma = mont_sqr[N, N0](p.y, mod)
     var beta = mont_mul[N, N0](p.x, gamma, mod)
@@ -558,12 +568,7 @@ def select_jacobian_ct[N: Int](a: JacobianPoint[N], b: JacobianPoint[N], choice:
 
 @always_inline
 def pow_mod[N: Int, N0: UInt64](base_in: Limbs[N], exponent: Limbs[N], rr: Limbs[N], p: Limbs[N]) -> Limbs[N]:
-    """Modular exponentiation. Exponent must be public.
-
-    Branches on exponent.bit(i) and is not constant-time. The only caller
-    today is _sqrt_p via the public _sqrt_exp() constant. For secret
-    exponents use mod_inv_ct (constant-time select()).
-    """
+    """Power by squaring and multiplying that should stay on public exponents"""
     var one = Limbs[N].zero()
     one.limbs[0] = 1
     var res = to_mont[N, N0](one, rr, p)
@@ -585,8 +590,8 @@ def sqn[N: Int, N0: UInt64](x: Limbs[N], n: Int, p: Limbs[N]) -> Limbs[N]:
 
 @always_inline
 def inv_p[N: Int, N0: UInt64](x: Limbs[N], p: Limbs[N], rr: Limbs[N]) -> Limbs[N]:
-    # Fermat x^(p-2) with curve-specific addition chain selected by N.
-    # N==4 -> P-256, N==6 -> P-384, keeps optimized chain vs generic pow.
+    # Fermat power with a chain picked for the curve size
+    # Four limbs means P-256 and six means P-384 with a faster chain than generic power
     var x2 = mont_mul[N, N0](mont_sqr[N, N0](x, p), x, p)
     var x3 = mont_mul[N, N0](mont_sqr[N, N0](x2, p), x, p)
     var x6 = mont_mul[N, N0](sqn[N, N0](x3, 3, p), x3, p)
@@ -632,6 +637,7 @@ def jacobian_infinity[N: Int](one_mont: Limbs[N]) -> JacobianPoint[N]:
 
 @always_inline
 def scalar_mult[N: Int, N0: UInt64](k: Limbs[N], p: Point[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]) -> Point[N]:
+    """Variable base scalar multiply with a small window and one shared inversion"""
     return jacobian_to_affine[N, N0](
         scalar_mult_jacobian[N, N0](k, p, mod, rr, one_mont), mod, rr
     )
@@ -724,6 +730,9 @@ def _booth_recode_w7(value: UInt64) -> UInt64:
 def scalar_mult_jacobian_w5[N: Int, N0: UInt64](
     k: Limbs[N], p: Point[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]
 ) -> JacobianPoint[N]:
+    """Scalar multiply with a five bit Booth window over odd digits and sixteen entries
+    Picks behind a mask and fixes all the Zs with one shared inversion
+    Steps five bits at a time so adds drop to about a fifth"""
     var pm = Point[N](to_mont[N, N0](p.x, rr, mod), to_mont[N, N0](p.y, rr, mod), False)
     var jac = InlineArray[JacobianPoint[N], 16](fill=JacobianPoint[N]())
     jac[0] = JacobianPoint[N](pm.x, pm.y, one_mont, False)
@@ -777,7 +786,7 @@ def scalar_mult_jacobian_w5[N: Int, N0: UInt64](
 
 @always_inline
 def mod_inv_ct[N: Int, N0: UInt64](x: Limbs[N], m: Limbs[N], rr: Limbs[N], m_minus2: Limbs[N], one_mont: Limbs[N]) -> Limbs[N]:
-    # Fixed-window exponentiation for x^(m-2).
+    # Fixed window power for x to the m minus two
     var base = to_mont[N, N0](x, rr, m)
     var powers = InlineArray[Limbs[N], 16](fill=Limbs[N].zero())
     powers[0] = one_mont
@@ -842,6 +851,7 @@ def base_table_entry[N: Int](tptr: Pointer[UInt64, _], j: Int, d: UInt64) -> Poi
 @always_inline
 def scalar_mult_base[N: Int, N0: UInt64](tptr: Pointer[UInt64, _], k: Limbs[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]
 ) -> Point[N]:
+    """Fixed base comb that picks behind a mask and shares one inversion"""
     return jacobian_to_affine[N, N0](
         scalar_mult_base_jacobian[N, N0](tptr, k, mod, rr, one_mont), mod, rr
     )
@@ -943,7 +953,7 @@ def _rfc6979_impl[N: Int, H: RFC6979HMAC & Deinitable](
                     h_ptr.unsafe_store[volatile=True](i, UInt64(0))
                 return candidate^
             accepted += 1
-        # wipe candidate
+        # wipe the rejected candidate
         var c_ptr = Pointer(to=candidate).unsafe_bitcast[UInt64]()
         for i in range(N):
             c_ptr.unsafe_store[volatile=True](i, UInt64(0))
@@ -968,6 +978,7 @@ def _rfc6979_impl[N: Int, H: RFC6979HMAC & Deinitable](
 
 
 def rfc6979[N: Int](private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int, n: Limbs[N]) -> Limbs[N]:
+    """Deterministic nonce from HMAC DRBG that retries until it lands in range"""
     comptime if N == 4:
         return _rfc6979_impl[N, HMACSHA256State](private_key, digest, skip, n)
     else:
