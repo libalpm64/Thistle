@@ -6,7 +6,8 @@ from thistle.p256 import (
     p256_ecdsa_sign_der,
     p256_ecdsa_verify_der,
     p256_keygen,
-    p256_public_key
+    p256_public_key,
+    _n as p256_order
 )
 from thistle.p384 import (
     p384_ecdsa_sign,
@@ -14,8 +15,10 @@ from thistle.p384 import (
     p384_ecdsa_sign_der,
     p384_ecdsa_verify_der,
     p384_keygen,
-    p384_public_key
+    p384_public_key,
+    _n as p384_order
 )
+from thistle.weierstrass import Limbs, rfc6979, to_be
 from thistle.x25519 import x25519_keygen, x25519_public_key
 from thistle.pbkdf2 import hmac_sha384
 from thistle.rsa import (
@@ -80,6 +83,48 @@ def test_hmac_sha384() raises:
     got = hmac_sha384(Span[UInt8, ...](key), Span[UInt8, ...](data))
     if not equal(got, expected):
         raise Error("HMAC-SHA384 long-key vector mismatch")
+
+
+def _check_rfc6979[N: Int](
+    order: Limbs[N], private: UInt8, skip: Int, expected_hex: String
+) raises:
+    var key = List[UInt8](length=N * 8, fill=0)
+    key[N * 8 - 1] = private
+    var digest = List[UInt8](length=N * 8, fill=0)
+    var nonce = rfc6979[N](Span[UInt8, ...](key), Span[UInt8, ...](digest), skip, order)
+    var actual = List[UInt8](unsafe_uninit_length=N * 8)
+    to_be(nonce, actual.unsafe_ptr())
+    if not equal(actual, hex_bytes(expected_hex)):
+        raise Error("RFC 6979 nonce mismatch: bits=" + String(N * 64) + ", skip=" + String(skip))
+
+
+def test_rfc6979_retries() raises:
+    # RFC 6979 section 3.2 expectations computed independently with Python hmac.
+    # Skipping accepted candidates models a signing retry after r or s is zero.
+    _check_rfc6979[4](p256_order(), 1, 0,
+        "010497d369b3d525ca15ec29c104a694210bb59ff6cabfc10afe6df0283896df")
+    _check_rfc6979[4](p256_order(), 1, 1,
+        "a9b1a1a84a4c2f96b6158ed7a81404c50cb74373c22e8d9e02d0411d719acae2")
+    _check_rfc6979[4](p256_order(), 1, 2,
+        "440961852bb5677a94a39212b0276edfe0ac86a12b044522406b2d6319d42b76")
+    _check_rfc6979[6](p384_order(), 1, 0,
+        "c730f3b3fa52e209d24d0d776455dcfa9a0e406a47c8c288e6953a08282c59f3c1abd70265fb70f2ce59ce85187234b1")
+    _check_rfc6979[6](p384_order(), 1, 1,
+        "356500a840f183300b64b173f17285bd28ef210f695dc5933a3b611122d53a2d37d4e7d6d5a28b924e3efbcaab47989b")
+    _check_rfc6979[6](p384_order(), 1, 2,
+        "e8dc1939b5f0751ef595ef0a5e7360b1597a8791fed2b87b7f035de9d4bed89eae4756801f6606fbc631851f1b3f0287")
+
+    # Full-width synthetic orders force rejection of the first candidate.
+    var reject256 = Limbs[4]()
+    reject256.limbs[0] = 1
+    reject256.limbs[3] = UInt64(1) << 63
+    _check_rfc6979[4](reject256, 2, 0,
+        "1811a8267e838b5b8ad161c54f9178ee610b0620915abfc4ff3bc6dee49921a8")
+    var reject384 = Limbs[6]()
+    reject384.limbs[0] = 1
+    reject384.limbs[5] = UInt64(1) << 63
+    _check_rfc6979[6](reject384, 1, 0,
+        "356500a840f183300b64b173f17285bd28ef210f695dc5933a3b611122d53a2d37d4e7d6d5a28b924e3efbcaab47989b")
 
 
 def test_p256() raises:
@@ -547,6 +592,7 @@ def test_rsa_pss_wycheproof() raises:
 
 def main() raises:
     test_hmac_sha384()
+    test_rfc6979_retries()
     test_p256()
     test_p384()
     test_keygen()

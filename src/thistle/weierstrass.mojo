@@ -935,11 +935,11 @@ def _rfc6979_impl[N: Int, H: RFC6979HMAC & Deinitable](
 
     var accepted = 0
     while True:
-        hmac2.hmac_into(Span[UInt8, ...](v), next_k.unsafe_ptr())
+        hmac2.hmac_into(Span[UInt8, ...](v), next_v.unsafe_ptr())
         for i in range(N * 8):
             v[i] = next_v[i]
             next_v.unsafe_ptr().unsafe_store[volatile=True](i, UInt8(0))
-        var candidate = from_be[N](Span[UInt8, ...](unsafe_ptr=next_k.unsafe_ptr(), length=N * 8))
+        var candidate = from_be[N](Span[UInt8, ...](v))
         if not candidate.is_zero() and cmp(candidate, n) < 0:
             if accepted == skip:
                 volatile_wipe(k.unsafe_ptr(), N * 8)
@@ -957,21 +957,19 @@ def _rfc6979_impl[N: Int, H: RFC6979HMAC & Deinitable](
         var c_ptr = Pointer(to=candidate).unsafe_bitcast[UInt64]()
         for i in range(N):
             c_ptr.unsafe_store[volatile=True](i, UInt64(0))
-        volatile_wipe(next_k.unsafe_ptr(), N * 8)
+        # RFC 6979 section 3.2.h.3: rekey with V || 0x00, then update V.
         for i in range(N * 8):
             seed[i] = v[i]
-            seed[N * 8 + 1 + i] = private_key[i]
-            seed[N * 8 + 1 + N * 8 + i] = h1_bytes[i]
         seed[N * 8] = 0
         hmac2.hmac_into(
-            Span[UInt8, ...](unsafe_ptr=seed.unsafe_ptr(), length=seed_len),
+            Span[UInt8, ...](unsafe_ptr=seed.unsafe_ptr(), length=N * 8 + 1),
             next_k.unsafe_ptr()
         )
         for i in range(N * 8):
             k[i] = next_k[i]
             next_k.unsafe_ptr().unsafe_store[volatile=True](i, UInt8(0))
-        var hmac_next = H(Span[UInt8, ...](k))
-        hmac_next.hmac_into(Span[UInt8, ...](v), next_v.unsafe_ptr())
+        hmac2 = H(Span[UInt8, ...](k))
+        hmac2.hmac_into(Span[UInt8, ...](v), next_v.unsafe_ptr())
         for i in range(N * 8):
             v[i] = next_v[i]
             next_v.unsafe_ptr().unsafe_store[volatile=True](i, UInt8(0))
