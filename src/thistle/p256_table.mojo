@@ -1,6 +1,7 @@
 # P-256 precomputed comb table for fast scalar multiplication
 from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
+from std.collections import InlineArray
 from std.memory import Pointer
 
 comptime _P256_W7_0_0 = SIMD[DType.uint64, 128](
@@ -2974,3 +2975,13 @@ def p256_w7_fill(p: Pointer[mut=True, UInt64, _]):
     p256_w7_fill_1(p.unsafe_offset(9 * 512))
     p256_w7_fill_2(p.unsafe_offset(18 * 512))
     p256_w7_fill_3(p.unsafe_offset(27 * 512))
+
+
+def _p256_w7_table() -> InlineArray[UInt64, 37 * 64 * 8]:
+    var table = InlineArray[UInt64, 37 * 64 * 8](fill=0)
+    p256_w7_fill(table.unsafe_ptr())
+    return table^
+
+
+# Materialize all 37 windows for the caller's read-only global table.
+comptime P256_W7_TABLE = _p256_w7_table()
