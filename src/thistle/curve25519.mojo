@@ -1,4 +1,4 @@
-"""Provides finite-field operations used by Curve25519 implementations."""
+"""Little field helpers that power Curve25519"""
 
 from std.builtin.dtype import DType
 
@@ -25,6 +25,7 @@ def _u128_shr[shift: Int](x: UInt128) -> UInt128:
 
 
 struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
+    """Field element in five fifty one bit limbs that can stay redundant until you reduce"""
     var limbs: SIMD[DType.uint64, 8]
 
     @always_inline
@@ -155,6 +156,9 @@ struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
 
     @always_inline
     def __mul__(self, other: FieldElement51) -> FieldElement51:
+        """Field multiply that keeps things redundant and holds off on carries
+        Upper limbs come pre scaled by nineteen since two to the 255 wraps to nineteen
+        Folds the tall products then lets the carry helper cascade them down"""
         var a = self.limbs
         var b = other.limbs
 
@@ -167,6 +171,7 @@ struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
         var b2_19 = b2 * 19
         var b3_19 = b3 * 19
         var b4_19 = b4 * 19
+        # Upper limbs come pre scaled by nineteen because two to the 255 wraps to nineteen
 
         var a0 = UInt128(a[0])
         var a1 = UInt128(a[1])
@@ -197,6 +202,7 @@ struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
 
     @always_inline
     def square(self) -> FieldElement51:
+        """Field square that reuses symmetry and folds the overflow with nineteen"""
         var a = self.limbs
         var a0 = UInt128(a[0])
         var a1 = UInt128(a[1])
@@ -217,6 +223,9 @@ struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
 
     @always_inline
     def invert(self) -> FieldElement51:
+        """Invert with Fermat power through a short addition chain you can follow by hand
+        Squares climb through powers of two then multiplies collect the pieces
+        Shares its prefix with the p minus five over eight power"""
         var t0 = self.square()
         var t1 = t0.pow2k[2]()
         var t2 = self * t1
@@ -266,7 +275,11 @@ struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
     @always_inline
     def _carry_reduce(self, var c0: UInt128, var c1: UInt128, var c2: UInt128, var c3: UInt128, var c4: UInt128
     ) -> FieldElement51:
+        """Carry the tall accumulator back into five fifty one bit limbs
+        Top overflow wraps with nineteen since two to the 255 acts like nineteen then ripples forward
+        Leaves limbs a little redundant so the next multiply stays happy"""
         var MASK = UInt64(0x7FFFFFFFFFFFF)
+        # Top overflow wraps with nineteen and cascades down by fifty one bits
         
         c1 += _u128_shr[51](c0)
         var l0 = (c0.cast[DType.uint64]()) & MASK
@@ -305,6 +318,7 @@ struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
 
     @staticmethod
     def from_bytes_span(bytes: Span[UInt8, ...]) raises -> FieldElement51:
+        """Decode thirty two little endian bytes without checking the range"""
         if len(bytes) != 32:
             raise Error("FieldElement51 input must be exactly 32 bytes")
         @always_inline
@@ -323,6 +337,7 @@ struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
         return FieldElement51(l0, l1, l2, l3, l4)
 
     def to_bytes_into(self, output: Pointer[mut=True, UInt8, _, address_space=_]):
+        """Encode to thirty two canonical bytes after fully reducing"""
         var res = self._reduce(self.limbs)
         var limbs = res.limbs
 

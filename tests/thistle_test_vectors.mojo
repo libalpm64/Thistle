@@ -9,7 +9,7 @@ from thistle.sha2 import (
     sha256_hash_bits,
     sha384_hash_bits
 )
-from thistle.argon2 import Argon2id
+from thistle.argon2 import Argon2id, variable_length_hash, variable_length_hash_into
 from thistle.blake2b import Blake2b
 from thistle.blake3 import blake3_parallel_hash
 from thistle.camellia import (
@@ -60,6 +60,25 @@ def hex_to_bytes(hex_str: String) -> List[UInt8]:
         )
         i += 2
     return res^
+
+
+# Independently computed with RFC 9106 H' using Python's hashlib.blake2b.
+def argon2_variable_expected(output_len: Int) raises -> List[UInt8]:
+    if output_len == 1:
+        return hex_to_bytes("c6")
+    if output_len == 32:
+        return hex_to_bytes("d6195cceb6d7665e9312f99b645a51e8a78527da80d2d1528f6db2c5c0bd8fc1")
+    if output_len == 64:
+        return hex_to_bytes("ccc1e6a07791cba319eefa266023246c2d33d4e49a764867a72425833be7cf5906bd80477fc89717755c800e6a3552b6ff21b687158f794748be0653e20e975a")
+    if output_len == 65:
+        return hex_to_bytes("7acf3762976068746eb9d3b02bd31dfa5fd0c8e2376605fa1d86e37d2e2fbd006376b9f227851979034cdce78a040764ee776ec4ad7b0e71c073d46c9d14a04ef2")
+    if output_len == 96:
+        return hex_to_bytes("3b2f84e78cbd27325d6b0b3668320b648edd8d1d43abd8d55b4015acc4a44e29540e27ad3ff5e4215bae6681929c3d802b311fa3719c178682e60044303f69ca589cd9b5fc8d789cd3ee9cbf2380353c8c3d6e5c4a78dc0ae7378291bba90640")
+    if output_len == 127:
+        return hex_to_bytes("30adbe40c42f7129b6f7b39a1f91378d6b7b2ec41a93a603c119376d8e06a76926e87b9c71a407be9eaa8788714edcea0bdde3c66206505e70d3d9a70bb7e58c461d83a5fae44573f27255045f053f54aa4ccc59afacfbfa22d155adecd6fa1a7168babcc1fc9d7828ebdc4985b79d0c0eda9315a4a7532b987e84fe66f770")
+    if output_len == 128:
+        return hex_to_bytes("135f5497b21d3e8425659f71f47acb7034075369c22414369638f3b1b501871d3be9191eefca74ccc8104a9605c6b33c2d8109b40c2e9fa686bee47ef6f973d63668e0833aa45ff3150805c1115dad4cefbfc3e4274c6664cb0365ff7218324c6f43ffdd57cb49af9616bbee6c770f2a624bc5068070952f453dab3d32768cf4")
+    raise Error("unsupported Argon2 variable-length test size")
 
 
 def hex_to_u32_list(hex_str: String) -> SIMD[DType.uint32, 4]:
@@ -151,6 +170,31 @@ def test_argon2(data: PythonObject, py: PythonObject) raises -> TestResult:
             failures.append(
                 "Argon2 " + name + ": expected " + expected + ", got " + got
             )
+    return TestResult(passed, failed, failures^)
+
+
+def test_argon2_variable_length() raises -> TestResult:
+    var input = string_to_bytes("variable length hash test input")
+    var passed, failed = 0, 0
+    var failures = List[String]()
+    for output_len in [1, 32, 64, 65, 96, 127, 128]:
+        var expected = argon2_variable_expected(output_len)
+        var into = List[UInt8](length=output_len, fill=0)
+        variable_length_hash_into(
+            output_len,
+            Span[UInt8, ...](input),
+            Span[mut=True, UInt8, ...](into)
+        )
+        var got = variable_length_hash(output_len, Span[UInt8, ...](input))
+        var equal = len(expected) == len(into) and len(expected) == len(got)
+        if equal:
+            for i in range(output_len):
+                equal &= expected[i] == into[i] and expected[i] == got[i]
+        if equal:
+            passed += 1
+        else:
+            failed += 1
+            failures.append("Argon2 variable length " + String(output_len))
     return TestResult(passed, failed, failures^)
 
 
@@ -973,6 +1017,16 @@ def main() raises:
     except e:
         print("Argon2 [error] " + String(e))
         af = True
+    print()
+
+    print("Testing Argon2 variable-length hashing...")
+    print_result(
+        "Argon2 variable-length",
+        test_argon2_variable_length(),
+        tp,
+        tf,
+        af
+    )
     print()
 
     try:

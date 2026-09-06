@@ -282,6 +282,7 @@ def sha256ni_transform_blocks(
     data: Pointer[mut=False, UInt8, _, address_space=_],
     nblocks: Int
 ):
+    """hardware SHA-256 using x86 or ARM crypto with the state kept in registers"""
     comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86():
         var st0 = SIMD128(state[0], state[1], state[2], state[3])
         var st1 = SIMD128(state[4], state[5], state[6], state[7])
@@ -439,6 +440,7 @@ def sha512ni_transform_blocks(
     data: Pointer[mut=False, UInt8, _, address_space=_],
     nblocks: Int
 ):
+    """hardware SHA-512 using ARM crypto over 40 paired steps with DIT on"""
     var previous_dit = _sha512_dit_begin()
     var ab = SIMD64x2(state[0], state[1])
     var cd = SIMD64x2(state[2], state[3])

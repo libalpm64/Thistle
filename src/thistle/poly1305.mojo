@@ -3,6 +3,7 @@
 from std.memory import Pointer
 from std.collections import InlineArray
 
+# limb masks for a 44 44 and 42 bit split
 comptime _M44: UInt64 = 0xFFFFFFFFFFF
 comptime _M42: UInt64 = 0x3FFFFFFFFFF
 
@@ -93,6 +94,7 @@ def _limbs_at(ptr: Pointer[mut=False, UInt8, _, address_space=_], offset: Int, h
 
 
 struct Poly1305:
+    """Poly1305 that keeps r mod 2 to the 130 minus 5 in three limbs and batches with Horner"""
     var r: _RPower
     var r2: _RPower
     var r3: _RPower
@@ -110,6 +112,7 @@ struct Poly1305:
     var buf_len: Int
     var powers4_ready: Bool
     var powers8_ready: Bool
+    var finalized: Bool
 
     def __init__(out self, key: Span[UInt8, ...]) raises:
         if len(key) != 32:
@@ -138,6 +141,7 @@ struct Poly1305:
         self.r8 = self.r
         self.powers4_ready = False
         self.powers8_ready = False
+        self.finalized = False
 
     def __deinit__(deinit self):
         self.wipe()
@@ -352,6 +356,8 @@ struct Poly1305:
     def finalize_into(
         mut self, output: Span[mut=True, UInt8, ...]
     ) raises:
+        if self.finalized:
+            raise Error("Poly1305 context is already finalized or wiped")
         if len(output) < 16:
             raise Error("Poly1305 output needs at least 16 writable bytes")
         self._finalize_into_unchecked(output.unsafe_ptr())
@@ -376,6 +382,7 @@ struct Poly1305:
         self.buf_len = 0
         self.powers4_ready = False
         self.powers8_ready = False
+        self.finalized = True
 
 
 def poly1305_mac(
@@ -383,6 +390,7 @@ def poly1305_mac(
     message: Span[UInt8, ...],
     output: Span[mut=True, UInt8, ...]
 ) raises:
+    """one shot Poly1305 that clamps r then folds each block in and adds s at the end"""
     if len(output) < 16:
         raise Error("Poly1305 output needs at least 16 writable bytes")
     var p = Poly1305(key)

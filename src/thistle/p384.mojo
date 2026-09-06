@@ -2,6 +2,7 @@
 NIST P-384 / secp384r1 implementation.
 """
 
+from std.builtin.globals import global_constant
 from .p384_table import p384_base_table
 from .utils import u64_nonzero_choice, u64_zero_choice
 from .sha2 import sha384_hash
@@ -86,7 +87,7 @@ def _gy() -> U384:
 
 
 def _sqrt_exp() -> U384:
-    # p == 3 mod 4
+    # p leaves remainder three when divided by four
     return U384(
         0x0000000040000000,
         0xBFFFFFFFC0000000,
@@ -161,6 +162,8 @@ def _sub_mod(a: U384, b: U384) -> U384:
 
 @always_inline
 def _mont_mul(a: U384, b: U384) -> U384:
+    """Montgomery multiply with plain CIOS because this prime has no sparse shortcut"""
+    # Montgomery reduction where N0 is one plus two to the thirty two so there is no sparse shortcut
     return ws_mont_mul[6, _N0](a, b, _p())
 
 
@@ -215,6 +218,7 @@ def _to_be(x: U384, output: Pointer[mut=True, UInt8, _, address_space=_]):
 
 
 struct P384Point(Copyable, ImplicitlyCopyable, Movable):
+    """Affine P-384 point that lives on the short curve with a equals minus three"""
     var x: U384
     var y: U384
     var infinity: Bool
@@ -245,6 +249,7 @@ struct P384Point(Copyable, ImplicitlyCopyable, Movable):
 
 
 struct P384JacobianPoint(Copyable, ImplicitlyCopyable, Movable):
+    """Jacobian P-384 point that postpones division until the very end"""
     var x: U384
     var y: U384
     var z: U384
@@ -347,14 +352,14 @@ def _scalar_mult_jacobian(k: U384, p: P384Point) -> P384JacobianPoint:
 
 @always_inline
 def _base_table_entry(
-    tptr: Pointer[UInt64, _], j: Int, d: UInt64
+    tptr: Pointer[mut=False, UInt64, _], j: Int, d: UInt64
 ) -> P384Point:
     var res = ws_base_table_entry[6](tptr, j, d)
     return P384Point(res.x, res.y, res.infinity)
 
 
 def _scalar_mult_base(k: U384) -> P384Point:
-    var table = p384_base_table()
+    ref table = global_constant[p384_base_table()]()
     var tptr = table.unsafe_ptr()
     var res = ws_scalar_mult_base[6, _N0](tptr, k, _p(), _rr(), _one_mont())
     return P384Point(res.x, res.y, res.infinity)
@@ -362,7 +367,7 @@ def _scalar_mult_base(k: U384) -> P384Point:
 
 @always_inline
 def _scalar_mult_base_jacobian(k: U384) -> P384JacobianPoint:
-    var table = p384_base_table()
+    ref table = global_constant[p384_base_table()]()
     var tptr = table.unsafe_ptr()
     var res = ws_scalar_mult_base_jacobian[6, _N0](tptr, k, _p(), _rr(), _one_mont())
     return P384JacobianPoint(res.x, res.y, res.z, res.infinity)
@@ -377,6 +382,7 @@ def _jacobian_add(p: P384JacobianPoint, q: P384JacobianPoint) -> P384JacobianPoi
 
 
 def p384_decode_uncompressed(point: Span[UInt8, ...]) -> P384Point:
+    """Decode a point just like P-256 but with forty eight byte fields"""
     if len(point) == 49 and (point[0] == 0x02 or point[0] == 0x03):
         var x = _from_be(
             Span[UInt8, ...](unsafe_ptr=point.unsafe_ptr().unsafe_offset(1), length=48)
@@ -422,6 +428,7 @@ def p384_encode_uncompressed(
 def p384_public_key(
     private_key: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
 ) -> Bool:
+    """Multiply the generator by your secret with the precomputed comb"""
     if len(private_key) != 48 or len(output) < P384_POINT_SIZE:
         return False
     var d = _from_be(private_key)
@@ -444,6 +451,7 @@ def p384_ecdh(
     public_key: Span[UInt8, ...],
     output: Span[mut=True, UInt8, ...]
 ) -> Bool:
+    """Agree a shared secret just like P-256 but keep forty eight bytes of x"""
     if len(private_key) != 48 or len(output) < P384_SIZE:
         return False
     var d = _from_be(private_key)
@@ -551,6 +559,7 @@ def p384_ecdsa_sign_digest(
     digest: Span[UInt8, ...],
     signature: Span[mut=True, UInt8, ...]
 ) -> Bool:
+    """Sign a digest just like P-256 but with a forty eight byte digest"""
     if len(private_key) != 48 or len(digest) != 48
         or len(signature) < P384_SIGNATURE_SIZE:
         return False
@@ -596,6 +605,7 @@ def p384_ecdsa_sign(
     message: Span[UInt8, ...],
     signature: Span[mut=True, UInt8, ...]
 ) -> Bool:
+    """Same as sign_digest but hashes the message first with SHA-384"""
     if len(signature) < P384_SIGNATURE_SIZE:
         return False
     var digest = sha384_hash(message)
@@ -618,6 +628,7 @@ def p384_ecdsa_verify_digest(
     digest: Span[UInt8, ...],
     signature: Span[UInt8, ...]
 ) -> Bool:
+    """Verify a digest just like P-256 but with a forty eight byte digest"""
     if len(digest) != 48 or len(signature) != 96:
         return False
     var q = p384_decode_uncompressed(public_key)
@@ -644,6 +655,7 @@ def p384_ecdsa_verify(
     message: Span[UInt8, ...],
     signature: Span[UInt8, ...]
 ) -> Bool:
+    """Same as verify_digest but hashes the message first with SHA-384"""
     var digest = sha384_hash(message)
     return p384_ecdsa_verify_digest(public_key, Span[UInt8, ...](digest), signature)
 
@@ -651,6 +663,7 @@ def p384_ecdsa_verify(
 def p384_ecdsa_sign_der(
     private_key: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
+    """Sign with ECDSA then wrap the raw pair in DER"""
     from .ecdsa_der import ecdsa_der_encode
     var raw = List[UInt8](unsafe_uninit_length=P384_SIGNATURE_SIZE)
     if not p384_ecdsa_sign(
@@ -664,6 +677,7 @@ def p384_ecdsa_verify_der(
     public_key: Span[UInt8, ...], message: Span[UInt8, ...],
     signature: Span[UInt8, ...]
 ) -> Bool:
+    """Unwrap DER first then verify the ECDSA signature"""
     from .ecdsa_der import ecdsa_der_decode
     var raw = ecdsa_der_decode(signature, P384_SIZE)
     if len(raw) != P384_SIGNATURE_SIZE:
@@ -672,6 +686,7 @@ def p384_ecdsa_verify_der(
 
 
 def p384_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
+    """Generate a fresh keypair just like P-256 but with forty eight byte fields"""
     from .random import random_bytes
     while True:
         var private_key = random_bytes(48)

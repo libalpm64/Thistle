@@ -6,7 +6,8 @@ from thistle.p256 import (
     p256_ecdsa_sign_der,
     p256_ecdsa_verify_der,
     p256_keygen,
-    p256_public_key
+    p256_public_key,
+    _n as p256_order
 )
 from thistle.p384 import (
     p384_ecdsa_sign,
@@ -14,16 +15,22 @@ from thistle.p384 import (
     p384_ecdsa_sign_der,
     p384_ecdsa_verify_der,
     p384_keygen,
-    p384_public_key
+    p384_public_key,
+    _n as p384_order
 )
+from thistle.weierstrass import Limbs, rfc6979, to_be
 from thistle.x25519 import x25519_keygen, x25519_public_key
 from thistle.pbkdf2 import hmac_sha384
 from thistle.rsa import (
     rsa_pss_sign_with_salt,
     rsa_pss_verify,
     rsa_pkcs1_v15_sha256_verify,
+    RsaPublicKey,
     RsaPrivateKey,
     RsaCrtPrivateKey,
+    _bn_inverse_odd,
+    _bn_zero,
+    _bn_equal,
     SHA1,
     SHA224,
     SHA256,
@@ -80,6 +87,48 @@ def test_hmac_sha384() raises:
     got = hmac_sha384(Span[UInt8, ...](key), Span[UInt8, ...](data))
     if not equal(got, expected):
         raise Error("HMAC-SHA384 long-key vector mismatch")
+
+
+def _check_rfc6979[N: Int](
+    order: Limbs[N], private: UInt8, skip: Int, expected_hex: String
+) raises:
+    var key = List[UInt8](length=N * 8, fill=0)
+    key[N * 8 - 1] = private
+    var digest = List[UInt8](length=N * 8, fill=0)
+    var nonce = rfc6979[N](Span[UInt8, ...](key), Span[UInt8, ...](digest), skip, order)
+    var actual = List[UInt8](unsafe_uninit_length=N * 8)
+    to_be(nonce, actual.unsafe_ptr())
+    if not equal(actual, hex_bytes(expected_hex)):
+        raise Error("RFC 6979 nonce mismatch: bits=" + String(N * 64) + ", skip=" + String(skip))
+
+
+def test_rfc6979_retries() raises:
+    # RFC 6979 section 3.2 expectations computed independently with Python hmac.
+    # Skipping accepted candidates models a signing retry after r or s is zero.
+    _check_rfc6979[4](p256_order(), 1, 0,
+        "010497d369b3d525ca15ec29c104a694210bb59ff6cabfc10afe6df0283896df")
+    _check_rfc6979[4](p256_order(), 1, 1,
+        "a9b1a1a84a4c2f96b6158ed7a81404c50cb74373c22e8d9e02d0411d719acae2")
+    _check_rfc6979[4](p256_order(), 1, 2,
+        "440961852bb5677a94a39212b0276edfe0ac86a12b044522406b2d6319d42b76")
+    _check_rfc6979[6](p384_order(), 1, 0,
+        "c730f3b3fa52e209d24d0d776455dcfa9a0e406a47c8c288e6953a08282c59f3c1abd70265fb70f2ce59ce85187234b1")
+    _check_rfc6979[6](p384_order(), 1, 1,
+        "356500a840f183300b64b173f17285bd28ef210f695dc5933a3b611122d53a2d37d4e7d6d5a28b924e3efbcaab47989b")
+    _check_rfc6979[6](p384_order(), 1, 2,
+        "e8dc1939b5f0751ef595ef0a5e7360b1597a8791fed2b87b7f035de9d4bed89eae4756801f6606fbc631851f1b3f0287")
+
+    # Full-width synthetic orders force rejection of the first candidate.
+    var reject256 = Limbs[4]()
+    reject256.limbs[0] = 1
+    reject256.limbs[3] = UInt64(1) << 63
+    _check_rfc6979[4](reject256, 2, 0,
+        "1811a8267e838b5b8ad161c54f9178ee610b0620915abfc4ff3bc6dee49921a8")
+    var reject384 = Limbs[6]()
+    reject384.limbs[0] = 1
+    reject384.limbs[5] = UInt64(1) << 63
+    _check_rfc6979[6](reject384, 1, 0,
+        "356500a840f183300b64b173f17285bd28ef210f695dc5933a3b611122d53a2d37d4e7d6d5a28b924e3efbcaab47989b")
 
 
 def test_p256() raises:
@@ -220,6 +269,41 @@ def test_keygen() raises:
         raise Error("X25519 key generation failed")
 
 
+def test_rsa_inverse_widths() raises:
+    var py = Python.import_module("builtins")
+    var e = hex_bytes("010001")
+    var widths: List[Int] = [128, 129, 2048, 2049, 3072, 4096, 4224]
+    for bits in widths:
+        var modulus = py.pow(2, bits) - 1
+        var nb = (bits + 7) // 8
+        var n = hex_bytes(String(modulus.to_bytes(nb, "big").hex()))
+        var key = RsaPublicKey(Span[UInt8, ...](n), Span[UInt8, ...](e))
+        for case_index in range(6):
+            var value = py.int(case_index)
+            if case_index == 4:
+                value = modulus - 1
+            elif case_index == 5:
+                value = py.pow(2, bits // 2) + 0x1234567
+            var encoded = hex_bytes(String(value.to_bytes(nb, "little").hex()))
+            var a = _bn_zero()
+            for i in range(nb):
+                a[i >> 3] |= UInt64(encoded[i]) << UInt64(8 * (i & 7))
+            var inverse, valid = _bn_inverse_odd(a, key)
+            var expected = py.int(0)
+            var expected_valid = True
+            try:
+                expected = py.pow(value, -1, modulus)
+            except:
+                expected_valid = False
+            if valid != expected_valid:
+                raise Error("RSA inverse validity mismatch at bits=" + String(bits))
+            if valid:
+                var expected_bytes = hex_bytes(String(expected.to_bytes(key.k * 8, "little").hex()))
+                for i in range(key.k * 8):
+                    if UInt8(inverse[i >> 3] >> UInt64(8 * (i & 7))) != expected_bytes[i]:
+                        raise Error("RSA inverse value mismatch at bits=" + String(bits))
+
+
 def test_rsa_pss_signing() raises:
     var n = hex_bytes(
         "00c0704ded9d79d29aca25c59bb4711b75a4776fe463b527d2b3eea57198a692081a2645dac540597852a70a22327f38d2068378e37f8d074246eb1879a3a34c530bfa91f629f91c8f9089f489332a6febaa83014cea0e2f7511e8338fe265e8296b7f934529244820f21a7c38de946b182a023ef85c306d1e14ddbfeed54b6daaf5e5c31d02d627e4d068c133511cef3d44bf7a0941b80621193250c8d8fb1893550b3ce828d220a64c9086f01f50c3dc3d1a8081ba185f4798e6bc4a1b913ecfaaf6b45b109a94c765fdb6f662847c1bd48ff83b6f7882ed75f3fb54a176e39ca7856de1e9fd09dd90fcb133ad19b6851e05d8d39b695731fdd3da6a5539e44f"
@@ -285,6 +369,14 @@ def test_rsa_pss_signing() raises:
         Span[UInt8, ...](dq),
         Span[UInt8, ...](qi)
     )
+    var one = _bn_zero()
+    one[0] = 1
+    var inverse, inverse_valid = _bn_inverse_odd(one, crt.public)
+    if not inverse_valid or not _bn_equal(inverse, one, crt.public.k):
+        raise Error("RSA blinding inverse of one mismatch")
+    var _, noninvertible_valid = _bn_inverse_odd(crt.p.n, crt.public)
+    if noninvertible_valid:
+        raise Error("RSA blinding accepted a noninvertible factor")
     if crt.pss_sign_with_salt(
         Span[UInt8, ...](msg),
         Span[UInt8, ...](salt),
@@ -294,6 +386,13 @@ def test_rsa_pss_signing() raises:
     ):
         raise Error("RSA-PSS CRT accepted an undersized signature destination")
     var sig2 = List[UInt8](unsafe_uninit_length=256)
+    if crt._private_op(
+        Span[UInt8, ...](n)[len(n) - crt.public.nb:], sig2.unsafe_ptr()
+    ):
+        raise Error("RSA CRT accepted an input equal to its modulus")
+    var oversized_input = List[UInt8](length=crt.public.nb, fill=0xFF)
+    if crt._private_op(Span[UInt8, ...](oversized_input), sig2.unsafe_ptr()):
+        raise Error("RSA CRT accepted an input above its modulus")
     if not crt.pss_sign_with_salt(
         Span[UInt8, ...](msg),
         Span[UInt8, ...](salt),
@@ -547,9 +646,11 @@ def test_rsa_pss_wycheproof() raises:
 
 def main() raises:
     test_hmac_sha384()
+    test_rfc6979_retries()
     test_p256()
     test_p384()
     test_keygen()
+    test_rsa_inverse_widths()
     test_rsa_pss_signing()
     test_ecdsa_wycheproof()
     test_rsa_pkcs1_wycheproof()

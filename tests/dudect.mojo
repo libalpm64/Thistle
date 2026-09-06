@@ -421,19 +421,24 @@ def run_ed25519(mut rng: Rng) raises -> Bool:
     for i in range(32):
         msg.append(UInt8(i))
     var cls = _classes(N_ASYM, rng)
+    # Prepare both classes before timing so RNG work cannot bias measurement setup.
+    var inputs = List[UInt8](length=N_ASYM * 32, fill=0)
+    var sk = List[UInt8](length=32, fill=0)
+    for i in range(N_ASYM):
+        if cls[i] == 1:
+            rng.fill(sk)
+            for j in range(32):
+                inputs[i * 32 + j] = sk[j]
+        else:
+            inputs[i * 32] = 0x33
     var times = List[Float64](capacity=N_ASYM)
     var sig = List[UInt8]()
     for _ in range(64):
         sig.append(0)
     var sink: UInt8 = 0
     for i in range(N_ASYM):
-        var sk = List[UInt8]()
-        for _ in range(32):
-            sk.append(0)
-        if cls[i] == 1:
-            rng.fill(sk)
-        else:
-            sk[0] = 0x33
+        for j in range(32):
+            sk[j] = inputs[i * 32 + j]
         var t0 = perf_counter_ns()
         ed25519_sign(
             Span[UInt8, ...](sk), Span[UInt8, ...](msg),
@@ -536,16 +541,19 @@ def run_mlkem_decaps(mut rng: Rng) raises -> Bool:
     var good_ct = enc[0].copy()
 
     var cls = _classes(N_ASYM, rng)
+    var inputs = List[UInt8](length=N_ASYM * len(good_ct), fill=0)
+    for i in range(N_ASYM):
+        for j in range(len(good_ct)):
+            inputs[i * len(good_ct) + j] = good_ct[j]
+        if cls[i] == 1:
+            var pos = Int(rng.next() % UInt64(len(good_ct)))
+            inputs[i * len(good_ct) + pos] ^= 0xFF
+    var ct = good_ct.copy()
     var times = List[Float64](capacity=N_ASYM)
     var sink: UInt8 = 0
     for i in range(N_ASYM):
-        var ct = List[UInt8]()
         for j in range(len(good_ct)):
-            ct.append(good_ct[j])
-        if cls[i] == 1:
-            # corrupt one random byte force implicit rejection
-            var pos = Int(rng.next() % UInt64(len(ct)))
-            ct[pos] = ct[pos] ^ 0xFF
+            ct[j] = inputs[i * len(good_ct) + j]
         var t0 = perf_counter_ns()
         var res = mlkem512_decaps(
             Span[UInt8, ...](dk), Span[UInt8, ...](ct)
@@ -557,6 +565,13 @@ def run_mlkem_decaps(mut rng: Rng) raises -> Bool:
     return _report("ml-kem-512 decaps (valid/corrupt ct)", times, cls)
 
 
+def finish_timing(control_detected: Bool, any_leak: Bool) raises:
+    if not control_detected:
+        raise Error("Invalid timing run: leaky control was not detected")
+    if any_leak:
+        raise Error("Timing leak detected; preserve samples and investigate")
+
+
 def main() raises:
     print(
         "dudect harness: fast", N_FAST, "batch", BATCH, "| asym", N_ASYM,
@@ -566,9 +581,7 @@ def main() raises:
     var rng = Rng(0x1234567890ABCDEF)
 
     var control_leaked = run_leaky_control(rng)
-    if not control_leaked:
-        print("warning: harness did not detect the leaky control;")
-        print("results below are not trustworthy on this machine.")
+    finish_timing(control_leaked, False)
     print("")
 
     var any_leak = False
@@ -620,3 +633,4 @@ def main() raises:
         print("timing leak detected")
     else:
         print("no evidence of leaks by statistical analysis")
+    finish_timing(control_leaked, any_leak)

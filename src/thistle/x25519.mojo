@@ -1,4 +1,4 @@
-"""Implements X25519 key agreement."""
+"""X25519 key agreement you can call directly"""
 
 from .curve25519 import FieldElement51
 from .utils import StackInlineArray
@@ -8,6 +8,7 @@ from std.collections import List
 
 @always_inline
 def _cswap_fe(swap: UInt64, mut a: FieldElement51, mut b: FieldElement51):
+    """Swap two field elements behind a mask so timing stays flat"""
     var mask = UInt64(0) - swap
     comptime for i in range(5):
         var dummy = mask & (a.limbs[i] ^ b.limbs[i])
@@ -33,6 +34,9 @@ def x25519(
     point: Span[UInt8, ...],
     output: Span[mut=True, UInt8, ...]
 ) raises:
+    """Walk the Montgomery ladder for two hundred fifty five swaps with clamping for the subgroup
+    Clamping clears the low bits and sets a high one so timing stays flat while DA and CB cross each step
+    Push the curve with 121665 which is A minus two over four when A is 486662"""
     if len(scalar_in) != 32:
         raise Error("X25519 scalar must be 32 bytes")
     if len(point) != 32:
@@ -42,12 +46,13 @@ def x25519(
     var scalar = StackInlineArray[UInt8, 32](fill=0)
     for i in range(32):
         scalar[i] = scalar_in[i]
+    # Clamp away the low and top bits and set the second top bit for safe timing
     scalar[0] &= 248
     scalar[31] &= 127
     scalar[31] |= 64
 
     var u = FieldElement51.from_bytes_span(point)
-    # RFC 7748 ignores the top input bit.
+    # Ignore the top input bit the way the RFC asks
     u.limbs[4] &= (UInt64(1) << UInt64(51)) - UInt64(1)
 
     var x_1 = u
@@ -76,6 +81,7 @@ def x25519(
         x_3 = (DA + CB).square()
         z_3 = x_1 * (DA - CB).square()
         x_2 = AA * BB
+        # 121665 is A minus two over four with A at 486662 for the Montgomery shape
         z_2 = E * (AA + E.mul_u32(121665))
         
     _cswap_pair(swap, x_2, x_3, z_2, z_3)
@@ -92,6 +98,7 @@ def x25519_checked(
     point: Span[UInt8, ...],
     output: Span[mut=True, UInt8, ...]
 ) raises:
+    """Run x25519 then reject the all zero low order result"""
     x25519(scalar_in, point, output)
     var out_ptr = output.unsafe_ptr()
     var zero_diff: UInt8 = 0
@@ -116,6 +123,7 @@ def x25519_public_key(
 
 
 def x25519_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
+    """Make thirty two random bytes then multiply the base point nine"""
     var private_key = random_bytes(32)
     var public_key = List[UInt8](unsafe_uninit_length=32)
     x25519_public_key(

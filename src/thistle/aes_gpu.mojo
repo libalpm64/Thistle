@@ -39,6 +39,7 @@ def aes_gpu_kernel_ecb(
     n: Int32,
     rounds: Int32
 ) -> None:
+    """runs ECB on GPU with 4 blocks per thread bitsliced"""
     if n <= 0 or (rounds != 10 and rounds != 12 and rounds != 14):
         return
     var tid = global_idx.x
@@ -70,6 +71,7 @@ def aes_gpu_kernel_ctr(
     nonce: Pointer[mut=True, UInt8, MutUntrackedOrigin],
     rounds: Int32
 ) -> None:
+    """runs CTR on GPU xoring nonce keystream with 4 blocks per thread"""
     if n <= 0 or (rounds != 10 and rounds != 12 and rounds != 14):
         return
     var tid = global_idx.x
@@ -105,6 +107,7 @@ def aes_gpu_kernel_gcm_ctr(
     j0: Pointer[mut=True, UInt8, MutUntrackedOrigin],
     rounds: Int32
 ) -> None:
+    """runs the GCM counter stage on GPU from J0 plus index"""
     if n <= 0 or (rounds != 10 and rounds != 12 and rounds != 14):
         return
     var tid = global_idx.x

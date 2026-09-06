@@ -1,9 +1,10 @@
-"""Implements RSA-PSS signatures and PKCS#1 v1.5 verification."""
+"""RSA PSS signing plus PKCS1 v1 dot 5 verification you can call directly"""
 
 from std.collections import List, InlineArray
 from std.memory import Pointer
 from std.bit import rotate_bits_left, count_leading_zeros
 from std.utils import StaticTuple
+from std.sys import inlined_assembly
 from .random import random_bytes
 from .sha2 import (
     sha224_hash, sha256_hash, sha384_hash, sha512_hash,
@@ -166,6 +167,7 @@ def _mgf1(
         block[i] = seed[unsafe_offset=i]
     var done = 0
     var counter: UInt32 = 0
+    # MGF1 hashes the seed with a big endian counter each round
     while done < mask_len:
         block[seed_len] = UInt8((counter >> 24) & 0xFF)
         block[seed_len + 1] = UInt8((counter >> 16) & 0xFF)
@@ -323,7 +325,9 @@ def _bn_select(
     k: Int
 ) -> StaticTuple[UInt64, _NL]:
     var out = a
-    var mask = UInt64(0) - (choice & UInt64(1))
+    var mask = inlined_assembly[
+        "", UInt64, constraints="=r,0", has_side_effect=True
+    ](UInt64(0) - (choice & UInt64(1)))
     for i in range(k):
         out[i] = a[i] ^ (mask & (a[i] ^ b[i]))
     return out
@@ -354,6 +358,10 @@ def _mont_mul_k[K: Int](
     n: StaticTuple[UInt64, _NL],
     n0: UInt64
 ) -> StaticTuple[UInt64, _NL]:
+    """CIOS multiply that folds two rows at once to save loop trips
+    Carries ripple in two chains and work grows with the square of the limbs
+    Feeds the cubic time modexp that squares and multiplies"""
+    # Fold each pair into t the Montgomery way
     var t = StaticTuple[UInt64, _NL]()
     comptime for z in range(K):
         t[z] = 0
@@ -531,6 +539,7 @@ def _mont_mul(
 
 
 struct RsaPublicKey:
+    """RSA public key that verifies with Montgomery modexp in cubic time"""
     var n: StaticTuple[UInt64, _NL]
     var k: Int
     var nb: Int
@@ -745,7 +754,189 @@ def _wipe_bn_table(
             ptr.unsafe_store[volatile=True](row * _NL + i, UInt64(0))
 
 
+@always_inline
+def _bn_sub_into(
+    output: Pointer[mut=True, UInt64, _],
+    a: Pointer[mut=False, UInt64, _], b: Pointer[mut=False, UInt64, _], k: Int
+) -> UInt64:
+    var borrow = UInt64(0)
+    for i in range(k):
+        var d = (UInt128(1) << 64) + UInt128(a[unsafe_offset=i]) - UInt128(b[unsafe_offset=i]) - UInt128(borrow)
+        output[unsafe_offset=i] = UInt64(d)
+        borrow = 1 - UInt64(d >> 64)
+    return borrow
+
+
+@always_inline
+def _bn_select_inplace(
+    a: Pointer[mut=True, UInt64, _], b: Pointer[mut=False, UInt64, _],
+    choice: UInt64, k: Int
+):
+    var mask = inlined_assembly[
+        "", UInt64, constraints="=r,0", has_side_effect=True
+    ](UInt64(0) - (choice & UInt64(1)))
+    for i in range(k):
+        a[unsafe_offset=i] ^= mask & (a[unsafe_offset=i] ^ b[unsafe_offset=i])
+
+
+@always_inline
+def _bn_half_inplace(a: Pointer[mut=True, UInt64, _], k: Int, high: UInt64 = 0):
+    var carry = high
+    for i in range(k - 1, -1, -1):
+        var limb = a[unsafe_offset=i]
+        a[unsafe_offset=i] = (limb >> 1) | (carry << 63)
+        carry = limb & 1
+
+
+@always_inline
+def _bn_half_mod_inplace(
+    a: Pointer[mut=True, UInt64, _], n: Pointer[mut=False, UInt64, _], k: Int
+):
+    var mask = inlined_assembly[
+        "", UInt64, constraints="=r,0", has_side_effect=True
+    ](UInt64(0) - (a[unsafe_offset=0] & UInt64(1)))
+    var carry = UInt64(0)
+    for i in range(k):
+        var sum = UInt128(a[unsafe_offset=i]) + UInt128(n[unsafe_offset=i] & mask) + UInt128(carry)
+        a[unsafe_offset=i] = UInt64(sum)
+        carry = UInt64(sum >> 64)
+    _bn_half_inplace(a, k, carry)
+
+
+@always_inline
+def _bn_sub_mod_into(
+    output: Pointer[mut=True, UInt64, _],
+    a: Pointer[mut=False, UInt64, _], b: Pointer[mut=False, UInt64, _],
+    n: Pointer[mut=False, UInt64, _], k: Int
+):
+    var borrow = _bn_sub_into(output, a, b, k)
+    var mask = inlined_assembly[
+        "", UInt64, constraints="=r,0", has_side_effect=True
+    ](UInt64(0) - borrow)
+    var carry = UInt64(0)
+    for i in range(k):
+        var sum = UInt128(output[unsafe_offset=i]) + UInt128(n[unsafe_offset=i] & mask) + UInt128(carry)
+        output[unsafe_offset=i] = UInt64(sum)
+        carry = UInt64(sum >> 64)
+
+
+def _bn_inverse_odd(a: StaticTuple[UInt64, _NL], key: RsaPublicKey) -> Tuple[StaticTuple[UInt64, _NL], Bool]:
+    """Binary extended GCD with a fixed budget that halves evens and subtracts odds
+    Picks each step behind a mask and returns x with a times x is one mod n for blinding"""
+    # Binary GCD with a public fixed budget where each active step halves something even
+    # At most twice the bit width reaches the end and extra steps leave things fixed
+    # Use addressable limbs in the hot loop instead of rebuilding StaticTuples.
+    # Four state rows and four scratch rows remain live until the final wipe.
+    var state = InlineArray[UInt64, 4 * _NL](fill=0)
+    var scratch = InlineArray[UInt64, 4 * _NL](fill=0)
+    var u = state.unsafe_ptr()
+    var v = u.unsafe_offset(_NL)
+    var x = v.unsafe_offset(_NL)
+    var y = x.unsafe_offset(_NL)
+    var next_u = scratch.unsafe_ptr()
+    var next_v = next_u.unsafe_offset(_NL)
+    var next_x = next_v.unsafe_offset(_NL)
+    var next_y = next_x.unsafe_offset(_NL)
+    var n = Pointer(to=key.n).unsafe_bitcast[UInt64]()
+    var ap = Pointer(to=a).unsafe_bitcast[UInt64]()
+    var k = key.k
+    for i in range(k):
+        u[unsafe_offset=i] = ap[unsafe_offset=i]
+        v[unsafe_offset=i] = n[unsafe_offset=i]
+    x[unsafe_offset=0] = 1
+    for _ in range(2 * 64 * k + 1):
+        var borrow = _bn_sub_into(next_u, u, v, k)
+        _ = _bn_sub_into(next_v, v, u, k)
+        var u_even = (u[unsafe_offset=0] & 1) ^ UInt64(1)
+        var v_even = (v[unsafe_offset=0] & 1) ^ UInt64(1)
+        var both_odd = (u_even ^ 1) & (v_even ^ 1)
+        var take_u = u_even | (both_odd & (borrow ^ 1))
+        var take_v = (u_even ^ 1) & (v_even | (both_odd & borrow))
+        _bn_select_inplace(next_u, u, u_even, k)
+        _bn_select_inplace(next_v, v, v_even, k)
+        _bn_half_inplace(next_u, k)
+        _bn_half_inplace(next_v, k)
+        _bn_sub_mod_into(next_x, x, y, n, k)
+        _bn_sub_mod_into(next_y, y, x, n, k)
+        _bn_select_inplace(next_x, x, u_even, k)
+        _bn_select_inplace(next_y, y, v_even, k)
+        _bn_half_mod_inplace(next_x, n, k)
+        _bn_half_mod_inplace(next_y, n, k)
+        _bn_select_inplace(u, next_u, take_u, k)
+        _bn_select_inplace(v, next_v, take_v, k)
+        _bn_select_inplace(x, next_x, take_u, k)
+        _bn_select_inplace(y, next_y, take_v, k)
+    var diff = v[unsafe_offset=0] ^ UInt64(1)
+    var result = _bn_zero()
+    var rp = Pointer(to=result).unsafe_bitcast[UInt64]()
+    for i in range(k):
+        if i > 0:
+            diff |= v[unsafe_offset=i]
+        rp[unsafe_offset=i] = y[unsafe_offset=i]
+    for i in range(4 * _NL):
+        state.unsafe_ptr().unsafe_store[volatile=True](i, UInt64(0))
+        scratch.unsafe_ptr().unsafe_store[volatile=True](i, UInt64(0))
+    return result, diff == 0
+
+
+struct _RsaBlinding:
+    var factor: StaticTuple[UInt64, _NL]
+    var inverse: StaticTuple[UInt64, _NL]
+
+    def __init__(out self, key: RsaPublicKey) raises:
+        self.factor = _bn_zero()
+        self.inverse = _bn_zero()
+        # Rejection sampling keeps r uniform and randomness failures bubble up
+        # so signing never falls back to an unblinded private operation
+        for _ in range(128):
+            var bytes = random_bytes(key.nb)
+            bytes[0] &= UInt8(0xFF) >> UInt8(8 * key.nb - key.mod_bits)
+            var r = _bn_zero()
+            for i in range(key.nb):
+                r[i >> 3] |= UInt64(bytes[key.nb - 1 - i]) << UInt64(8 * (i & 7))
+            var bp = bytes.unsafe_ptr()
+            for i in range(len(bytes)):
+                bp.unsafe_store[volatile=True](i, UInt8(0))
+            var nonzero = UInt64(0)
+            for i in range(key.k):
+                nonzero |= r[i]
+            if nonzero == 0 or _bn_ge(r, key.n, key.k):
+                _wipe_bn(r, key.k)
+                continue
+            var inverse, valid = _bn_inverse_odd(r, key)
+            if not valid:
+                _wipe_bn(r, key.k)
+                _wipe_bn(inverse, key.k)
+                continue
+            var base = _mont_mul(r, key.r2, key.n, key.n0, key.k)
+            var acc = key.rmod
+            for i in range(len(key.e)):
+                for bit in range(7, -1, -1):
+                    acc = _mont_sqr(acc, key.n, key.n0, key.k)
+                    if (key.e[i] >> UInt8(bit)) & 1:
+                        acc = _mont_mul(acc, base, key.n, key.n0, key.k)
+            self.factor = acc
+            self.inverse = _mont_mul(inverse, key.r2, key.n, key.n0, key.k)
+            _wipe_bn(r, key.k)
+            _wipe_bn(inverse, key.k)
+            _wipe_bn(base, key.k)
+            _wipe_bn(acc, key.k)
+            return
+        raise Error("RSA could not sample an invertible blinding factor")
+
+    def __deinit__(deinit self):
+        _wipe_bn(self.factor, _NL)
+        _wipe_bn(self.inverse, _NL)
+
+    def blind(self, input: StaticTuple[UInt64, _NL], key: RsaPublicKey) -> StaticTuple[UInt64, _NL]:
+        return _mont_mul(input, self.factor, key.n, key.n0, key.k)
+
+    def unblind(self, result: StaticTuple[UInt64, _NL], key: RsaPublicKey) -> StaticTuple[UInt64, _NL]:
+        return _mont_mul(result, self.inverse, key.n, key.n0, key.k)
+
+
 struct RsaPrivateKey:
+    """RSA private key that signs blinded and windowed in cubic time"""
     var public: RsaPublicKey
     var d: InlineArray[UInt8, 528]
 
@@ -798,31 +989,10 @@ struct RsaPrivateKey:
             _wipe_bn(input, k)
             return False
 
-        var base = _mont_mul(input, self.public.r2, self.public.n, self.public.n0, k)
-        var table = StaticTuple[StaticTuple[UInt64, _NL], 16]()
-        table[0] = self.public.rmod
-        table[1] = base
-        for i in range(2, 16):
-            table[i] = _mont_mul(table[i - 1], base, self.public.n, self.public.n0, k)
-
-        var acc = self.public.rmod
-        for bi in range(nb):
-            var byte = self.d[bi]
-            for half in range(2):
-                acc = _mont_sqr(acc, self.public.n, self.public.n0, k)
-                acc = _mont_sqr(acc, self.public.n, self.public.n0, k)
-                acc = _mont_sqr(acc, self.public.n, self.public.n0, k)
-                acc = _mont_sqr(acc, self.public.n, self.public.n0, k)
-                var digit = UInt64(byte >> UInt8(4 if half == 0 else 0)) & UInt64(0xF)
-                var selected = table[0]
-                for i in range(1, 16):
-                    var hit = _nonzero_choice(digit ^ UInt64(i)) ^ UInt64(1)
-                    selected = _bn_select(selected, table[i], hit, k)
-                acc = _mont_mul(acc, selected, self.public.n, self.public.n0, k)
-
-        var one = _bn_zero()
-        one[0] = 1
-        var result = _mont_mul(acc, one, self.public.n, self.public.n0, k)
+        var blinding = _RsaBlinding(self.public)
+        var blinded = blinding.blind(input, self.public)
+        var result = _private_pow(self.public, self.d, blinded)
+        result = blinding.unblind(result, self.public)
         for i in range(nb):
             var limb = result[(nb - 1 - i) >> 3]
             signature[unsafe_offset=i] = UInt8((limb >> UInt64(8 * ((nb - 1 - i) & 7))) & 0xFF)
@@ -839,10 +1009,8 @@ struct RsaPrivateKey:
                 signature.unsafe_store[volatile=True](i, UInt8(0))
 
         _wipe_bn(input, k)
-        _wipe_bn(base, k)
-        _wipe_bn(acc, k)
+        _wipe_bn(blinded, k)
         _wipe_bn(result, k)
-        _wipe_bn_table(table, k)
         return valid
 
     def pss_sign_with_salt(
@@ -932,7 +1100,8 @@ def _bn_reduce_bytes(
 def _private_pow(
     key: RsaPublicKey,
     exponent: InlineArray[UInt8, 528],
-    input: StaticTuple[UInt64, _NL]
+    input: StaticTuple[UInt64, _NL],
+    exponent_bytes: Int = 0
 ) -> StaticTuple[UInt64, _NL]:
     var base = _mont_mul(input, key.r2, key.n, key.n0, key.k)
     var table = StaticTuple[StaticTuple[UInt64, _NL], 16]()
@@ -941,7 +1110,7 @@ def _private_pow(
     for i in range(2, 16):
         table[i] = _mont_mul(table[i - 1], base, key.n, key.n0, key.k)
     var acc = key.rmod
-    for bi in range(key.nb):
+    for bi in range(key.nb if exponent_bytes == 0 else exponent_bytes):
         var byte = exponent[bi]
         for half in range(2):
             acc = _mont_sqr(acc, key.n, key.n0, key.k)
@@ -987,7 +1156,48 @@ def _bn_equal(
     return diff == 0
 
 
+struct _RsaExponentBlinding:
+    var bytes: InlineArray[UInt8, 528]
+    var length: Int
+
+    def __init__(out self, key: RsaPublicKey, exponent: InlineArray[UInt8, 528]) raises:
+        self.bytes = InlineArray[UInt8, 528](fill=0)
+        self.length = key.nb + 16
+        if self.length > 528 or key.k + 2 > _NL:
+            raise Error("RSA CRT exponent blinding size unsupported")
+        var random = random_bytes(16)
+        var multiplier = _bn_zero()
+        for i in range(16):
+            multiplier[i >> 3] |= UInt64(random[i]) << UInt64(8 * (i & 7))
+            random.unsafe_ptr().unsafe_store[volatile=True](i, UInt8(0))
+        var one = _bn_zero()
+        one[0] = 1
+        var order, _ = _bn_sub_copy(key.n, one, key.k)
+        var product = _bn_mul_parts(order, key.k, multiplier, 2)
+        var carry = UInt64(0)
+        for i in range(key.k + 2):
+            var limb = UInt64(0)
+            for j in range(8):
+                var offset = i * 8 + j
+                if offset < key.nb:
+                    limb |= UInt64(exponent[key.nb - 1 - offset]) << UInt64(8 * j)
+            var sum = UInt128(product[i]) + UInt128(limb) + UInt128(carry)
+            product[i] = UInt64(sum)
+            carry = UInt64(sum >> 64)
+        for i in range(self.length):
+            var offset = self.length - 1 - i
+            self.bytes[i] = UInt8(product[offset >> 3] >> UInt64(8 * (offset & 7)))
+        _wipe_bn(order, key.k)
+        _wipe_bn(multiplier, 2)
+        _wipe_bn(product, key.k + 2)
+
+    def __deinit__(deinit self):
+        for i in range(528):
+            self.bytes.unsafe_ptr().unsafe_store[volatile=True](i, UInt8(0))
+
+
 struct RsaCrtPrivateKey:
+    """RSA CRT key that combines two half size powers with Garner for a big speedup"""
     var public: RsaPublicKey
     var p: RsaPublicKey
     var q: RsaPublicKey
@@ -1103,12 +1313,29 @@ struct RsaCrtPrivateKey:
         self, encoded: Span[UInt8, ...],
         signature: Pointer[mut=True, UInt8, _, address_space=_]
     ) raises -> Bool:
+        """Blind the message then run two half size powers and Garner them back together
+        Blinds the exponent too and wipes everything before returning"""
         if len(encoded) != self.public.nb:
             return False
-        var mp = _bn_reduce_bytes(encoded, self.p)
-        var mq = _bn_reduce_bytes(encoded, self.q)
-        var m1 = _private_pow(self.p, self.dp, mp)
-        var m2 = _private_pow(self.q, self.dq, mq)
+        # PSS encodings are already below n; decode and reject noncanonical inputs.
+        var input = _bn_zero()
+        for i in range(self.public.nb):
+            input[i >> 3] |= UInt64(encoded[self.public.nb - 1 - i]) << UInt64(8 * (i & 7))
+        if _bn_ge(input, self.public.n, self.public.k):
+            _wipe_bn(input, self.public.k)
+            return False
+        var blinding = _RsaBlinding(self.public)
+        var blinded = blinding.blind(input, self.public)
+        var blinded_bytes = InlineArray[UInt8, 528](fill=0)
+        for i in range(self.public.nb):
+            blinded_bytes[i] = UInt8(blinded[(self.public.nb - 1 - i) >> 3] >> UInt64(8 * ((self.public.nb - 1 - i) & 7)))
+        var blinded_span = Span[UInt8, ...](unsafe_ptr=blinded_bytes.unsafe_ptr(), length=self.public.nb)
+        var mp = _bn_reduce_bytes(blinded_span, self.p)
+        var mq = _bn_reduce_bytes(blinded_span, self.q)
+        var dp = _RsaExponentBlinding(self.p, self.dp)
+        var dq = _RsaExponentBlinding(self.q, self.dq)
+        var m1 = _private_pow(self.p, dp.bytes, mp, dp.length)
+        var m2 = _private_pow(self.q, dq.bytes, mq, dq.length)
 
         var m2_bytes = InlineArray[UInt8, 528](fill=0)
         for i in range(self.q.nb):
@@ -1139,6 +1366,7 @@ struct RsaCrtPrivateKey:
             var sum = UInt128(result[i]) + UInt128(addend) + UInt128(carry)
             result[i] = sum.cast[DType.uint64]()
             carry = (sum >> 64).cast[DType.uint64]()
+        result = blinding.unblind(result, self.public)
         for i in range(self.public.nb):
             var limb = result[(self.public.nb - 1 - i) >> 3]
             signature[unsafe_offset=i] = UInt8((limb >> UInt64(8 * ((self.public.nb - 1 - i) & 7))) & 0xFF)
@@ -1155,6 +1383,10 @@ struct RsaCrtPrivateKey:
             for i in range(self.public.nb):
                 signature.unsafe_store[volatile=True](i, UInt8(0))
 
+        _wipe_bn(input, self.public.k)
+        _wipe_bn(blinded, self.public.k)
+        for i in range(self.public.nb):
+            blinded_bytes.unsafe_ptr().unsafe_store[volatile=True](i, UInt8(0))
         _wipe_bn(mp, self.p.k)
         _wipe_bn(mq, self.q.k)
         _wipe_bn(m1, self.p.k)
@@ -1274,6 +1506,7 @@ def rsa_pss_verify(
     mgf_sha: Int,
     salt_len: Int
 ) raises -> Bool:
+    """RSA PSS verify with MGF1 salt and Montgomery modexp under the hood"""
     var key: RsaPublicKey
     try:
         key = RsaPublicKey(modulus, exponent)
@@ -1291,6 +1524,7 @@ def rsa_pss_sign_with_salt(
     sha: Int,
     mgf_sha: Int
 ) raises -> List[UInt8]:
+    """Same as PSS signing but with a salt you hand over"""
     var key = RsaPrivateKey(modulus, exponent, private_exponent)
     var signature = List[UInt8](unsafe_uninit_length=key.public.nb)
     if not key.pss_sign_with_salt(
@@ -1309,6 +1543,7 @@ def rsa_pss_sign(
     mgf_sha: Int,
     salt_len: Int
 ) raises -> List[UInt8]:
+    """Same as PSS verify but on the signing side"""
     var key = RsaPrivateKey(modulus, exponent, private_exponent)
     return key.pss_sign(message, sha, mgf_sha, salt_len)
 
@@ -1320,6 +1555,7 @@ def rsa_pss_crt_sign_with_salt(
     coefficient: Span[UInt8, ...], message: Span[UInt8, ...],
     salt: Span[UInt8, ...], sha: Int, mgf_sha: Int
 ) raises -> List[UInt8]:
+    """Same as PSS signing with salt but split with CRT for speed"""
     var key = RsaCrtPrivateKey(
         modulus, exponent, prime1, prime2, exponent1, exponent2, coefficient
     )
@@ -1338,6 +1574,7 @@ def rsa_pss_crt_sign(
     coefficient: Span[UInt8, ...], message: Span[UInt8, ...],
     sha: Int, mgf_sha: Int, salt_len: Int
 ) raises -> List[UInt8]:
+    """Same as PSS signing but split with CRT for speed"""
     var key = RsaCrtPrivateKey(
         modulus, exponent, prime1, prime2, exponent1, exponent2, coefficient
     )
@@ -1348,6 +1585,7 @@ def rsa_pss_sha256_sign(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     private_exponent: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
+    """PSS signing that uses SHA-256 with thirty two bytes of salt"""
     return rsa_pss_sign(modulus, exponent, private_exponent, message, SHA256, SHA256, 32)
 
 
@@ -1355,6 +1593,7 @@ def rsa_pss_sha384_sign(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     private_exponent: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
+    """PSS signing that uses SHA-384 with forty eight bytes of salt"""
     return rsa_pss_sign(modulus, exponent, private_exponent, message, SHA384, SHA384, 48)
 
 
@@ -1362,6 +1601,7 @@ def rsa_pss_sha512_sign(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     private_exponent: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
+    """PSS signing that uses SHA-512 with sixty four bytes of salt"""
     return rsa_pss_sign(modulus, exponent, private_exponent, message, SHA512, SHA512, 64)
 
 
@@ -1371,6 +1611,7 @@ def rsa_pss_crt_sha256_sign(
     exponent1: Span[UInt8, ...], exponent2: Span[UInt8, ...],
     coefficient: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
+    """CRT PSS signing that uses SHA-256 under the hood"""
     return rsa_pss_crt_sign(
         modulus, exponent, prime1, prime2, exponent1, exponent2,
         coefficient, message, SHA256, SHA256, 32
@@ -1383,6 +1624,7 @@ def rsa_pss_crt_sha384_sign(
     exponent1: Span[UInt8, ...], exponent2: Span[UInt8, ...],
     coefficient: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
+    """CRT PSS signing that uses SHA-384 under the hood"""
     return rsa_pss_crt_sign(
         modulus, exponent, prime1, prime2, exponent1, exponent2,
         coefficient, message, SHA384, SHA384, 48
@@ -1395,6 +1637,7 @@ def rsa_pss_crt_sha512_sign(
     exponent1: Span[UInt8, ...], exponent2: Span[UInt8, ...],
     coefficient: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
+    """CRT PSS signing that uses SHA-512 under the hood"""
     return rsa_pss_crt_sign(
         modulus, exponent, prime1, prime2, exponent1, exponent2,
         coefficient, message, SHA512, SHA512, 64
@@ -1407,6 +1650,7 @@ def rsa_pss_sha256_verify(
     message: Span[UInt8, ...],
     signature: Span[UInt8, ...]
 ) raises -> Bool:
+    """PSS verify that uses SHA-256 with thirty two bytes of salt"""
     return rsa_pss_verify(modulus, exponent, message, signature, SHA256, SHA256, 32)
 
 
@@ -1416,6 +1660,7 @@ def rsa_pss_sha384_verify(
     message: Span[UInt8, ...],
     signature: Span[UInt8, ...]
 ) raises -> Bool:
+    """PSS verify that uses SHA-384 with forty eight bytes of salt"""
     return rsa_pss_verify(modulus, exponent, message, signature, SHA384, SHA384, 48)
 
 
@@ -1425,6 +1670,7 @@ def rsa_pss_sha512_verify(
     message: Span[UInt8, ...],
     signature: Span[UInt8, ...]
 ) raises -> Bool:
+    """PSS verify that uses SHA-512 with sixty four bytes of salt"""
     return rsa_pss_verify(modulus, exponent, message, signature, SHA512, SHA512, 64)
 
 
@@ -1435,6 +1681,7 @@ def rsa_pkcs1_v15_verify(
     signature: Span[UInt8, ...],
     sha: Int
 ) raises -> Bool:
+    """PKCS1 v1 dot 5 verify that checks DigestInfo padding in cubic time"""
     var key: RsaPublicKey
     try:
         key = RsaPublicKey(modulus, exponent)
@@ -1447,6 +1694,7 @@ def rsa_pkcs1_v15_sha1_verify(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     message: Span[UInt8, ...], signature: Span[UInt8, ...]
 ) raises -> Bool:
+    """PKCS1 verify that uses SHA-1 under the hood"""
     return rsa_pkcs1_v15_verify(modulus, exponent, message, signature, SHA1)
 
 
@@ -1454,6 +1702,7 @@ def rsa_pkcs1_v15_sha256_verify(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     message: Span[UInt8, ...], signature: Span[UInt8, ...]
 ) raises -> Bool:
+    """PKCS1 verify that uses SHA-256 under the hood"""
     return rsa_pkcs1_v15_verify(modulus, exponent, message, signature, SHA256)
 
 
@@ -1461,6 +1710,7 @@ def rsa_pkcs1_v15_sha384_verify(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     message: Span[UInt8, ...], signature: Span[UInt8, ...]
 ) raises -> Bool:
+    """PKCS1 verify that uses SHA-384 under the hood"""
     return rsa_pkcs1_v15_verify(modulus, exponent, message, signature, SHA384)
 
 
@@ -1468,4 +1718,5 @@ def rsa_pkcs1_v15_sha512_verify(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     message: Span[UInt8, ...], signature: Span[UInt8, ...]
 ) raises -> Bool:
+    """PKCS1 verify that uses SHA-512 under the hood"""
     return rsa_pkcs1_v15_verify(modulus, exponent, message, signature, SHA512)

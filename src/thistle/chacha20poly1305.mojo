@@ -15,6 +15,7 @@ def hchacha20(
     input16: Span[UInt8, ...],
     output: Span[mut=True, UInt8, ...]
 ) raises:
+    """HChaCha20 runs 20 rounds and mixes rows 0 and 3 into a subkey for long nonces"""
     if len(key) != 32 or len(input16) != 16:
         raise Error("HChaCha20 needs a 32-byte key and 16-byte input")
     if len(output) < 32:
@@ -125,6 +126,7 @@ def chacha20_poly1305_encrypt(
     ciphertext: Span[mut=True, UInt8, ...],
     tag: Span[mut=True, UInt8, ...]
 ) raises:
+    """encrypts with ChaCha20 starting at counter 1 and MACs with a counter 0 Poly key"""
     if len(key) != 32:
         raise Error("ChaCha20-Poly1305 key must be 32 bytes")
     if len(nonce) != 12:
@@ -144,6 +146,7 @@ def chacha20_poly1305_decrypt(
     tag: Span[UInt8, ...],
     plaintext: Span[mut=True, UInt8, ...]
 ) raises -> Bool:
+    """checks the Poly tag first then decrypts with ChaCha20 if it matches"""
     if len(key) != 32:
         raise Error("ChaCha20-Poly1305 key must be 32 bytes")
     if len(nonce) != 12:
@@ -204,6 +207,7 @@ def xchacha20_poly1305_encrypt(
     ciphertext: Span[mut=True, UInt8, ...],
     tag: Span[mut=True, UInt8, ...]
 ) raises:
+    """same as chacha20_poly1305_encrypt but derives a subkey so a 24 byte nonce works"""
     if len(key) != 32:
         raise Error("XChaCha20-Poly1305 key must be 32 bytes")
     if len(nonce) != 24:
@@ -236,6 +240,7 @@ def xchacha20_poly1305_decrypt(
     tag: Span[UInt8, ...],
     plaintext: Span[mut=True, UInt8, ...]
 ) raises -> Bool:
+    """same as chacha20_poly1305_decrypt but derives a subkey so a 24 byte nonce works"""
     if len(key) != 32:
         raise Error("XChaCha20-Poly1305 key must be 32 bytes")
     if len(nonce) != 24:
