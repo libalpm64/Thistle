@@ -15,7 +15,7 @@ from std.builtin.globals import global_constant
 from std.memory import unsafe_memset_zero
 from std.os import abort
 from thistle.sha3 import (
-    SHA3Context, sha3_update, shake_final, shake128, shake256
+    SHA3Context, sha3_update, shake_final, shake128, shake256, shake256_into
 )
 from thistle.random import random_bytes
 from thistle.utils import StackBuffer, zero_stack_u8
@@ -32,6 +32,7 @@ comptime MLDSA87_BYTES = 4627
 comptime MLDSA_SEEDBYTES = 32
 comptime MLDSA_RNDBYTES = 32
 comptime MLDSA_CRHBYTES = 64
+comptime MLDSA_Y_SAMPLE_BYTES_MAX = 640
 
 comptime Q: UInt32 = 8380417
 comptime RR: UInt32 = 2365951
@@ -1420,6 +1421,8 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
     var ct0 = DSAPolyVec[MAX_K]()
     var h = DSAHintVec(fill=DSAHintRow(fill=0))
     var product = DSAPoly(fill=0)
+    var y_sample = StackBuffer[UInt8, MLDSA_Y_SAMPLE_BYTES_MAX]()
+    var y_sample_len = (p.gamma1_log + 1) * N // 8
 
     var kappa = 0
     while True:
@@ -1430,10 +1433,18 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
             seed.push_unchecked(UInt8(kappa & 0xFF))
             seed.push_unchecked(UInt8((kappa >> 8) & 0xFF))
             kappa += 1
-            var v = shake256(Span[UInt8, ...](unsafe_ptr=seed.ptr(), length=seed.len()), (p.gamma1_log + 1) * N // 8)
+            shake256_into(
+                y_sample,
+                Span[UInt8, ...](unsafe_ptr=seed.ptr(), length=seed.len()),
+                y_sample_len
+            )
             zero_stack_u8(seed)
-            _dsa_bit_unpack_into(y[_r], Span[UInt8, ...](v), p)
-            _zero_list_u8(v)
+            _dsa_bit_unpack_into(
+                y[_r],
+                Span[UInt8, ...](unsafe_ptr=y_sample.ptr(), length=y_sample.len()),
+                p
+            )
+            zero_stack_u8(y_sample)
 
         for i in range(p.l):
             _dsa_copy_poly_into(y_hat[i], y[i])

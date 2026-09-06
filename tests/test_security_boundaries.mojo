@@ -122,6 +122,24 @@ def main() raises:
         rejected = True
     if not rejected:
         raise Error("Poly1305 accepted an undersized destination")
+    var poly_valid_output = List[UInt8](length=16, fill=0)
+    poly.finalize_into(Span[mut=True, UInt8, ...](poly_valid_output))
+    rejected = False
+    try:
+        poly.finalize_into(Span[mut=True, UInt8, ...](poly_valid_output))
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("Poly1305 allowed finalization after finalization")
+    var wiped_poly = Poly1305(Span[UInt8, ...](poly_key))
+    wiped_poly.wipe()
+    rejected = False
+    try:
+        wiped_poly.finalize_into(Span[mut=True, UInt8, ...](poly_valid_output))
+    except:
+        rejected = True
+    if not rejected:
+        raise Error("Poly1305 allowed finalization after wipe")
 
     var key32 = List[UInt8](length=32, fill=1)
     var point32 = List[UInt8](length=32, fill=0)

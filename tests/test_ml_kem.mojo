@@ -4,6 +4,7 @@ from thistle.ml_kem import (
     N,
     Q,
     POLYBYTES,
+    SYMBYTES,
     Poly,
     barrett_reduce,
     cbd2,
@@ -138,6 +139,27 @@ def test_mlkem_external_api() raises -> Tuple[Int, Int]:
             failed += 1
         else:
             passed += 1
+
+    var seeded_m = List[UInt8](length=SYMBYTES, fill=0)
+    for i in range(SYMBYTES):
+        seeded_m[i] = UInt8(i)
+    var seeded_standard = mlkem_encaps_seed(
+        Span[UInt8, ...](generic_ek), Span[UInt8, ...](seeded_m), "ML-KEM-512"
+    )
+    var seeded_vector = mlkem_encaps_seed_vector(
+        Span[UInt8, ...](generic_ek), Span[UInt8, ...](seeded_m), "ML-KEM-512"
+    )
+    if not seeded_standard[2] or not seeded_vector[2]:
+        print("ML-KEM external API: seeded encaps rejected generated key")
+        failed += 1
+    elif (
+        not list_equal(seeded_standard[0].copy(), seeded_vector[1].copy())
+        or not list_equal(seeded_standard[1].copy(), seeded_vector[0].copy())
+    ):
+        print("ML-KEM external API: seeded encaps output order mismatch")
+        failed += 1
+    else:
+        passed += 1
 
     return (passed, failed)
 

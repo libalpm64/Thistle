@@ -43,6 +43,7 @@ trait HMACer(Movable):
     comptime HASH: Int
     def hmac(mut self, data: Span[UInt8, ...]): ...
     def hmac_with_counter(mut self, data: Span[UInt8, ...], counter: UInt32): ...
+    def _hmac_fixed_unchecked(mut self, data: Span[UInt8, ...]): ...
     def u_block_ptr(mut self) -> Pointer[UInt8, MutUntrackedOrigin]: ...
 
 
@@ -69,7 +70,9 @@ def _pbkdf2_derive[H: HMACer](mut h: H, salt: Span[UInt8, ...], iterations: Int,
         # HMAC iteration hashes the last block then xors it into the accumulator
         for _ in range(1, iterations):
             unsafe_memcpy(dest=input_block.unsafe_ptr(), src=h.u_block_ptr(), count=hLen)
-            h.hmac(Span[UInt8, ...](unsafe_ptr=input_block.unsafe_ptr(), length=hLen))
+            h._hmac_fixed_unchecked(
+                Span[UInt8, ...](unsafe_ptr=input_block.unsafe_ptr(), length=hLen)
+            )
             comptime if hLen == 32:
                 _xor_block[4](t_block.unsafe_ptr(), h.u_block_ptr())
             else:
@@ -148,6 +151,23 @@ struct PBKDF2SHA256(HMACer):
         self.outer_ctx.reset(self.outer_state)
         self.outer_ctx.count = 512
         sha256_update(self.outer_ctx, Span[UInt8, ...](unsafe_ptr=self.inner_hash.ptr(), length=32))
+        sha256_final_to_buffer(self.outer_ctx, self.u_block.ptr())
+
+    @always_inline
+    def _hmac_fixed_unchecked(mut self, data: Span[UInt8, ...]):
+        # Internal PBKDF2 path; data must contain exactly 32 bytes.
+        self.inner_ctx.state = self.inner_state
+        self.inner_ctx.count = 512
+        for i in range(32):
+            self.inner_ctx.buffer[i] = data[i]
+        self.inner_ctx.buffer_len = 32
+        sha256_final_to_buffer(self.inner_ctx, self.inner_hash.ptr())
+
+        self.outer_ctx.state = self.outer_state
+        self.outer_ctx.count = 512
+        for i in range(32):
+            self.outer_ctx.buffer[i] = self.inner_hash[i]
+        self.outer_ctx.buffer_len = 32
         sha256_final_to_buffer(self.outer_ctx, self.u_block.ptr())
 
     @always_inline
@@ -255,6 +275,25 @@ struct PBKDF2SHA512(HMACer):
         self.outer_ctx.reset(self.outer_state)
         self.outer_ctx.count_low = 1024
         sha512_update(self.outer_ctx, Span[UInt8, ...](unsafe_ptr=self.inner_hash.ptr(), length=64))
+        sha512_final_to_buffer(self.outer_ctx, self.u_block.ptr())
+
+    @always_inline
+    def _hmac_fixed_unchecked(mut self, data: Span[UInt8, ...]):
+        # Internal PBKDF2 path; data must contain exactly 64 bytes.
+        self.inner_ctx.state = self.inner_state
+        self.inner_ctx.count_high = 0
+        self.inner_ctx.count_low = 1024
+        for i in range(64):
+            self.inner_ctx.buffer[i] = data[i]
+        self.inner_ctx.buffer_len = 64
+        sha512_final_to_buffer(self.inner_ctx, self.inner_hash.ptr())
+
+        self.outer_ctx.state = self.outer_state
+        self.outer_ctx.count_high = 0
+        self.outer_ctx.count_low = 1024
+        for i in range(64):
+            self.outer_ctx.buffer[i] = self.inner_hash[i]
+        self.outer_ctx.buffer_len = 64
         sha512_final_to_buffer(self.outer_ctx, self.u_block.ptr())
 
     @always_inline

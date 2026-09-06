@@ -591,7 +591,10 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
                 local_cvs.unsafe_set(i, combined.slice[8]())
         batch_roots_ptr[unsafe_offset=tid] = local_cvs[0]
 
-    parallelize[process_batch](num_full_batches)
+    if num_full_batches == 1:
+        process_batch(0)
+    else:
+        parallelize[process_batch](num_full_batches)
 
     var h = Hasher()
     for i in range(num_full_batches):

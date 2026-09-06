@@ -112,6 +112,7 @@ struct Poly1305:
     var buf_len: Int
     var powers4_ready: Bool
     var powers8_ready: Bool
+    var finalized: Bool
 
     def __init__(out self, key: Span[UInt8, ...]) raises:
         if len(key) != 32:
@@ -140,6 +141,7 @@ struct Poly1305:
         self.r8 = self.r
         self.powers4_ready = False
         self.powers8_ready = False
+        self.finalized = False
 
     def __deinit__(deinit self):
         self.wipe()
@@ -354,6 +356,8 @@ struct Poly1305:
     def finalize_into(
         mut self, output: Span[mut=True, UInt8, ...]
     ) raises:
+        if self.finalized:
+            raise Error("Poly1305 context is already finalized or wiped")
         if len(output) < 16:
             raise Error("Poly1305 output needs at least 16 writable bytes")
         self._finalize_into_unchecked(output.unsafe_ptr())
@@ -378,6 +382,7 @@ struct Poly1305:
         self.buf_len = 0
         self.powers4_ready = False
         self.powers8_ready = False
+        self.finalized = True
 
 
 def poly1305_mac(

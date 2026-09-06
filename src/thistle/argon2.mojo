@@ -256,58 +256,58 @@ def variable_length_hash_into(
     var out_ptr = output.unsafe_ptr()
 
     if t_len <= 64:
-        var le_buf = alloc(Layout[UInt8](count=4)).unsafe_leak()
+        var le_buf = StackBuffer[UInt8, 4](fill=0)
         try:
             var ctx = Blake2b(t_len)
-            store_le32(le_buf, 0, t_len)
-            ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
+            store_le32(le_buf.ptr(), 0, t_len)
+            ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
             ctx.update(input)
             ctx.finalize_into(output)
         finally:
-            zero_and_free(le_buf, 4)
+            zero_buffer(le_buf.ptr(), 4)
         return
 
-    var le_buf = alloc(Layout[UInt8](count=4)).unsafe_leak()
+    var le_buf = StackBuffer[UInt8, 4](fill=0)
     var r = (t_len + 31) // 32 - 2
-    var v_buf = alloc(Layout[UInt8](count=64)).unsafe_leak()
+    var v_buf = StackBuffer[UInt8, 64](fill=0)
     try:
         # First block hashes length prefix followed by input then chains forward
         var ctx1 = Blake2b(64)
-        store_le32(le_buf, 0, t_len)
-        ctx1.update(Span[UInt8, ...](unsafe_ptr=le_buf, length=4))
+        store_le32(le_buf.ptr(), 0, t_len)
+        ctx1.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
         ctx1.update(input)
         ctx1.finalize_into(
-            Span[mut=True, UInt8, ...](unsafe_ptr=v_buf, length=64)
+            Span[mut=True, UInt8, ...](unsafe_ptr=v_buf.ptr(), length=64)
         )
 
         var out_offset = 0
         # Copies out the first half of each block and truncates the last one
         for _ in range(r - 1):
             for j in range(32):
-                out_ptr[unsafe_offset=out_offset + j] = v_buf[unsafe_offset=j]
+                out_ptr[unsafe_offset=out_offset + j] = v_buf.ptr()[unsafe_offset=j]
             out_offset += 32
 
             var ctx = Blake2b(64)
-            ctx.update(Span[UInt8, ...](unsafe_ptr=v_buf, length=64))
+            ctx.update(Span[UInt8, ...](unsafe_ptr=v_buf.ptr(), length=64))
             ctx.finalize_into(
-                Span[mut=True, UInt8, ...](unsafe_ptr=v_buf, length=64)
+                Span[mut=True, UInt8, ...](unsafe_ptr=v_buf.ptr(), length=64)
             )
 
         for j in range(32):
-            out_ptr[unsafe_offset=out_offset + j] = v_buf[unsafe_offset=j]
+            out_ptr[unsafe_offset=out_offset + j] = v_buf.ptr()[unsafe_offset=j]
         out_offset += 32
 
         var last_len = t_len - 32 * r
         var ctx_last = Blake2b(last_len)
-        ctx_last.update(Span[UInt8, ...](unsafe_ptr=v_buf, length=64))
+        ctx_last.update(Span[UInt8, ...](unsafe_ptr=v_buf.ptr(), length=64))
         ctx_last.finalize_into(
             Span[mut=True, UInt8, ...](
                 unsafe_ptr=out_ptr.unsafe_offset(out_offset), length=last_len
             )
         )
     finally:
-        zero_and_free(v_buf, 64)
-        zero_and_free(le_buf, 4)
+        zero_buffer(v_buf.ptr(), 64)
+        zero_buffer(le_buf.ptr(), 4)
 
 
 def variable_length_hash(t_len: Int, input: Span[UInt8, ...]) raises -> List[UInt8]:
@@ -316,19 +316,13 @@ def variable_length_hash(t_len: Int, input: Span[UInt8, ...]) raises -> List[UIn
         raise Error("Argon2 variable-length hash output must not be empty")
     if t_len >= (1 << 32):
         raise Error("Argon2 variable-length hash output must fit in 32 bits")
-    var out_buf = alloc(Layout[UInt8](count=t_len)).unsafe_leak()
-    try:
-        variable_length_hash_into(
-            t_len,
-            input,
-            Span[mut=True, UInt8, ...](unsafe_ptr=out_buf, length=t_len)
-        )
-        var result = List[UInt8](capacity=t_len)
-        for i in range(t_len):
-            result.append(out_buf[unsafe_offset=i])
-        return result^
-    finally:
-        zero_and_free(out_buf, t_len)
+    var result = List[UInt8](unsafe_uninit_length=t_len)
+    variable_length_hash_into(
+        t_len,
+        input,
+        Span[mut=True, UInt8, ...](result)
+    )
+    return result^
 
 
 @always_inline
