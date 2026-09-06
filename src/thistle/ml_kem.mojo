@@ -165,8 +165,9 @@ def _wipe_poly(mut p: Poly):
 
 
 @always_inline
-def _wipe_polyvec(mut v: Polyvec):
-    for i in range(K_MAX):
+def _wipe_polyvec(mut v: Polyvec, k: Int):
+    # Local scratch uses only the validated active k; remaining slots stay zero.
+    for i in range(k):
         _wipe_poly(v.vec[i])
 
 
@@ -1298,9 +1299,9 @@ def k_pke_encrypt_into(mut ciphertext: StackBuffer[UInt8, CIPHERTEXTBYTES_MAX], 
         _wipe_poly(kay)
         _wipe_poly(epp)
         _wipe_poly(v)
-        _wipe_polyvec(sp)
-        _wipe_polyvec(ep)
-        _wipe_polyvec(b)
+        _wipe_polyvec(sp, k)
+        _wipe_polyvec(ep, k)
+        _wipe_polyvec(b, k)
 
 
 def k_pke_encrypt_into_k[k: Int](mut ciphertext: StackBuffer[UInt8, CIPHERTEXTBYTES_MAX], ref ek: KPKEEncryptionKey, m: Span[UInt8, ...], r: Span[UInt8, ...]) raises -> Bool:
@@ -1356,9 +1357,9 @@ def k_pke_encrypt_into_k[k: Int](mut ciphertext: StackBuffer[UInt8, CIPHERTEXTBY
         _wipe_poly(kay)
         _wipe_poly(epp)
         _wipe_poly(v)
-        _wipe_polyvec(sp)
-        _wipe_polyvec(ep)
-        _wipe_polyvec(b)
+        _wipe_polyvec(sp, k)
+        _wipe_polyvec(ep, k)
+        _wipe_polyvec(b, k)
 
 
 def k_pke_decrypt_msg(mut plaintext: StackBuffer[UInt8, SYMBYTES], ref dk: KPKEDecapsulationKey, c: Span[UInt8, ...]
@@ -1383,8 +1384,7 @@ def k_pke_decrypt_msg(mut plaintext: StackBuffer[UInt8, SYMBYTES], ref dk: KPKED
         poly_tomsg_stack(plaintext, mp)
         return True
     finally:
-        _wipe_polyvec(b)
-        _wipe_poly(v)
+        # b and v are public ciphertext-derived values; mp contains the secret.
         _wipe_poly(mp)
 
 
@@ -1409,8 +1409,7 @@ def k_pke_decrypt_msg_k[k: Int](mut plaintext: StackBuffer[UInt8, SYMBYTES], ref
         poly_tomsg_stack(plaintext, mp)
         return True
     finally:
-        _wipe_polyvec(b)
-        _wipe_poly(v)
+        # b and v are public ciphertext-derived values; mp contains the secret.
         _wipe_poly(mp)
 
 

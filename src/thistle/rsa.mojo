@@ -755,37 +755,69 @@ def _wipe_bn_table(
 
 
 @always_inline
-def _bn_half(a: StaticTuple[UInt64, _NL], k: Int, high: UInt64 = 0) -> StaticTuple[UInt64, _NL]:
-    var result = a
+def _bn_sub_into(
+    output: Pointer[mut=True, UInt64, _],
+    a: Pointer[mut=False, UInt64, _], b: Pointer[mut=False, UInt64, _], k: Int
+) -> UInt64:
+    var borrow = UInt64(0)
+    for i in range(k):
+        var d = (UInt128(1) << 64) + UInt128(a[unsafe_offset=i]) - UInt128(b[unsafe_offset=i]) - UInt128(borrow)
+        output[unsafe_offset=i] = UInt64(d)
+        borrow = 1 - UInt64(d >> 64)
+    return borrow
+
+
+@always_inline
+def _bn_select_inplace(
+    a: Pointer[mut=True, UInt64, _], b: Pointer[mut=False, UInt64, _],
+    choice: UInt64, k: Int
+):
+    var mask = inlined_assembly[
+        "", UInt64, constraints="=r,0", has_side_effect=True
+    ](UInt64(0) - (choice & UInt64(1)))
+    for i in range(k):
+        a[unsafe_offset=i] ^= mask & (a[unsafe_offset=i] ^ b[unsafe_offset=i])
+
+
+@always_inline
+def _bn_half_inplace(a: Pointer[mut=True, UInt64, _], k: Int, high: UInt64 = 0):
     var carry = high
     for i in range(k - 1, -1, -1):
-        result[i] = (a[i] >> 1) | (carry << 63)
-        carry = a[i] & 1
-    return result
+        var limb = a[unsafe_offset=i]
+        a[unsafe_offset=i] = (limb >> 1) | (carry << 63)
+        carry = limb & 1
 
 
 @always_inline
-def _bn_half_mod(a: StaticTuple[UInt64, _NL], key: RsaPublicKey) -> StaticTuple[UInt64, _NL]:
-    var result = a
-    var mask = UInt64(0) - (a[0] & 1)
+def _bn_half_mod_inplace(
+    a: Pointer[mut=True, UInt64, _], n: Pointer[mut=False, UInt64, _], k: Int
+):
+    var mask = inlined_assembly[
+        "", UInt64, constraints="=r,0", has_side_effect=True
+    ](UInt64(0) - (a[unsafe_offset=0] & UInt64(1)))
     var carry = UInt64(0)
-    for i in range(key.k):
-        var sum = UInt128(a[i]) + UInt128(key.n[i] & mask) + UInt128(carry)
-        result[i] = UInt64(sum)
+    for i in range(k):
+        var sum = UInt128(a[unsafe_offset=i]) + UInt128(n[unsafe_offset=i] & mask) + UInt128(carry)
+        a[unsafe_offset=i] = UInt64(sum)
         carry = UInt64(sum >> 64)
-    return _bn_half(result, key.k, carry)
+    _bn_half_inplace(a, k, carry)
 
 
 @always_inline
-def _bn_sub_mod(a: StaticTuple[UInt64, _NL], b: StaticTuple[UInt64, _NL], key: RsaPublicKey) -> StaticTuple[UInt64, _NL]:
-    var result, borrow = _bn_sub_copy(a, b, key.k)
-    var mask = UInt64(0) - borrow
+def _bn_sub_mod_into(
+    output: Pointer[mut=True, UInt64, _],
+    a: Pointer[mut=False, UInt64, _], b: Pointer[mut=False, UInt64, _],
+    n: Pointer[mut=False, UInt64, _], k: Int
+):
+    var borrow = _bn_sub_into(output, a, b, k)
+    var mask = inlined_assembly[
+        "", UInt64, constraints="=r,0", has_side_effect=True
+    ](UInt64(0) - borrow)
     var carry = UInt64(0)
-    for i in range(key.k):
-        var sum = UInt128(result[i]) + UInt128(key.n[i] & mask) + UInt128(carry)
-        result[i] = UInt64(sum)
+    for i in range(k):
+        var sum = UInt128(output[unsafe_offset=i]) + UInt128(n[unsafe_offset=i] & mask) + UInt128(carry)
+        output[unsafe_offset=i] = UInt64(sum)
         carry = UInt64(sum >> 64)
-    return result
 
 
 def _bn_inverse_odd(a: StaticTuple[UInt64, _NL], key: RsaPublicKey) -> Tuple[StaticTuple[UInt64, _NL], Bool]:
@@ -793,40 +825,58 @@ def _bn_inverse_odd(a: StaticTuple[UInt64, _NL], key: RsaPublicKey) -> Tuple[Sta
     Picks each step behind a mask and returns x with a times x is one mod n for blinding"""
     # Binary GCD with a public fixed budget where each active step halves something even
     # At most twice the bit width reaches the end and extra steps leave things fixed
-    var u = a
-    var v = key.n
-    var x = _bn_zero()
-    var y = _bn_zero()
-    x[0] = 1
-    for _ in range(2 * 64 * key.k + 1):
-        var uv, borrow = _bn_sub_copy(u, v, key.k)
-        var vu, _ = _bn_sub_copy(v, u, key.k)
-        var u_even = (u[0] & 1) ^ UInt64(1)
-        var v_even = (v[0] & 1) ^ UInt64(1)
+    # Use addressable limbs in the hot loop instead of rebuilding StaticTuples.
+    # Four state rows and four scratch rows remain live until the final wipe.
+    var state = InlineArray[UInt64, 4 * _NL](fill=0)
+    var scratch = InlineArray[UInt64, 4 * _NL](fill=0)
+    var u = state.unsafe_ptr()
+    var v = u.unsafe_offset(_NL)
+    var x = v.unsafe_offset(_NL)
+    var y = x.unsafe_offset(_NL)
+    var next_u = scratch.unsafe_ptr()
+    var next_v = next_u.unsafe_offset(_NL)
+    var next_x = next_v.unsafe_offset(_NL)
+    var next_y = next_x.unsafe_offset(_NL)
+    var n = Pointer(to=key.n).unsafe_bitcast[UInt64]()
+    var ap = Pointer(to=a).unsafe_bitcast[UInt64]()
+    var k = key.k
+    for i in range(k):
+        u[unsafe_offset=i] = ap[unsafe_offset=i]
+        v[unsafe_offset=i] = n[unsafe_offset=i]
+    x[unsafe_offset=0] = 1
+    for _ in range(2 * 64 * k + 1):
+        var borrow = _bn_sub_into(next_u, u, v, k)
+        _ = _bn_sub_into(next_v, v, u, k)
+        var u_even = (u[unsafe_offset=0] & 1) ^ UInt64(1)
+        var v_even = (v[unsafe_offset=0] & 1) ^ UInt64(1)
         var both_odd = (u_even ^ 1) & (v_even ^ 1)
         var take_u = u_even | (both_odd & (borrow ^ 1))
         var take_v = (u_even ^ 1) & (v_even | (both_odd & borrow))
-        var next_u = _bn_half(_bn_select(uv, u, u_even, key.k), key.k)
-        var next_v = _bn_half(_bn_select(vu, v, v_even, key.k), key.k)
-        var next_x = _bn_half_mod(_bn_select(_bn_sub_mod(x, y, key), x, u_even, key.k), key)
-        var next_y = _bn_half_mod(_bn_select(_bn_sub_mod(y, x, key), y, v_even, key.k), key)
-        u = _bn_select(u, next_u, take_u, key.k)
-        v = _bn_select(v, next_v, take_v, key.k)
-        x = _bn_select(x, next_x, take_u, key.k)
-        y = _bn_select(y, next_y, take_v, key.k)
-        _wipe_bn(uv, key.k)
-        _wipe_bn(vu, key.k)
-        _wipe_bn(next_u, key.k)
-        _wipe_bn(next_v, key.k)
-        _wipe_bn(next_x, key.k)
-        _wipe_bn(next_y, key.k)
-    var one = _bn_zero()
-    one[0] = 1
-    var valid = _bn_equal(v, one, key.k)
-    _wipe_bn(u, key.k)
-    _wipe_bn(v, key.k)
-    _wipe_bn(x, key.k)
-    return y, valid
+        _bn_select_inplace(next_u, u, u_even, k)
+        _bn_select_inplace(next_v, v, v_even, k)
+        _bn_half_inplace(next_u, k)
+        _bn_half_inplace(next_v, k)
+        _bn_sub_mod_into(next_x, x, y, n, k)
+        _bn_sub_mod_into(next_y, y, x, n, k)
+        _bn_select_inplace(next_x, x, u_even, k)
+        _bn_select_inplace(next_y, y, v_even, k)
+        _bn_half_mod_inplace(next_x, n, k)
+        _bn_half_mod_inplace(next_y, n, k)
+        _bn_select_inplace(u, next_u, take_u, k)
+        _bn_select_inplace(v, next_v, take_v, k)
+        _bn_select_inplace(x, next_x, take_u, k)
+        _bn_select_inplace(y, next_y, take_v, k)
+    var diff = v[unsafe_offset=0] ^ UInt64(1)
+    var result = _bn_zero()
+    var rp = Pointer(to=result).unsafe_bitcast[UInt64]()
+    for i in range(k):
+        if i > 0:
+            diff |= v[unsafe_offset=i]
+        rp[unsafe_offset=i] = y[unsafe_offset=i]
+    for i in range(4 * _NL):
+        state.unsafe_ptr().unsafe_store[volatile=True](i, UInt64(0))
+        scratch.unsafe_ptr().unsafe_store[volatile=True](i, UInt64(0))
+    return result, diff == 0
 
 
 struct _RsaBlinding:
@@ -1267,7 +1317,13 @@ struct RsaCrtPrivateKey:
         Blinds the exponent too and wipes everything before returning"""
         if len(encoded) != self.public.nb:
             return False
-        var input = _bn_reduce_bytes(encoded, self.public)
+        # PSS encodings are already below n; decode and reject noncanonical inputs.
+        var input = _bn_zero()
+        for i in range(self.public.nb):
+            input[i >> 3] |= UInt64(encoded[self.public.nb - 1 - i]) << UInt64(8 * (i & 7))
+        if _bn_ge(input, self.public.n, self.public.k):
+            _wipe_bn(input, self.public.k)
+            return False
         var blinding = _RsaBlinding(self.public)
         var blinded = blinding.blind(input, self.public)
         var blinded_bytes = InlineArray[UInt8, 528](fill=0)
