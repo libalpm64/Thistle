@@ -1,4 +1,4 @@
-"""Implements the BLAKE2b hash function specified by RFC 7693."""
+"""BLAKE2b hashing and keyed authentication (RFC 7693)."""
 
 from std.collections import List
 from std.memory import Pointer, unsafe_memcpy, unsafe_memset_zero
@@ -78,7 +78,7 @@ def round_fn[r: Int](
     return (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15)
 # fmt: on
 struct Blake2b(Movable):
-    """streaming BLAKE2b working in 128 byte blocks with 12 rounds of G"""
+    """Streaming BLAKE2b with 128-byte blocks and configurable digest length (RFC 7693, sec. 3)."""
     var h: SIMD[DType.uint64, 8]
     var t_low: UInt64
     var t_high: UInt64
@@ -270,7 +270,7 @@ struct Blake2b(Movable):
 
 
 def blake2b_hash(data: Span[UInt8, ...], out_len: Int = 64) raises -> List[UInt8]:
-    """hashes with BLAKE2b giving 1 to 64 bytes out starting from IV and param block"""
+    """Return a BLAKE2b digest of 1 to 64 bytes (RFC 7693, secs. 2.1 and 3.3)."""
     if out_len < 1 or out_len > 64:
         raise Error("BLAKE2b digest length must be 1..64")
     var ctx = Blake2b(out_len)
@@ -281,7 +281,9 @@ def blake2b_hash(data: Span[UInt8, ...], out_len: Int = 64) raises -> List[UInt8
 def blake2b_hash_keyed(
     data: Span[UInt8, ...], key: Span[UInt8, ...], out_len: Int = 64
 ) raises -> List[UInt8]:
-    """same as blake2b_hash but starts with a padded key block"""
+    """Return a keyed BLAKE2b digest of 1 to 64 bytes; the key may contain at most 64 bytes (RFC
+    7693, secs. 2.1 and 3.3).
+    """
     if out_len < 1 or out_len > 64:
         raise Error("BLAKE2b digest length must be 1..64")
     if len(key) > 64:

@@ -1,4 +1,9 @@
-"""Implements ChaCha20-Poly1305 and XChaCha20-Poly1305 from RFC 8439."""
+"""ChaCha20-Poly1305 AEAD (RFC 8439, sec. 2.8) and XChaCha20-Poly1305.
+
+XChaCha20 uses draft-irtf-cfrg-xchacha-03, sec. 2 (Internet-Draft):
+
+https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-xchacha-03
+"""
 
 from std.memory import bitcast
 from std.memory.unsafe_pointer import Pointer
@@ -15,7 +20,9 @@ def hchacha20(
     input16: Span[UInt8, ...],
     output: Span[mut=True, UInt8, ...]
 ) raises:
-    """HChaCha20 runs 20 rounds and mixes rows 0 and 3 into a subkey for long nonces"""
+    """Derive a 32-byte HChaCha20 subkey from rows 0 and 3 without feedforward
+    (draft-irtf-cfrg-xchacha-03, sec. 2.2).
+    """
     if len(key) != 32 or len(input16) != 16:
         raise Error("HChaCha20 needs a 32-byte key and 16-byte input")
     if len(output) < 32:
@@ -126,7 +133,9 @@ def chacha20_poly1305_encrypt(
     ciphertext: Span[mut=True, UInt8, ...],
     tag: Span[mut=True, UInt8, ...]
 ) raises:
-    """encrypts with ChaCha20 starting at counter 1 and MACs with a counter 0 Poly key"""
+    """Encrypt from counter 1; counter 0 derives the one-time Poly1305 key (RFC 8439, secs. 2.6
+    and 2.8).
+    """
     if len(key) != 32:
         raise Error("ChaCha20-Poly1305 key must be 32 bytes")
     if len(nonce) != 12:
@@ -146,7 +155,9 @@ def chacha20_poly1305_decrypt(
     tag: Span[UInt8, ...],
     plaintext: Span[mut=True, UInt8, ...]
 ) raises -> Bool:
-    """checks the Poly tag first then decrypts with ChaCha20 if it matches"""
+    """Authenticate before decrypting; a tag mismatch returns False without writing plaintext
+    (RFC 8439, sec. 2.8).
+    """
     if len(key) != 32:
         raise Error("ChaCha20-Poly1305 key must be 32 bytes")
     if len(nonce) != 12:
@@ -207,7 +218,9 @@ def xchacha20_poly1305_encrypt(
     ciphertext: Span[mut=True, UInt8, ...],
     tag: Span[mut=True, UInt8, ...]
 ) raises:
-    """same as chacha20_poly1305_encrypt but derives a subkey so a 24 byte nonce works"""
+    """Encrypt with a 24-byte XChaCha20 nonce and an HChaCha20 subkey
+    (draft-irtf-cfrg-xchacha-03, sec. 2).
+    """
     if len(key) != 32:
         raise Error("XChaCha20-Poly1305 key must be 32 bytes")
     if len(nonce) != 24:
@@ -240,7 +253,9 @@ def xchacha20_poly1305_decrypt(
     tag: Span[UInt8, ...],
     plaintext: Span[mut=True, UInt8, ...]
 ) raises -> Bool:
-    """same as chacha20_poly1305_decrypt but derives a subkey so a 24 byte nonce works"""
+    """Decrypt XChaCha20-Poly1305 (draft-irtf-cfrg-xchacha-03, sec. 2); leave output untouched on
+    tag mismatch.
+    """
     if len(key) != 32:
         raise Error("XChaCha20-Poly1305 key must be 32 bytes")
     if len(nonce) != 24:

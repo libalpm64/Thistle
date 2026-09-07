@@ -1,6 +1,4 @@
-"""
-KCipher-2 stream cipher implemented in Mojo.
-"""
+"""KCipher-2 stream cipher with 128-bit keys and IVs (RFC 7008)."""
 
 from std.memory import bitcast
 from std.bit import byte_swap
@@ -55,13 +53,12 @@ def _amul4(b: SIMD[DType.uint32, 4]) -> SIMD[DType.uint32, 4]:
 
 @always_inline
 def _rho(x: UInt32) -> UInt32:
-    # byte k+1 (mod 4)
+    # Rotate byte positions: output byte k takes input byte (k + 1) mod 4.
     return ((x >> 1) & 0x7777) | ((x << 3) & 0x8888)
 
 
 @always_inline
 def _rho2(x: UInt32) -> UInt32:
-    # rho applied twice
     return ((x >> 2) & 0x3333) | ((x << 2) & 0xCCCC)
 
 
@@ -240,7 +237,7 @@ def sub_k2_x4(
 def _sub_k2_x4_bitsliced(
     w0: UInt32, w1: UInt32, w2: UInt32, w3: UInt32
 ) -> SIMD[DType.uint32, 4]:
-    # Attempt to defeat SROA
+    # Transpose the packed input words into S-box bit planes.
     var tlo = transpose8x8(UInt64(w0) | (UInt64(w1) << 32))
     var thi = transpose8x8(UInt64(w2) | (UInt64(w3) << 32))
     var p = InlineArray[UInt32, 8](fill=0)
@@ -252,9 +249,9 @@ def _sub_k2_x4_bitsliced(
 
     _sbox_planes(p)
 
-    # q_k = 2*t_k ^ 3*t_{k+1} ^ t_{k+2} ^ t_{k+3}.
-    # e = t ^ rho(t) this reduces to xtime(e) ^ e ^ rho2(e) ^ t
-    # rho(t) ^ rho2(t) ^ rho3(t) = e ^ rho2(e) ^ t.
+    # MixColumns: q_k = 2*t_k ^ 3*t_{k+1} ^ t_{k+2} ^ t_{k+3}.
+    # With e = t ^ rho(t), this becomes xtime(e) ^ e ^ rho2(e) ^ t.
+    # Here rho(t) ^ rho2(t) ^ rho3(t) = e ^ rho2(e) ^ t.
     var e = InlineArray[UInt32, 8](fill=0)
     var s = InlineArray[UInt32, 8](fill=0)
 
@@ -262,8 +259,7 @@ def _sub_k2_x4_bitsliced(
         e[j] = p[j] ^ _rho(p[j])
         s[j] = e[j] ^ _rho2(e[j]) ^ p[j]
 
-    # xtime permutation plane fold carry plane e[7] back
-    # into planes 1, 3 and 4 (AES 0x1B).
+    # Reduce the xtime carry plane e[7] into planes 1, 3, and 4 (AES polynomial 0x1B).
     var q = InlineArray[UInt32, 8](fill=0)
     q[0] = e[7] ^ s[0]
     q[1] = e[0] ^ e[7] ^ s[1]
@@ -274,7 +270,7 @@ def _sub_k2_x4_bitsliced(
     q[6] = e[5] ^ s[6]
     q[7] = e[6] ^ s[7]
 
-    # Upper 16 bits of each plane are garbage (S-box XNOR outputs)
+    # S-box XNORs leave unused high bits set; retain only the low 16 bits of each plane.
     var olo = UInt64(0)
     var ohi = UInt64(0)
 
@@ -303,7 +299,9 @@ def nlf(a: UInt32, b: UInt32, c: UInt32, d: UInt32) -> UInt32:
 
 
 struct KCipher2:
-    """KCipher-2 stream from a 128 bit key and IV with two registers and a small tail buffer"""
+    """KCipher-2 state with two register banks and cached keystream bytes for partial reads (RFC
+    7008, sec. 2.2).
+    """
     var a0: UInt32
     var a1: UInt32
     var a2: UInt32
@@ -545,7 +543,7 @@ struct KCipher2:
     def encrypt_inplace[
         origin: Origin[mut=True]
     ](mut self, mut data: Span[mut=True, UInt8, origin]):
-        # bytes go out big endian per RFC 7008 and leftover bytes carry to the next call
+        # RFC 7008 emits words big-endian; retain unused bytes for the next call.
         var offset = 0
         while self._pending_bytes > 0 and offset < len(data):
             data[offset] ^= UInt8(self._pending >> 56)

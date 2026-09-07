@@ -1,5 +1,5 @@
-"""
-NIST P-384 / secp384r1 implementation.
+"""P-384 (SEC 2 v2.0, sec. 2.5.1), ECDH (SEC 1 v2.0, sec. 3.3.1), and ECDSA (FIPS 186-5, sec. 6)
+with RFC 6979 nonces.
 """
 
 from std.builtin.globals import global_constant
@@ -87,7 +87,7 @@ def _gy() -> U384:
 
 
 def _sqrt_exp() -> U384:
-    # p leaves remainder three when divided by four
+    # p = 3 mod 4 permits square roots via exponent (p + 1) / 4.
     return U384(
         0x0000000040000000,
         0xBFFFFFFFC0000000,
@@ -162,8 +162,7 @@ def _sub_mod(a: U384, b: U384) -> U384:
 
 @always_inline
 def _mont_mul(a: U384, b: U384) -> U384:
-    """Montgomery multiply with plain CIOS because this prime has no sparse shortcut"""
-    # Montgomery reduction where N0 is one plus two to the thirty two so there is no sparse shortcut
+    """Multiply in Montgomery form using six-limb CIOS reduction with N0 = 2^32 + 1."""
     return ws_mont_mul[6, _N0](a, b, _p())
 
 
@@ -218,7 +217,7 @@ def _to_be(x: U384, output: Pointer[mut=True, UInt8, _, address_space=_]):
 
 
 struct P384Point(Copyable, ImplicitlyCopyable, Movable):
-    """Affine P-384 point that lives on the short curve with a equals minus three"""
+    """Affine P-384 coordinates with an explicit infinity flag."""
     var x: U384
     var y: U384
     var infinity: Bool
@@ -249,7 +248,7 @@ struct P384Point(Copyable, ImplicitlyCopyable, Movable):
 
 
 struct P384JacobianPoint(Copyable, ImplicitlyCopyable, Movable):
-    """Jacobian P-384 point that postpones division until the very end"""
+    """Jacobian P-384 coordinates: x = X/Z^2 and y = Y/Z^3, with an explicit infinity flag."""
     var x: U384
     var y: U384
     var z: U384
@@ -382,7 +381,9 @@ def _jacobian_add(p: P384JacobianPoint, q: P384JacobianPoint) -> P384JacobianPoi
 
 
 def p384_decode_uncompressed(point: Span[UInt8, ...]) -> P384Point:
-    """Decode a point just like P-256 but with forty eight byte fields"""
+    """Decode and validate a compressed or uncompressed SEC 1 P-384 point (SEC 1 v2.0, sec.
+    2.3.4).
+    """
     if len(point) == 49 and (point[0] == 0x02 or point[0] == 0x03):
         var x = _from_be(
             Span[UInt8, ...](unsafe_ptr=point.unsafe_ptr().unsafe_offset(1), length=48)
@@ -428,7 +429,9 @@ def p384_encode_uncompressed(
 def p384_public_key(
     private_key: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
 ) -> Bool:
-    """Multiply the generator by your secret with the precomputed comb"""
+    """Derive an uncompressed 97-byte public key from a 48-byte private scalar (SEC 1 v2.0, secs.
+    3.2.1 and 2.3.3).
+    """
     if len(private_key) != 48 or len(output) < P384_POINT_SIZE:
         return False
     var d = _from_be(private_key)
@@ -451,7 +454,9 @@ def p384_ecdh(
     public_key: Span[UInt8, ...],
     output: Span[mut=True, UInt8, ...]
 ) -> Bool:
-    """Agree a shared secret just like P-256 but keep forty eight bytes of x"""
+    """Write the raw 48-byte ECDH x coordinate after validating the private scalar and peer point
+    (SEC 1 v2.0, sec. 3.3.1).
+    """
     if len(private_key) != 48 or len(output) < P384_SIZE:
         return False
     var d = _from_be(private_key)
@@ -559,7 +564,9 @@ def p384_ecdsa_sign_digest(
     digest: Span[UInt8, ...],
     signature: Span[mut=True, UInt8, ...]
 ) -> Bool:
-    """Sign a digest just like P-256 but with a forty eight byte digest"""
+    """Sign a 48-byte digest as a 96-byte raw r || s signature (FIPS 186-5, sec. 6.4.1); derive
+    the nonce using RFC 6979 sec. 3.2.
+    """
     if len(private_key) != 48 or len(digest) != 48
         or len(signature) < P384_SIGNATURE_SIZE:
         return False
@@ -605,7 +612,9 @@ def p384_ecdsa_sign(
     message: Span[UInt8, ...],
     signature: Span[mut=True, UInt8, ...]
 ) -> Bool:
-    """Same as sign_digest but hashes the message first with SHA-384"""
+    """Hash the message with SHA-384 and write a 96-byte raw ECDSA signature (FIPS 186-5, sec.
+    6.4.1; RFC 6979, sec. 3.2).
+    """
     if len(signature) < P384_SIGNATURE_SIZE:
         return False
     var digest = sha384_hash(message)
@@ -628,7 +637,7 @@ def p384_ecdsa_verify_digest(
     digest: Span[UInt8, ...],
     signature: Span[UInt8, ...]
 ) -> Bool:
-    """Verify a digest just like P-256 but with a forty eight byte digest"""
+    """Verify a raw P-384 ECDSA signature over a 48-byte digest (FIPS 186-5, sec. 6.4.2)."""
     if len(digest) != 48 or len(signature) != 96:
         return False
     var q = p384_decode_uncompressed(public_key)
@@ -655,7 +664,9 @@ def p384_ecdsa_verify(
     message: Span[UInt8, ...],
     signature: Span[UInt8, ...]
 ) -> Bool:
-    """Same as verify_digest but hashes the message first with SHA-384"""
+    """Verify a raw P-384 ECDSA signature after hashing the message with SHA-384 (FIPS 186-5,
+    sec. 6.4.2).
+    """
     var digest = sha384_hash(message)
     return p384_ecdsa_verify_digest(public_key, Span[UInt8, ...](digest), signature)
 
@@ -663,7 +674,9 @@ def p384_ecdsa_verify(
 def p384_ecdsa_sign_der(
     private_key: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
-    """Sign with ECDSA then wrap the raw pair in DER"""
+    """Sign the message with P-384/SHA-384 and encode r and s as a DER sequence (RFC 3279, sec.
+    2.2.3).
+    """
     from .ecdsa_der import ecdsa_der_encode
     var raw = List[UInt8](unsafe_uninit_length=P384_SIGNATURE_SIZE)
     if not p384_ecdsa_sign(
@@ -677,7 +690,7 @@ def p384_ecdsa_verify_der(
     public_key: Span[UInt8, ...], message: Span[UInt8, ...],
     signature: Span[UInt8, ...]
 ) -> Bool:
-    """Unwrap DER first then verify the ECDSA signature"""
+    """Decode a DER signature and verify it with P-384/SHA-384 (RFC 3279, sec. 2.2.3)."""
     from .ecdsa_der import ecdsa_der_decode
     var raw = ecdsa_der_decode(signature, P384_SIZE)
     if len(raw) != P384_SIGNATURE_SIZE:
@@ -686,7 +699,9 @@ def p384_ecdsa_verify_der(
 
 
 def p384_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
-    """Generate a fresh keypair just like P-256 but with forty eight byte fields"""
+    """Return (private_key, public_key) with a uniformly sampled scalar in [1, n) (SEC 1 v2.0,
+    sec. 3.2.1).
+    """
     from .random import random_bytes
     while True:
         var private_key = random_bytes(48)

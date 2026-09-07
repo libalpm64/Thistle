@@ -1,4 +1,4 @@
-"""Provides AES hardware acceleration and AES-GCM contexts."""
+"""Hardware AES (FIPS 197) and AES-GCM (NIST SP 800-38D) with reusable key schedules."""
 
 from std.collections import List, InlineArray
 from std.bit import byte_swap
@@ -89,7 +89,9 @@ def _write_gcm_counter(
     j0_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     block_index: Int
 ) -> None:
-    """builds the GCM counter from J0 by bumping the low 32 bits"""
+    """Write J0 with its low 32 bits incremented by block_index + 1 for GCM (NIST SP 800-38D,
+    secs. 6.2 and 7.1).
+    """
     if block_index < 0:
         abort("GCM counter block_index cannot be negative")
     var block_u64 = UInt64(block_index)
@@ -126,7 +128,7 @@ def x86_aes_encrypt_128(
     pt: Pointer[mut=True, UInt8, _, address_space=_],
     round_keys: Pointer[mut=True, UInt32, _, address_space=_]
 ) -> None:
-    """encrypts one block with AES-NI over 10 rounds ending with ENCLAST"""
+    """Encrypt one AES-128 block in place using AES-NI (FIPS 197, sec. 5.1)."""
     var state = _mm_loadu_si128(pt)
     x86_aes_encrypt_128_direct(state, round_keys)
     _mm_storeu_si128(pt, state)
@@ -136,7 +138,7 @@ def x86_aes_encrypt_192(
     pt: Pointer[mut=True, UInt8, _, address_space=_],
     round_keys: Pointer[mut=True, UInt32, _, address_space=_]
 ) -> None:
-    """encrypts one block with AES-NI over 12 rounds"""
+    """Encrypt one AES-192 block in place using AES-NI (FIPS 197, sec. 5.1)."""
     var state = _mm_loadu_si128(pt)
     x86_aes_encrypt_192_direct(state, round_keys)
     _mm_storeu_si128(pt, state)
@@ -146,7 +148,7 @@ def x86_aes_encrypt_256(
     pt: Pointer[mut=True, UInt8, _, address_space=_],
     round_keys: Pointer[mut=True, UInt32, _, address_space=_]
 ) -> None:
-    """encrypts one block with AES-NI over 14 rounds"""
+    """Encrypt one AES-256 block in place using AES-NI (FIPS 197, sec. 5.1)."""
     var state = _mm_loadu_si128(pt)
     x86_aes_encrypt_256_direct(state, round_keys)
     _mm_storeu_si128(pt, state)
@@ -157,7 +159,7 @@ def x86_aes_encrypt_128_direct(
     mut state: SIMD128,
     round_keys: Pointer[mut=True, UInt32, _, address_space=_]
 ) -> None:
-    """xors in the first key then runs 9 AESENC plus a final ENCLAST"""
+    """Encrypt an AES-128 state held in a vector register."""
     var keys = StaticTuple[SIMD128, 11]()
     comptime for i in range(11):
         keys[i] = _load_round_key(i, round_keys)
@@ -173,7 +175,7 @@ def x86_aes_encrypt_192_direct(
     mut state: SIMD128,
     round_keys: Pointer[mut=True, UInt32, _, address_space=_]
 ) -> None:
-    """xors in the first key then runs 11 AESENC plus a final ENCLAST"""
+    """Encrypt an AES-192 state held in a vector register."""
     var keys = StaticTuple[SIMD128, 13]()
     comptime for i in range(13):
         keys[i] = _load_round_key(i, round_keys)
@@ -189,7 +191,7 @@ def x86_aes_encrypt_256_direct(
     mut state: SIMD128,
     round_keys: Pointer[mut=True, UInt32, _, address_space=_]
 ) -> None:
-    """xors in the first key then runs 13 AESENC plus a final ENCLAST"""
+    """Encrypt an AES-256 state held in a vector register."""
     var keys = StaticTuple[SIMD128, 15]()
     comptime for i in range(15):
         keys[i] = _load_round_key(i, round_keys)
@@ -221,7 +223,7 @@ def _arm_load_keys[N: Int](
 def _arm_enc_block[NR: Int](
     x0: SIMD16, keys: InlineArray[SIMD16, NR + 1]
 ) -> SIMD16:
-    """loops AESE and AESMC then finishes with AESE and a final xor"""
+    """Apply ARM AES rounds; omit AESMC in the final round."""
     var x = x0
     comptime for r in range(NR - 1):
         x = _aesmc(_aese(x, keys[r]))
@@ -233,7 +235,7 @@ def arm_aes_encrypt_128(
     pt: Pointer[mut=True, UInt8, _, address_space=_],
     round_keys: Pointer[mut=True, UInt32, _, address_space=_]
 ) -> None:
-    """encrypts one block with ARM crypto over 10 rounds"""
+    """Encrypt one AES-128 block in place using ARM crypto instructions."""
     var keys = _arm_load_keys[11](round_keys)
     var x = pt.unsafe_load[width=16, alignment=1](0)
     pt.unsafe_store[alignment=1](0, _arm_enc_block[10](x, keys))
@@ -243,7 +245,7 @@ def arm_aes_encrypt_192(
     pt: Pointer[mut=True, UInt8, _, address_space=_],
     round_keys: Pointer[mut=True, UInt32, _, address_space=_]
 ) -> None:
-    """encrypts one block with ARM crypto over 12 rounds"""
+    """Encrypt one AES-192 block in place using ARM crypto instructions."""
     var keys = _arm_load_keys[13](round_keys)
     var x = pt.unsafe_load[width=16, alignment=1](0)
     pt.unsafe_store[alignment=1](0, _arm_enc_block[12](x, keys))
@@ -253,7 +255,7 @@ def arm_aes_encrypt_256(
     pt: Pointer[mut=True, UInt8, _, address_space=_],
     round_keys: Pointer[mut=True, UInt32, _, address_space=_]
 ) -> None:
-    """encrypts one block with ARM crypto over 14 rounds"""
+    """Encrypt one AES-256 block in place using ARM crypto instructions."""
     var keys = _arm_load_keys[15](round_keys)
     var x = pt.unsafe_load[width=16, alignment=1](0)
     pt.unsafe_store[alignment=1](0, _arm_enc_block[14](x, keys))
@@ -266,7 +268,7 @@ def _arm_ecb_loop[NR: Int](
     round_keys: Pointer[mut=True, UInt32, _, address_space=_],
     num_blocks: Int
 ) -> None:
-    """encrypts blocks four at a time and runs in linear time"""
+    """Interleave four independent ARM AES states to hide round latency."""
     var keys = _arm_load_keys[NR + 1](round_keys)
     var i = 0
     while i + 4 <= num_blocks:
@@ -304,7 +306,7 @@ def arm_aes_ecb_kernel(
     num_blocks: Int,
     rounds: Int
 ) -> None:
-    """encrypts each block on its own and runs in linear time"""
+    """Encrypt full ECB blocks with ARM AES; no padding is added."""
     _validate_aes_rounds(rounds)
     _validate_aes_block_count(num_blocks)
     if rounds == 10:
@@ -323,7 +325,7 @@ def _arm_cbc_loop[NR: Int](
     num_blocks: Int,
     iv_ptr: Pointer[mut=True, UInt8, _, address_space=_]
 ) -> None:
-    """chains each block with the last ciphertext in order"""
+    """Encrypt CBC blocks in order, retaining each ciphertext as the next chaining value."""
     var keys = _arm_load_keys[NR + 1](round_keys)
     var prev = iv_ptr.unsafe_load[width=16, alignment=1](0)
     var src = input_ptr
@@ -347,7 +349,7 @@ def arm_aes_cbc_kernel(
     iv_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
-    """same as _arm_cbc_loop picking 10 12 or 14 rounds for you"""
+    """Dispatch ARM CBC encryption for 10, 12, or 14 rounds."""
     _validate_aes_rounds(rounds)
     _validate_aes_block_count(num_blocks)
     if rounds == 10:
@@ -368,7 +370,7 @@ def arm_aes_xts_kernel(
     tweak_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
-    """xors each block with its tweak then encrypts while doubling the tweak"""
+    """Encrypt full XTS blocks with ARM AES and advance the tweak."""
     _validate_aes_rounds(rounds)
     _validate_aes_block_count(num_blocks)
     var tweak = tweak_ptr.unsafe_load[width=16, alignment=1](0)
@@ -420,7 +422,7 @@ def _x86_aes_ecb_loop[NR: Int](
     round_keys: Pointer[mut=True, UInt32, _, address_space=_],
     num_blocks: Int
 ) -> None:
-    """encrypts eight blocks at once to hide AESENC latency"""
+    """Interleave eight independent AES blocks to hide AESENC latency."""
     var keys = StaticTuple[SIMD128, NR + 1]()
     comptime for r in range(NR + 1):
         keys[r] = _load_round_key(r, round_keys)
@@ -574,7 +576,7 @@ def aes_encrypt(
     round_keys: Pointer[mut=True, UInt32, _, address_space=_],
     rounds: Int = 10
 ) -> None:
-    """picks AES-NI or ARM crypto when present else falls back to bitslice"""
+    """Select hardware AES from compile-time target features, with a bitsliced fallback."""
     if rounds != 10 and rounds != 12 and rounds != 14:
         abort("AES round count must be 10, 12, or 14")
     comptime if CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["aes"]():
@@ -605,7 +607,9 @@ def aes_gcm_ctr_kernel(
     j0_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     rounds: Int
 ) -> None:
-    """counts up from J0 and picks hardware or bitslice for the job"""
+    """Apply GCTR from inc32(J0) (NIST SP 800-38D, secs. 6.5 and 7.1); authentication is handled
+    separately.
+    """
     if rounds != 10 and rounds != 12 and rounds != 14:
         abort("AES round count must be 10, 12, or 14")
     if num_blocks < 0:
@@ -678,7 +682,7 @@ def _x86_gcm_ctr_loop[NR: Int](
     num_blocks: Int,
     j0_ptr: Pointer[mut=True, UInt8, _, address_space=_]
 ):
-    # mix independent counters together and load keys once
+    # Interleave independent counters so each round key serves the whole batch.
     var keys = StaticTuple[SIMD128, NR + 1]()
     comptime for r in range(NR + 1):
         keys[r] = _load_round_key(r, round_keys)
@@ -893,11 +897,11 @@ def _soft_gcm_ctr_kernel(
 
 @always_inline
 def has_aes_ni() -> Bool:
-    """checks if hardware AES is available"""
+    """Return whether the compilation target enables hardware AES."""
     return has_x86_aes_ni() or has_arm_crypto()
 
 
-# AES-GCM authenticated encryption (NIST SP 800-38D)
+# AES-GCM authenticated encryption (NIST SP 800-38D, sec. 7).
 
 comptime _GCM_MAX_INPUT_BYTES = 68719476704
 
@@ -961,7 +965,7 @@ def _shr64(v: SIMD128) -> SIMD128:
 
 @always_inline("nodebug")
 def _clmul_acc(a: SIMD128, b: SIMD128, mut lo: SIMD128, mut hi: SIMD128):
-    """multiplies with Karatsuba CLMUL and folds the halves into lo and hi"""
+    """XOR an unreduced Karatsuba carryless product into the lo/hi accumulators."""
     var p00 = _clmul64(a[0], b[0])
     var p11 = _clmul64(a[1], b[1])
     var axs = a ^ a.shuffle[1, 0]()
@@ -973,8 +977,10 @@ def _clmul_acc(a: SIMD128, b: SIMD128, mut lo: SIMD128, mut hi: SIMD128):
 
 @always_inline("nodebug")
 def _reduce_vec(lo: SIMD128, hi: SIMD128) -> SIMD128:
-    """folds the 256 bit product down to 128 bits for GHASH"""
-    # 0x87 is the GHASH reduction poly
+    """Reduce a 256-bit carryless product modulo the GHASH polynomial (NIST SP 800-38D, sec.
+    6.3).
+    """
+    # 0x87 encodes the low terms of x^128 + x^7 + x^2 + x + 1.
     var f = _clmul64(hi[1], 0x87)
     var hi2 = hi ^ _shr64(f)
     var lo2 = lo ^ _shl64(f)
@@ -983,7 +989,7 @@ def _reduce_vec(lo: SIMD128, hi: SIMD128) -> SIMD128:
 
 @always_inline("nodebug")
 def _gf_mul_nat(a: SIMD128, b: SIMD128) -> SIMD128:
-    """multiplies in the GHASH field then reduces for the 8 block fast path"""
+    """Multiply and reduce two elements in the GHASH field (NIST SP 800-38D, sec. 6.3)."""
     var lo = SIMD128(0)
     var hi = SIMD128(0)
     _clmul_acc(a, b, lo, hi)
@@ -1240,7 +1246,7 @@ def _gcm_core_keyed(
 
 
 struct AESGCMContext(Copyable, Movable):
-    """holds the AES keys and GHASH table counting up from J0"""
+    """Cache the AES schedule and GHASH powers for repeated operations with one key."""
     var _rk: InlineArray[UInt32, 60]
     var _rounds: Int
     var _gh0: _GHash
@@ -1370,7 +1376,7 @@ def aes_gcm_encrypt(
     key: Span[UInt8, ...], iv: Span[UInt8, ...],
     plaintext: Span[UInt8, ...], aad: Span[UInt8, ...]
 ) raises -> Tuple[List[UInt8], List[UInt8]]:
-    """same as AESGCMContext encrypt but one shot with tag out"""
+    """Encrypt and authenticate, returning (ciphertext, tag) (NIST SP 800-38D, sec. 7.1)."""
     var ctx = AESGCMContext(key)
     return ctx.encrypt(iv, plaintext, aad)
 
@@ -1379,6 +1385,8 @@ def aes_gcm_decrypt(
     key: Span[UInt8, ...], iv: Span[UInt8, ...],
     ciphertext: Span[UInt8, ...], aad: Span[UInt8, ...], tag: Span[UInt8, ...]
 ) raises -> Tuple[List[UInt8], Bool]:
-    """same as AESGCMContext decrypt with a constant time tag check"""
+    """Authenticate and decrypt, returning (plaintext, valid); failure returns empty plaintext
+    (NIST SP 800-38D, sec. 7.2).
+    """
     var ctx = AESGCMContext(key)
     return ctx.decrypt(iv, ciphertext, aad, tag)

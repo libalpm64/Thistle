@@ -1,5 +1,5 @@
-"""
-NIST P-256 / secp256r1 implementation.
+"""P-256 (SEC 2 v2.0, sec. 2.4.2), ECDH (SEC 1 v2.0, sec. 3.3.1), and ECDSA (FIPS 186-5, sec. 6)
+with RFC 6979 nonces.
 """
 
 from .p256_table import P256_W7_TABLE
@@ -21,7 +21,7 @@ comptime _ORDER_N0 = UInt64(0xCCD1C8AAEE00BC4F)
 
 
 def _p() -> U256:
-    """The P-256 field prime with a sparse shape that makes reduction cheap"""
+    """P-256 field prime: 2^256 - 2^224 + 2^192 + 2^96 - 1 (SEC 2 v2.0, sec. 2.4.2)."""
     return U256(
         0xFFFFFFFFFFFFFFFF,
         0x00000000FFFFFFFF,
@@ -76,7 +76,7 @@ def _gy() -> U256:
 
 
 def _sqrt_exp() -> U256:
-    # p leaves remainder three when divided by four
+    # p = 3 mod 4 permits square roots via exponent (p + 1) / 4.
     return U256(
         0x0000000000000000,
         0x0000000040000000,
@@ -86,7 +86,7 @@ def _sqrt_exp() -> U256:
 
 
 def _rr() -> U256:
-    # two to the 512 reduced by the prime
+    # R^2 mod p for Montgomery conversion, with R = 2^256.
     return U256(
         0x0000000000000003,
         0xFFFFFFFBFFFFFFFF,
@@ -96,7 +96,7 @@ def _rr() -> U256:
 
 
 def _one_mont() -> U256:
-    # two to the 256 reduced by the prime
+    # Montgomery encoding of one: R mod p.
     return U256(
         0x0000000000000001,
         0xFFFFFFFF00000000,
@@ -157,8 +157,7 @@ def _mont_final_sub(
 
 @always_inline
 def _mont_mul(a: U256, b: U256) -> U256:
-    """Montgomery multiply that takes the fast shift and add path on this sparse prime"""
-    # Folds the reduction with shifts and adds since N0 is 1 instead of generic CIOS
+    """Multiply in Montgomery form using the P-256 reduction with N0 = 1."""
     return ws_mont_mul[4, _N0](a, b, _p())
 
 
@@ -213,7 +212,7 @@ def _to_be(x: U256, output: Pointer[mut=True, UInt8, _, address_space=_]):
 
 
 struct P256Point(Copyable, ImplicitlyCopyable, Movable):
-    """Affine P-256 point that lives on the short curve with a equals minus three"""
+    """Affine P-256 coordinates with an explicit infinity flag."""
     var x: U256
     var y: U256
     var infinity: Bool
@@ -244,7 +243,7 @@ struct P256Point(Copyable, ImplicitlyCopyable, Movable):
 
 
 struct P256JacobianPoint(Copyable, ImplicitlyCopyable, Movable):
-    """Jacobian P-256 point that postpones division until the very end"""
+    """Jacobian P-256 coordinates: x = X/Z^2 and y = Y/Z^3, with an explicit infinity flag."""
     var x: U256
     var y: U256
     var z: U256
@@ -295,7 +294,6 @@ def _jacobian_infinity() -> P256JacobianPoint:
 def _select_jacobian_ct(
     a: P256JacobianPoint, b: P256JacobianPoint, choice: UInt64
 ) -> P256JacobianPoint:
-    # P-256 Jacobian and generic Jacobian share the same layout in memory
     var ga = JacobianPoint[4](a.x, a.y, a.z, a.infinity)
     var gb = JacobianPoint[4](b.x, b.y, b.z, b.infinity)
     var res = ws_select_jacobian_ct(ga, gb, choice)
@@ -386,9 +384,9 @@ def _booth_recode_w7(value: UInt64) -> UInt64:
 
 @no_inline
 def _scalar_mult_base_jacobian_w7(k: U256) -> P256JacobianPoint:
-    """Fixed base multiply with a seven bit Booth window over sixty four entries
-    Picks behind a mask across thirty seven windows from the global comb table
-    Fixes everything with one shared inversion so adds drop to about a seventh"""
+    """Multiply the generator with 37 signed 7-bit windows. Each window scans all 64
+    precomputed magnitudes under masks; the result stays in Jacobian form.
+    """
     ref table = global_constant[P256_W7_TABLE]()
     var tptr = table.unsafe_ptr()
 
@@ -428,7 +426,9 @@ def _jacobian_add(p: P256JacobianPoint, q: P256JacobianPoint) -> P256JacobianPoi
 
 
 def p256_decode_uncompressed(point: Span[UInt8, ...]) -> P256Point:
-    """Decode a SEC1 point and recover compressed y with one square root"""
+    """Decode and validate a compressed or uncompressed SEC 1 P-256 point (SEC 1 v2.0, sec.
+    2.3.4).
+    """
     if len(point) == 33 and (point[0] == 0x02 or point[0] == 0x03):
         var x = _from_be(
             Span[UInt8, ...](unsafe_ptr=point.unsafe_ptr().unsafe_offset(1), length=32)
@@ -474,7 +474,9 @@ def p256_encode_uncompressed(
 def p256_public_key(
     private_key: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
 ) -> Bool:
-    """Multiply the generator by your secret with the precomputed comb"""
+    """Derive an uncompressed 65-byte public key from a 32-byte private scalar (SEC 1 v2.0, secs.
+    3.2.1 and 2.3.3).
+    """
     if len(private_key) != 32 or len(output) < P256_POINT_SIZE:
         return False
     var d = _from_be(private_key)
@@ -497,7 +499,9 @@ def p256_ecdh(
     public_key: Span[UInt8, ...],
     output: Span[mut=True, UInt8, ...]
 ) -> Bool:
-    """Multiply a peer point by your secret and keep the x coordinate as the secret"""
+    """Write the raw 32-byte ECDH x coordinate after validating the private scalar and peer point
+    (SEC 1 v2.0, sec. 3.3.1).
+    """
     if len(private_key) != 32 or len(output) < P256_SIZE:
         return False
     var d = _from_be(private_key)
@@ -620,7 +624,9 @@ def p256_ecdsa_sign_digest(
     digest: Span[UInt8, ...],
     signature: Span[mut=True, UInt8, ...]
 ) -> Bool:
-    """ECDSA signing that picks a deterministic nonce and builds r and s the usual way"""
+    """Sign a 32-byte digest as a 64-byte raw r || s signature (FIPS 186-5, sec. 6.4.1); derive
+    the nonce using RFC 6979 sec. 3.2.
+    """
     if len(private_key) != 32 or len(digest) != 32
         or len(signature) < P256_SIGNATURE_SIZE:
         return False
@@ -666,7 +672,9 @@ def p256_ecdsa_sign(
     message: Span[UInt8, ...],
     signature: Span[mut=True, UInt8, ...]
 ) -> Bool:
-    """Same as sign_digest but hashes the message first with SHA-256"""
+    """Hash the message with SHA-256 and write a 64-byte raw ECDSA signature (FIPS 186-5, sec.
+    6.4.1; RFC 6979, sec. 3.2).
+    """
     if len(signature) < P256_SIGNATURE_SIZE:
         return False
     var digest = sha256_hash(message)
@@ -689,7 +697,7 @@ def p256_ecdsa_verify_digest(
     digest: Span[UInt8, ...],
     signature: Span[UInt8, ...]
 ) -> Bool:
-    """ECDSA verify that rebuilds the point from u1 and u2 and checks it matches r"""
+    """Verify a raw P-256 ECDSA signature over a 32-byte digest (FIPS 186-5, sec. 6.4.2)."""
     if len(digest) != 32 or len(signature) != 64:
         return False
     var q = p256_decode_uncompressed(public_key)
@@ -716,7 +724,9 @@ def p256_ecdsa_verify(
     message: Span[UInt8, ...],
     signature: Span[UInt8, ...]
 ) -> Bool:
-    """Same as verify_digest but hashes the message first with SHA-256"""
+    """Verify a raw P-256 ECDSA signature after hashing the message with SHA-256 (FIPS 186-5,
+    sec. 6.4.2).
+    """
     var digest = sha256_hash(message)
     return p256_ecdsa_verify_digest(public_key, Span[UInt8, ...](digest), signature)
 
@@ -724,7 +734,9 @@ def p256_ecdsa_verify(
 def p256_ecdsa_sign_der(
     private_key: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
-    """Sign with ECDSA then wrap the raw pair in DER"""
+    """Sign the message with P-256/SHA-256 and encode r and s as a DER sequence (RFC 3279, sec.
+    2.2.3).
+    """
     from .ecdsa_der import ecdsa_der_encode
     var raw = List[UInt8](unsafe_uninit_length=P256_SIGNATURE_SIZE)
     if not p256_ecdsa_sign(
@@ -738,7 +750,7 @@ def p256_ecdsa_verify_der(
     public_key: Span[UInt8, ...], message: Span[UInt8, ...],
     signature: Span[UInt8, ...]
 ) -> Bool:
-    """Unwrap DER first then verify the ECDSA signature"""
+    """Decode a DER signature and verify it with P-256/SHA-256 (RFC 3279, sec. 2.2.3)."""
     from .ecdsa_der import ecdsa_der_decode
     var raw = ecdsa_der_decode(signature, P256_SIZE)
     if len(raw) != P256_SIGNATURE_SIZE:
@@ -747,7 +759,9 @@ def p256_ecdsa_verify_der(
 
 
 def p256_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
-    """Pick a random secret in range and multiply the generator once"""
+    """Return (private_key, public_key) with a uniformly sampled scalar in [1, n) (SEC 1 v2.0,
+    sec. 3.2.1).
+    """
     from .random import random_bytes
     while True:
         var private_key = random_bytes(32)

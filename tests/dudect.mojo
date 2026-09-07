@@ -1,5 +1,5 @@
-"""
-Dudect test (Reparaz/Balasch/Verbauwhede).
+"""Dudect-style timing checks using the fixed-versus-random method of Reparaz, Balasch, and
+Verbauwhede.
 """
 
 from std.time import perf_counter_ns
@@ -148,7 +148,7 @@ def _classes(n: Int, mut rng: Rng) -> List[Int]:
         cls.append(Int(rng.next() & 1))
     return cls^
 
-# This is intentionally leaked
+# Deliberate timing leak used as a positive control for the detector.
 
 
 @no_inline
@@ -319,7 +319,7 @@ def _run_hash(which: Int, name: String, mut rng: Rng) raises -> Bool:
 
 
 def run_hmac(mut rng: Rng) raises -> Bool:
-    # HMAC-SHA256, key fixed vs random
+    # Compare fixed and random HMAC-SHA-256 keys.
     var cls = _classes(N_FAST, rng)
     var inp = _fast_inputs(cls, 32, rng)
     var data = List[UInt8]()
@@ -368,7 +368,7 @@ def run_hmac_sha384(mut rng: Rng) -> Bool:
 
 
 def _valid_scalar(nbytes: Int, mut rng: Rng, fixed: Bool) -> List[UInt8]:
-    # nonzero and < group order, top byte forced into [1,0x7f]
+    # Force the top byte into [1, 0x7f] so the scalar is nonzero and below the group order.
     var s = List[UInt8]()
     for _ in range(nbytes):
         s.append(0)
@@ -383,7 +383,7 @@ def _valid_scalar(nbytes: Int, mut rng: Rng, fixed: Bool) -> List[UInt8]:
 
 
 def run_x25519(mut rng: Rng) raises -> Bool:
-    # secret scalar fixed / random, fixed base point
+    # Compare fixed and random secret scalars with the same base point.
     var base = List[UInt8]()
     base.append(9)
     for _ in range(31):
@@ -416,7 +416,7 @@ def run_x25519(mut rng: Rng) raises -> Bool:
 
 
 def run_ed25519(mut rng: Rng) raises -> Bool:
-    # signing key fixed / random
+    # Compare fixed and random signing keys.
     var msg = List[UInt8]()
     for i in range(32):
         msg.append(UInt8(i))

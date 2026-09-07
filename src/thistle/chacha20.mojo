@@ -1,10 +1,10 @@
-"""Implements the ChaCha20 stream cipher specified by RFC 7539."""
+"""IETF ChaCha20 with a 96-bit nonce and 32-bit block counter (RFC 8439)."""
 
 from std.memory import bitcast
 from std.memory.unsafe_pointer import Pointer
 from std.bit import rotate_bits_left
 
-# sigma words for expand 32-byte k kept little endian
+# Little-endian words of "expand 32-byte k" (RFC 8439, sec. 2.3).
 comptime CHACHA_CONSTANTS = SIMD[DType.uint32, 4](
     0x61707865, 0x3320646E, 0x79622D32, 0x6B206574
 )
@@ -58,7 +58,7 @@ def simd_quarter_round(
     d: SIMD[DType.uint32, 4]
 ) -> Tuple[SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4]
 ]:
-    """one ChaCha quarter round doing adds xors and rotates by 16 12 8 and 7"""
+    """Apply a ChaCha quarter round with rotations of 16, 12, 8, and 7 bits (RFC 8439, sec. 2.1)."""
     var aa = a
     var bb = b
     var cc = c
@@ -125,7 +125,9 @@ def simd_double_round(
     row3: SIMD[DType.uint32, 4]
 ) -> Tuple[SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4], SIMD[DType.uint32, 4]
 ]:
-    """does a column round plus a diagonal round which is 2 of the 20 total"""
+    """Apply one column round and one diagonal round: two of the 20 ChaCha rounds (RFC 8439, sec.
+    2.3).
+    """
     var rr0 = row0
     var rr1 = row1
     var rr2 = row2
@@ -473,7 +475,9 @@ def chacha20_block_core(
     counter: UInt32,
     nonce: SIMD[DType.uint32, 4]
 ) -> SIMD[DType.uint32, 16]:
-    """builds one ChaCha20 block with 20 rounds then adds the input back"""
+    """Produce one ChaCha20 block with 20 rounds and input-state feedforward (RFC 8439, sec.
+    2.3).
+    """
     var row0 = CHACHA_CONSTANTS
     var row1 = SIMD[DType.uint32, 4](key[0], key[1], key[2], key[3])
     var row2 = SIMD[DType.uint32, 4](key[4], key[5], key[6], key[7])
@@ -559,7 +563,9 @@ def _chacha20_nonce_words(nonce: Span[UInt8, ...]) raises -> SIMD[DType.uint32, 
 def chacha20_block(
     key: SIMD[DType.uint8, 32], counter: UInt32, nonce: Span[UInt8, ...]
 ) raises -> SIMD[DType.uint8, 64]:
-    """makes 64 bytes of keystream with 20 ARX rounds for the given counter"""
+    """Return 64 keystream bytes for the supplied key, nonce, and block counter (RFC 8439, sec.
+    2.3).
+    """
     var key_words = bitcast[DType.uint32, 8](key)
     var nonce_words = _chacha20_nonce_words(nonce)
     var state = chacha20_block_core(key_words, counter, nonce_words)
@@ -579,7 +585,9 @@ def _xor_block64(
 
 
 struct ChaCha20:
-    """streaming ChaCha20 crunching 12 or 8 or 4 blocks at once then scalar for the tail"""
+    """Streaming ChaCha20 (RFC 8439, sec. 2.4), retaining unused keystream bytes between calls
+    and enforcing the 32-bit counter limit.
+    """
     var key: SIMD[DType.uint32, 8]
     var nonce: SIMD[DType.uint32, 4]
     var counter: UInt32

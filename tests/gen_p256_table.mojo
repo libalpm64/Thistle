@@ -1,11 +1,10 @@
-# This file is to test table generation ignore this file it's not useful
-# Mostly for auditing purposes.
+# Generate the radix-16 P-256 comb table; this does not generate the W7 table.
 from thistle.p256 import U256, P256Point, _scalar_mult, _to_mont
 
 
 def main() raises:
-    # T[j][d] = d * 16^(2j) * G, Montgomery-form affine, j in 0..31, d in 1..15
-    # flat layout: ((j * 15) + (d - 1)) * 8 + limb; x limbs 0..3, y limbs 4..7
+    # T[j][d] = d * 16^(2*j) * G in Montgomery affine form; j = 0..31, d = 1..15.
+    # Entry offset: (j * 15 + d - 1) * 8; x occupies limbs 0..3, y occupies limbs 4..7.
     var values = List[UInt64](capacity=4096)
     for j in range(32):
         for d in range(1, 16):

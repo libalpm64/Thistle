@@ -1,6 +1,4 @@
-"""
-This test file is for testing the Wycheproof P-384 ECDH test vectors.
-"""
+"""P-384 ECDH against Wycheproof vectors, with test-only ASN.1 point extraction."""
 from std.collections import List
 from std.python import Python
 from thistle.p384 import p384_ecdh
@@ -21,15 +19,12 @@ def hex_to_bytes(s: String) -> List[UInt8]:
 
 
 def extract_p384_public_key(public_der: List[UInt8]) -> List[UInt8]:
-    # RFC 5480 section 2.1 identifies EC public keys with id-ecPublicKey plus
-    # a namedCurve OID. SEC 2 v2.0 appendix A assigns secp384r1:
-    # 1.3.132.0.34, DER-encoded as 06 05 2B 81 04 00 22.
+    # Require the secp384r1 OID (SEC 2 appendix A; RFC 5480 namedCurve):
+    # 1.3.132.0.34, encoded as 06 05 2B 81 04 00 22.
     #
-    # RFC 5480 section 2.2 stores the SEC 1 ECPoint in subjectPublicKey as a
-    # BIT STRING. Wycheproof includes malformed-but-acceptable ASN.1 wrappers;
-    # this test harness deliberately extracts only the final SEC 1 point when
-    # the P-384 OID is present. The production p384_ecdh API receives raw SEC 1
-    # point bytes and does not parse ASN.1.
+    # RFC 5480 places the SEC 1 point in a BIT STRING. This harness extracts that
+    # point even from malformed ASN.1 wrappers accepted by some Wycheproof cases.
+    # Production p384_ecdh receives raw SEC 1 bytes and does not parse ASN.1.
     var has_p384_oid = False
     for i in range(len(public_der) - 6):
         if (
@@ -80,8 +75,7 @@ def extract_trailing_sec1_p384_public_key(
 
 
 def normalize_p384_private_key(var private_key: List[UInt8]) -> List[UInt8]:
-    # DER INTEGER values may include a leading 00 octet to keep the integer
-    # positive. SEC 1 scalar input to p384_ecdh is the fixed 48-octet value.
+    # DER may prefix a positive INTEGER with 00; strip it to obtain the 48-byte scalar.
     if len(private_key) == 48:
         return private_key^
     if len(private_key) == 49 and private_key[0] == 0:
@@ -121,9 +115,8 @@ def run_case(
     var public_der = hex_to_bytes(public_hex)
     var public_key = extract_p384_public_key(public_der)
     if (is_valid or is_acceptable) and len(public_key) == 0:
-        # Several Wycheproof "acceptable" cases intentionally corrupt the
-        # ASN.1 wrapper but leave a recoverable SEC 1 point. This fallback is
-        # test-harness-only; the production p384_ecdh API accepts raw SEC 1.
+        # Test-only fallback for Wycheproof cases with damaged ASN.1 and a recoverable point.
+        # Production p384_ecdh accepts raw SEC 1 points.
         public_key = extract_trailing_sec1_p384_public_key(public_der)
     var expected = hex_to_bytes(shared_hex)
     var actual = StackInlineArray[UInt8, 48](fill=0)

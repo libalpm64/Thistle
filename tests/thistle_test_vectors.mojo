@@ -308,7 +308,7 @@ def test_camellia(data: PythonObject, py: PythonObject) raises -> TestResult:
             failed += 1
             failures.append("Camellia " + name + " bulk kernel mismatch")
 
-        # CTR vs single-block keystream reference, plus round-trip
+        # Check CTR against single-block keystream generation and a round-trip.
         var ctr_nb = 41
         var nonce = List[UInt8](capacity=16)
         for j in range(16):
@@ -357,7 +357,7 @@ def test_camellia(data: PythonObject, py: PythonObject) raises -> TestResult:
             failed += 1
             failures.append("Camellia " + name + " CTR mismatch")
 
-        # CBC chaining vs single-block reference, plus in-place round-trip
+        # Check CBC chaining against single-block encryption and in-place round-trips.
         var cbc_nb = 40
         var cbc_msg = List[UInt8](capacity=cbc_nb * 16)
         for i2 in range(cbc_nb * 16):

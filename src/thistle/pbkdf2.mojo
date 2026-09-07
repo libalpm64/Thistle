@@ -1,4 +1,4 @@
-"""Implements PBKDF2 and HMAC-SHA-2 from RFC 8018."""
+"""PBKDF2 (RFC 8018, sec. 5.2) and HMAC (RFC 2104) with SHA-2 (FIPS 180-4)."""
 from std.collections import List
 from std.memory import unsafe_memcpy, Pointer
 from std.builtin.simd import SIMD
@@ -23,7 +23,7 @@ comptime PBKDF2_SHA512_MAX_DKLEN: Int = 0xFFFFFFFF * 64
 
 @always_inline
 def _secure_zero(ptr: Pointer[mut=True, UInt8, _, address_space=_], count: Int):
-    # Volatile stores prevent DCE of password/ipad wiping.
+    # Volatile stores preserve password and pad wiping against dead-store elimination.
     for i in range(count):
         ptr.unsafe_store[volatile=True](i, UInt8(0))
 
@@ -31,14 +31,14 @@ def _secure_zero(ptr: Pointer[mut=True, UInt8, _, address_space=_], count: Int):
 @always_inline
 def _xor_block[WIDTH: Int](dst: Pointer[mut=True, UInt8, _, address_space=_], src: Pointer[mut=True, UInt8, _, address_space=_]
 ):
-    # Constant-time XOR used to accumulate PBKDF2 U-values into T.
+    # XOR each U value into the PBKDF2 block accumulator without early exits.
     var d = dst.unsafe_bitcast[UInt64]().unsafe_load[width=WIDTH, alignment=1]()
     var s = src.unsafe_bitcast[UInt64]().unsafe_load[width=WIDTH, alignment=1]()
     dst.unsafe_bitcast[UInt64]().unsafe_store[width=WIDTH, alignment=1](0, d ^ s)
 
 
 trait HMACer(Movable):
-    """HMAC backend that hashes with the inner pad then the outer pad"""
+    """HMAC backend for the shared PBKDF2 loop, including a salt-and-counter first round."""
     comptime BLOCK: Int
     comptime HASH: Int
     def hmac(mut self, data: Span[UInt8, ...]): ...
@@ -49,8 +49,9 @@ trait HMACer(Movable):
 
 @always_inline
 def _pbkdf2_derive[H: HMACer](mut h: H, salt: Span[UInt8, ...], iterations: Int, dklen: Int) raises -> List[UInt8]:
-    """Runs PBKDF2 by hashing the salt with a counter then xoring all the rounds"""
-    # HMAC loop hashes password with salt followed by counter then chains the result
+    """Derive blocks T_i = U_1 XOR ... XOR U_c, where U_1 = PRF(P, S || INT32_BE(i)) and U_j =
+    PRF(P, U_{j-1}) (RFC 8018, sec. 5.2).
+    """
     if iterations < 1:
         raise Error("PBKDF2 iterations must be positive")
     comptime hLen = H.HASH
@@ -62,12 +63,9 @@ def _pbkdf2_derive[H: HMACer](mut h: H, salt: Span[UInt8, ...], iterations: Int,
     var derived_key = List[UInt8](capacity=dklen)
     var t_block = InlineArray[UInt8, 64](fill=0)
     var input_block = InlineArray[UInt8, 64](fill=0)
-    # Splits the output into hash sized blocks and derives each one
     for block_idx in range(1, num_blocks + 1):
-        # First round hashes password with salt followed by block counter
         h.hmac_with_counter(salt, UInt32(block_idx))
         unsafe_memcpy(dest=t_block.unsafe_ptr(), src=h.u_block_ptr(), count=hLen)
-        # HMAC iteration hashes the last block then xors it into the accumulator
         for _ in range(1, iterations):
             unsafe_memcpy(dest=input_block.unsafe_ptr(), src=h.u_block_ptr(), count=hLen)
             h._hmac_fixed_unchecked(
@@ -87,7 +85,7 @@ def _pbkdf2_derive[H: HMACer](mut h: H, salt: Span[UInt8, ...], iterations: Int,
 
 
 struct PBKDF2SHA256(HMACer):
-    """Derives a key with PBKDF2 using HMAC SHA256 under the hood"""
+    """Cache HMAC-SHA-256 pad states for PBKDF2 derivations with one password (RFC 2104, sec. 4)."""
     comptime BLOCK = 64
     comptime HASH = 32
     var ipad: StackBuffer[UInt8, 64]
@@ -141,8 +139,9 @@ struct PBKDF2SHA256(HMACer):
 
     @always_inline
     def hmac(mut self, data: Span[UInt8, ...]):
-        """Computes HMAC by hashing the inner pad plus the message then the outer pad"""
-        # Hashes inner pad with data then outer pad with the result
+        """Compute HMAC-SHA-256 from copies of the cached inner and outer states (RFC 2104, sec.
+        2).
+        """
         self.inner_ctx.reset(self.inner_state)
         self.inner_ctx.count = 512
         sha256_update(self.inner_ctx, data)
@@ -155,7 +154,7 @@ struct PBKDF2SHA256(HMACer):
 
     @always_inline
     def _hmac_fixed_unchecked(mut self, data: Span[UInt8, ...]):
-        # Internal PBKDF2 path; data must contain exactly 32 bytes.
+        # Unchecked PBKDF2 round: data must contain exactly 32 bytes.
         self.inner_ctx.state = self.inner_state
         self.inner_ctx.count = 512
         for i in range(32):
@@ -172,8 +171,9 @@ struct PBKDF2SHA256(HMACer):
 
     @always_inline
     def hmac_with_counter(mut self, data: Span[UInt8, ...], counter: UInt32):
-        """Hashes the salt plus the block counter for the first PBKDF2 round"""
-        # Hashes password with salt followed by counter
+        """Compute U_1 from the salt followed by a 32-bit big-endian block counter (RFC 8018,
+        sec. 5.2).
+        """
         self.counter_bytes[0] = UInt8((counter >> 24) & 0xFF)
         self.counter_bytes[1] = UInt8((counter >> 16) & 0xFF)
         self.counter_bytes[2] = UInt8((counter >> 8) & 0xFF)
@@ -192,14 +192,16 @@ struct PBKDF2SHA256(HMACer):
 
     @always_inline
     def derive(mut self, salt: Span[UInt8, ...], iterations: Int, dklen: Int) raises -> List[UInt8]:
-        """Derives a key by running the shared PBKDF2 loop"""
+        """Derive dklen bytes using the cached password state and the requested iteration
+        count.
+        """
         return _pbkdf2_derive(self, salt, iterations, dklen)
 
 
 def pbkdf2_hmac_sha256(
     password: Span[UInt8, ...], salt: Span[UInt8, ...], iterations: Int, dkLen: Int
 ) raises -> List[UInt8]:
-    """Derives a key with PBKDF2 using HMAC SHA256"""
+    """Derive dkLen bytes with PBKDF2-HMAC-SHA-256 (RFC 8018, sec. 5.2)."""
     if iterations < 1:
         raise Error("PBKDF2 iterations must be at least 1")
     if dkLen < 1:
@@ -211,7 +213,7 @@ def pbkdf2_hmac_sha256(
 
 
 struct PBKDF2SHA512(HMACer):
-    """Derives a key with PBKDF2 using HMAC SHA512 under the hood"""
+    """Cache HMAC-SHA-512 pad states for PBKDF2 derivations with one password (RFC 2104, sec. 4)."""
     comptime BLOCK = 128
     comptime HASH = 64
     var ipad: StackBuffer[UInt8, 128]
@@ -265,8 +267,9 @@ struct PBKDF2SHA512(HMACer):
 
     @always_inline
     def hmac(mut self, data: Span[UInt8, ...]):
-        """Computes HMAC the same way but with larger SHA512 blocks"""
-        # Hashes inner pad with data then outer pad with the result
+        """Compute HMAC-SHA-512 from copies of the cached inner and outer states (RFC 2104, sec.
+        2).
+        """
         self.inner_ctx.reset(self.inner_state)
         self.inner_ctx.count_low = 1024
         sha512_update(self.inner_ctx, data)
@@ -279,7 +282,7 @@ struct PBKDF2SHA512(HMACer):
 
     @always_inline
     def _hmac_fixed_unchecked(mut self, data: Span[UInt8, ...]):
-        # Internal PBKDF2 path; data must contain exactly 64 bytes.
+        # Unchecked PBKDF2 round: data must contain exactly 64 bytes.
         self.inner_ctx.state = self.inner_state
         self.inner_ctx.count_high = 0
         self.inner_ctx.count_low = 1024
@@ -298,8 +301,9 @@ struct PBKDF2SHA512(HMACer):
 
     @always_inline
     def hmac_with_counter(mut self, data: Span[UInt8, ...], counter: UInt32):
-        """Hashes the salt plus the counter the same way but with larger blocks"""
-        # Hashes password with salt followed by counter
+        """Compute U_1 from the salt followed by a 32-bit big-endian block counter (RFC 8018,
+        sec. 5.2).
+        """
         self.counter_bytes[0] = UInt8((counter >> 24) & 0xFF)
         self.counter_bytes[1] = UInt8((counter >> 16) & 0xFF)
         self.counter_bytes[2] = UInt8((counter >> 8) & 0xFF)
@@ -318,14 +322,16 @@ struct PBKDF2SHA512(HMACer):
 
     @always_inline
     def derive(mut self, salt: Span[UInt8, ...], iterations: Int, dklen: Int) raises -> List[UInt8]:
-        """Derives a key by running the shared PBKDF2 loop"""
+        """Derive dklen bytes using the cached password state and the requested iteration
+        count.
+        """
         return _pbkdf2_derive(self, salt, iterations, dklen)
 
 
 def pbkdf2_hmac_sha512(
     password: Span[UInt8, ...], salt: Span[UInt8, ...], iterations: Int, dkLen: Int
 ) raises -> List[UInt8]:
-    """Derives a key with PBKDF2 using HMAC SHA512"""
+    """Derive dkLen bytes with PBKDF2-HMAC-SHA-512 (RFC 8018, sec. 5.2)."""
     if iterations < 1:
         raise Error("PBKDF2 iterations must be at least 1")
     if dkLen < 1:
@@ -337,13 +343,15 @@ def pbkdf2_hmac_sha512(
 
 
 trait RFC6979HMAC(Movable):
-    """HMAC backend used for deterministic nonce generation"""
+    """HMAC backend for deterministic nonce generation (RFC 6979, sec. 3.2)."""
     def __init__(out self, key: Span[UInt8, ...]): ...
     def hmac_into(mut self, data: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]): ...
 
 
 struct HMACSHA256State(RFC6979HMAC):
-    """Computes HMAC SHA256 by hashing the pads with the message"""
+    """Cache keyed SHA-256 inner and outer states for repeated HMAC operations (RFC 2104, sec.
+    4).
+    """
     var inner_state: SIMD[DType.uint32, 8]
     var outer_state: SIMD[DType.uint32, 8]
 
@@ -382,8 +390,7 @@ struct HMACSHA256State(RFC6979HMAC):
 
     @always_inline
     def hmac_into(mut self, data: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]):
-        """Computes HMAC by hashing the pads with the message"""
-        # Hashes inner pad with data then outer pad with the digest
+        """Write a 32-byte HMAC-SHA-256 tag without consuming the cached keyed states."""
         var inner = SHA256Context(self.inner_state)
         inner.count = 512
         sha256_update(inner, data)
@@ -397,7 +404,9 @@ struct HMACSHA256State(RFC6979HMAC):
 
 
 struct HMACSHA384State(RFC6979HMAC):
-    """Computes truncated HMAC SHA384 by hashing the pads with the message"""
+    """Cache keyed SHA-384 inner and outer states for repeated HMAC operations (RFC 2104, sec.
+    4).
+    """
     var inner_state: SIMD[DType.uint64, 8]
     var outer_state: SIMD[DType.uint64, 8]
 
@@ -436,8 +445,7 @@ struct HMACSHA384State(RFC6979HMAC):
 
     @always_inline
     def hmac_into(mut self, data: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]):
-        """Computes HMAC the same way but truncated to 48 bytes"""
-        # Hashes inner pad with data then outer pad with the first half
+        """Write a 48-byte HMAC-SHA-384 tag without consuming the cached keyed states."""
         var inner = SHA512Context(self.inner_state)
         inner.count_low = 1024
         var digest = StackBuffer[UInt8, 64](fill=0)
@@ -453,8 +461,7 @@ struct HMACSHA384State(RFC6979HMAC):
 
 
 def hmac_sha256(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
-    """Computes HMAC SHA256 for the given key and message"""
-    # Inner and outer pads are already keyed so just hash
+    """Return the 32-byte HMAC-SHA-256 tag for key and data (RFC 2104, sec. 2)."""
     var ctx = PBKDF2SHA256(key)
     ctx.hmac(data)
     var result = List[UInt8](capacity=32)
@@ -464,8 +471,7 @@ def hmac_sha256(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
 
 
 def hmac_sha512(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
-    """Computes HMAC SHA512 for the given key and message"""
-    # Inner and outer pads are already keyed so just hash
+    """Return the 64-byte HMAC-SHA-512 tag for key and data (RFC 2104, sec. 2)."""
     var ctx = PBKDF2SHA512(key)
     ctx.hmac(data)
     var result = List[UInt8](capacity=64)
@@ -475,8 +481,7 @@ def hmac_sha512(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
 
 
 def hmac_sha384(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
-    """Computes truncated HMAC SHA384 for the given key and message"""
-    # Hashes inner pad with data then outer pad with the result
+    """Return the 48-byte HMAC-SHA-384 tag for key and data (RFC 2104, sec. 2)."""
     var k = StackBuffer[UInt8, 128](fill=0)
     if len(key) > 128:
         var kh = sha384_hash(key)

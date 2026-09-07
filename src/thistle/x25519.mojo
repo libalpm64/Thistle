@@ -1,4 +1,4 @@
-"""X25519 key agreement you can call directly"""
+"""X25519 key agreement (RFC 7748, secs. 5 and 6.1), with raw and all-zero-checking interfaces."""
 
 from .curve25519 import FieldElement51
 from .utils import StackInlineArray
@@ -8,7 +8,7 @@ from std.collections import List
 
 @always_inline
 def _cswap_fe(swap: UInt64, mut a: FieldElement51, mut b: FieldElement51):
-    """Swap two field elements behind a mask so timing stays flat"""
+    """Swap field elements by XOR-masking each limb."""
     var mask = UInt64(0) - swap
     comptime for i in range(5):
         var dummy = mask & (a.limbs[i] ^ b.limbs[i])
@@ -34,9 +34,9 @@ def x25519(
     point: Span[UInt8, ...],
     output: Span[mut=True, UInt8, ...]
 ) raises:
-    """Walk the Montgomery ladder for two hundred fifty five swaps with clamping for the subgroup
-    Clamping clears the low bits and sets a high one so timing stays flat while DA and CB cross each step
-    Push the curve with 121665 which is A minus two over four when A is 486662"""
+    """Compute X25519 with a clamped 32-byte scalar and 255-step Montgomery ladder (RFC 7748,
+    sec. 5). This raw interface does not reject an all-zero result.
+    """
     if len(scalar_in) != 32:
         raise Error("X25519 scalar must be 32 bytes")
     if len(point) != 32:
@@ -46,13 +46,13 @@ def x25519(
     var scalar = StackInlineArray[UInt8, 32](fill=0)
     for i in range(32):
         scalar[i] = scalar_in[i]
-    # Clamp away the low and top bits and set the second top bit for safe timing
+    # Clamp scalar bits: clear 0, 1, 2, and 255; set 254 (RFC 7748, sec. 5).
     scalar[0] &= 248
     scalar[31] &= 127
     scalar[31] |= 64
 
     var u = FieldElement51.from_bytes_span(point)
-    # Ignore the top input bit the way the RFC asks
+    # Ignore bit 255 of the encoded u coordinate (RFC 7748, sec. 5).
     u.limbs[4] &= (UInt64(1) << UInt64(51)) - UInt64(1)
 
     var x_1 = u
@@ -81,7 +81,7 @@ def x25519(
         x_3 = (DA + CB).square()
         z_3 = x_1 * (DA - CB).square()
         x_2 = AA * BB
-        # 121665 is A minus two over four with A at 486662 for the Montgomery shape
+        # a24 = (A - 2) / 4 = 121665 for Curve25519, where A = 486662 (RFC 7748, sec. 5).
         z_2 = E * (AA + E.mul_u32(121665))
         
     _cswap_pair(swap, x_2, x_3, z_2, z_3)
@@ -98,7 +98,7 @@ def x25519_checked(
     point: Span[UInt8, ...],
     output: Span[mut=True, UInt8, ...]
 ) raises:
-    """Run x25519 then reject the all zero low order result"""
+    """Compute X25519 and reject an all-zero shared secret (RFC 7748, sec. 6.1)."""
     x25519(scalar_in, point, output)
     var out_ptr = output.unsafe_ptr()
     var zero_diff: UInt8 = 0
@@ -123,7 +123,9 @@ def x25519_public_key(
 
 
 def x25519_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
-    """Make thirty two random bytes then multiply the base point nine"""
+    """Return (private_key, public_key), deriving the public key from base point u = 9 (RFC 7748,
+    sec. 6.1).
+    """
     var private_key = random_bytes(32)
     var public_key = List[UInt8](unsafe_uninit_length=32)
     x25519_public_key(

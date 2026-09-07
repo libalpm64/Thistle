@@ -1,5 +1,4 @@
-# This file is to test table generation ignore this file it's not useful
-# Mostly for auditing purposes.
+# Generate the Ed25519 base-point comb table for src/thistle/ed25519_table.mojo.
 from thistle.ed25519 import (
     EdwardsPoint,
     edwards_add,

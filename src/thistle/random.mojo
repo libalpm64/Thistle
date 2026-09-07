@@ -7,8 +7,8 @@ from std.sys import CompilationTarget, inlined_assembly
 
 @always_inline
 def _getrandom_linux_x86(buf: Pointer[mut=True, UInt8, _, address_space=_], length: Int) -> Int:
-    # Runs getrandom on linux x86 with syscall 318 and no flags
-    # rax holds the syscall number going in and the result coming out
+    # Linux x86-64 getrandom: syscall 318, flags = 0.
+    # rax supplies the syscall number and receives the byte count or negative errno.
     return Int(
         inlined_assembly[
             "syscall",
@@ -21,8 +21,8 @@ def _getrandom_linux_x86(buf: Pointer[mut=True, UInt8, _, address_space=_], leng
 
 @always_inline
 def _getrandom_linux_arm(buf: Pointer[mut=True, UInt8, _, address_space=_], length: Int) -> Int:
-    # Runs getrandom on linux arm with syscall 278 and no flags
-    # inputs go via scratch registers to avoid asm constraint conflicts
+    # Linux AArch64 getrandom: syscall 278, flags = 0.
+    # Stage inputs in scratch registers to avoid inline-assembly constraint conflicts.
     return Int(
         inlined_assembly[
             """
@@ -41,8 +41,8 @@ def _getrandom_linux_arm(buf: Pointer[mut=True, UInt8, _, address_space=_], leng
 
 @always_inline
 def _getentropy_macos_arm(buf: Pointer[mut=True, UInt8, _, address_space=_], length: Int) -> Int:
-    # Runs getentropy on mac arm with syscall 500
-    # x16 holds the number and x0 x1 hold buffer and size
+    # Darwin AArch64 getentropy: syscall 500.
+    # x16 supplies the syscall number; x0/x1 supply the buffer and length.
     # Errors set carry and return errno in x0; convert that to -errno.
     # getentropy returns 0 on success and accepts at most 256 bytes per call.
     return Int(
@@ -108,7 +108,7 @@ def _fill_macos_arm(buf: Pointer[mut=True, UInt8, _, address_space=_], length: I
 
 
 def random_fill(buf: Span[mut=True, UInt8, ...]) raises:
-    """fills a span from OS entropy picking the right syscall at compile time"""
+    """Fill a span from OS entropy, retrying interruptions and propagating other failures."""
     var length = len(buf)
     if length == 0:
         return
@@ -128,7 +128,7 @@ def random_fill(buf: Span[mut=True, UInt8, ...]) raises:
 
 
 def random_bytes(n: Int) raises -> List[UInt8]:
-    """grabs n random OS bytes and returns them as a List"""
+    """Return n bytes from OS entropy; n must be nonnegative."""
     if n < 0:
         raise Error("random_bytes length must be non-negative")
     var result = List[UInt8](length=n, fill=0)

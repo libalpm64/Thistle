@@ -1,4 +1,4 @@
-"""Ed25519 signing and verification you can call directly"""
+"""Ed25519 signing and strict signature verification (RFC 8032, sec. 5.1)."""
 from std.builtin.globals import global_constant
 from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
@@ -64,8 +64,9 @@ comptime FIELD_P_BYTES = SIMD[DType.uint8, 32](
 
 @always_inline
 def _s_lt_l(s: Span[UInt8, ...]) -> Bool:
-    """Check that S sits below L so nobody can slip in S plus a multiple of L"""
-    # Check S sits below L so a sneaky plus multiple of L cannot slip through
+    """Require S < L to reject signatures made malleable by adding multiples of L (RFC 8032,
+    secs. 5.1.7 and 8.4).
+    """
     for i in range(31, -1, -1):
         var li = L_BYTES[i]
         if s[i] < li:
@@ -77,7 +78,7 @@ def _s_lt_l(s: Span[UInt8, ...]) -> Bool:
 
 @always_inline
 def _encoded_y_lt_p(y: Span[UInt8, ...]) -> Bool:
-    # Strict decoding rejects y at or above p after the caller clears the parity bit
+    # Require y < p; the caller has already cleared the encoded x-sign bit (RFC 8032, sec. 5.1.3).
     var lt: UInt8 = 0
     var gt: UInt8 = 0
     for i in range(31, -1, -1):
@@ -105,7 +106,7 @@ def _pack_limbs_into(limbs: SIMD[DType.uint64, 8], output: Pointer[mut=True, UIn
 def _unpack_limbs(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 8]:
     if len(bytes) != 32:
         abort("Ed25519 scalar input must be exactly 32 bytes")
-    # Input can be byte aligned so load wide with alignment one
+    # Input is only byte-aligned, so wide loads must use alignment 1.
     var words = bytes.unsafe_ptr().unsafe_bitcast[UInt64]().unsafe_load[width=4, alignment=1]()
     comptime MASK = (UInt64(1) << 52) - 1
     comptime TOP_MASK = (UInt64(1) << 48) - 1
@@ -121,7 +122,7 @@ def _unpack_limbs(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 8]:
 def _from_512_raw(bytes: Span[UInt8, ...]) -> SIMD[DType.uint64, 8]:
     if len(bytes) != 64:
         abort("Ed25519 wide scalar input must be exactly 64 bytes")
-    # Reduce the sixty four byte hash output modulo L
+    # Reduce the full 64-byte hash modulo the group order L.
     var ptr = bytes.unsafe_ptr()
     var lo_span = Span[UInt8, ...](unsafe_ptr=ptr, length=32)
     var hi_span = Span[UInt8, ...](unsafe_ptr=ptr.unsafe_offset(32), length=32)
@@ -155,7 +156,7 @@ def ed25519_base_point() -> EdwardsPoint:
 
 
 struct Scalar(Copyable, ImplicitlyCopyable, Movable):
-    """Scalar modulo L in Montgomery form that multiplies in about twenty five limb muls"""
+    """Scalar modulo L in five 52-bit Montgomery limbs, with R = 2^260."""
     var limbs: SIMD[DType.uint64, 8]
 
     @always_inline
@@ -176,7 +177,7 @@ struct Scalar(Copyable, ImplicitlyCopyable, Movable):
 
     @staticmethod
     def from_bytes(bytes: Span[UInt8, ...]) -> Scalar:
-        # Reduces input modulo L and callers wanting canonical encodings range check first
+        # This decoder reduces modulo L; callers requiring canonical input must check the range first.
         var raw = _unpack_limbs(bytes)
         return Scalar(raw)._montgomery_mul(Scalar(RR_LIMBS))
 
@@ -195,7 +196,7 @@ struct Scalar(Copyable, ImplicitlyCopyable, Movable):
     def from_bytes_clamped(bytes: Span[UInt8, ...]) -> Scalar:
         if len(bytes) != 32:
             abort("Ed25519 clamped scalar input must be exactly 32 bytes")
-        # Prune the hashed secret into the secret scalar the RFC way
+        # Prune the hashed seed before base-point multiplication (RFC 8032, sec. 5.1.5).
         var s = InlineArray[UInt8, 32](fill=0)
         for i in range(32):
             s[i] = bytes[i]
@@ -224,9 +225,9 @@ struct Scalar(Copyable, ImplicitlyCopyable, Movable):
 
     @staticmethod
     def _montgomery_mul_raw(a: SIMD[DType.uint64, 8], b: SIMD[DType.uint64, 8]) -> SIMD[DType.uint64, 8]:
-        """Montgomery multiply modulo L with R at two to the 260 that folds as it goes
-        Forms the reduction digit with LFACTOR then shifts back to five limbs
-        Keeps Montgomery form with a final subtract in about twenty five multiplies"""
+        """Montgomery multiplication modulo L with R = 2^260; each CIOS step cancels one 52-bit
+        limb.
+        """
         var z = InlineArray[UInt128, 9](fill=0)
         for i in range(9): z[i] = 0
         for i in range(5):
@@ -239,7 +240,7 @@ struct Scalar(Copyable, ImplicitlyCopyable, Movable):
             for j in range(i):
                 sum += UInt128(n[j]) * UInt128(L_LIMBS[i - j])
             var p = (UInt64(sum.cast[DType.uint64]() * LFACTOR)) & ((UInt64(1) << 52) - 1)
-            # LFACTOR is minus L inverse so the CIOS step folds correctly
+            # LFACTOR = -L^-1 mod 2^52 cancels the low limb at each reduction step.
             n[i] = p
             carry = (sum + UInt128(p) * UInt128(L_LIMBS[0])) >> 52
         var r = SIMD[DType.uint64, 8](0)
@@ -253,7 +254,6 @@ struct Scalar(Copyable, ImplicitlyCopyable, Movable):
         return r
 
     def _montgomery_mul(self, other: Scalar) -> Scalar:
-        # Montgomery multiply staying modulo L
         var r = Scalar._montgomery_mul_raw(self.limbs, other.limbs)
         return Scalar(r)._sub(Scalar(L_LIMBS))
 
@@ -263,13 +263,13 @@ struct Scalar(Copyable, ImplicitlyCopyable, Movable):
         )
 
     def _sub(self, other: Scalar) -> Scalar:
-        # Branchless subtract modulo L for secret scalar paths
+        # Subtract modulo L using a masked add-back when the subtraction borrows.
         comptime MASK = (UInt64(1) << 52) - 1
         var diff = SIMD[DType.uint64, 8](0)
         var borrow: UInt64 = 0
         for i in range(5):
             var x = other.limbs[i] + borrow
-            # Keep both the limb fix and the add back unconditional
+            # Keep the mask opaque so the add-back does not become a secret-dependent branch.
             var underflow = inlined_assembly[
                 "", UInt64, constraints="=r,0", has_side_effect=True
             ](UInt64((self.limbs[i] < x).__bool__()))
@@ -285,7 +285,7 @@ struct Scalar(Copyable, ImplicitlyCopyable, Movable):
 
 
 struct EdwardsPoint(Copyable, ImplicitlyCopyable, Movable):
-    """Extended point with X Y Z and T that adds cleanly when a is minus one"""
+    """Extended Edwards coordinates: x = X/Z, y = Y/Z, and XY = ZT (RFC 8032, sec. 5.1.4)."""
     var X: FieldElement51
     var Y: FieldElement51
     var Z: FieldElement51
@@ -337,13 +337,13 @@ struct DecodeResult(Copyable, ImplicitlyCopyable, Movable):
 
 
 def edwards_add(p: EdwardsPoint, q: EdwardsPoint) -> EdwardsPoint:
-    """Add two Edwards points cleanly in about ten field multiplies"""
+    """Add points with the complete a = -1 extended Edwards formulas (RFC 8032, sec. 5.1.4)."""
     var d2 = ed25519_d2()
     return _edwards_add_d2(p, q, d2)
 
 
 def edwards_double(p: EdwardsPoint) -> EdwardsPoint:
-    """Double an Edwards point in about seven field operations"""
+    """Double a point in extended Edwards coordinates (RFC 8032, sec. 5.1.4)."""
     return _edwards_double_standalone(p)
 
 
@@ -353,7 +353,7 @@ def edwards_negate(p: EdwardsPoint) -> EdwardsPoint:
 
 @always_inline
 def _ct_select_fe(a: FieldElement51, b: FieldElement51, choice: UInt8) -> FieldElement51:
-    # Hide the mask values so LLVM cannot skip negation with a branch on a secret digit
+    # Keep masks opaque so LLVM cannot branch on a secret digit to skip negation.
     var mask = inlined_assembly[
         "", UInt64, constraints="=r,0", has_side_effect=True
     ](UInt64(0) - UInt64(choice))
@@ -365,7 +365,7 @@ def _ct_select_fe(a: FieldElement51, b: FieldElement51, choice: UInt8) -> FieldE
 
 @no_inline
 def _edwards_add_d2(p: EdwardsPoint, q: EdwardsPoint, d2: FieldElement51) -> EdwardsPoint:
-    # Complete Edwards addition with a equals minus one
+    # Complete extended Edwards addition for a = -1.
     var A = (p.Y - p.X) * (q.Y - q.X)
     var B = (p.Y + p.X) * (q.Y + q.X)
     var C = p.T * q.T * d2
@@ -380,7 +380,6 @@ def _edwards_add_d2(p: EdwardsPoint, q: EdwardsPoint, d2: FieldElement51) -> Edw
 
 @no_inline
 def _edwards_double_standalone(p: EdwardsPoint) -> EdwardsPoint:
-    # Extended Edwards doubling the RFC way
     var A = p.X.square()
     var B = p.Y.square()
     var ZZ = p.Z.square()
@@ -397,7 +396,7 @@ def _edwards_double_standalone(p: EdwardsPoint) -> EdwardsPoint:
 def fe_from_bytes(bytes: Span[UInt8, ...]) -> FieldElement51:
     if len(bytes) != 32:
         abort("Ed25519 field input must be exactly 32 bytes")
-    # Decode a little endian field element after the caller clears the parity bit
+    # Decode y after the caller clears the encoded x-sign bit.
     def load8(ptr: Pointer[mut=False, UInt8, _, address_space=_]) -> UInt64:
         var v: UInt64 = 0
         for j in range(8):
@@ -415,7 +414,7 @@ def fe_from_bytes(bytes: Span[UInt8, ...]) -> FieldElement51:
 
 @no_inline
 def edwards_encode_into(p: EdwardsPoint, output: Pointer[mut=True, UInt8, _, address_space=_]):
-    # Encode y and stash x parity in the top bit
+    # Encode canonical y with the parity of x in bit 255 (RFC 8032, sec. 5.1.2).
     _edwards_encode_with_zinv(p, p.Z.invert(), output)
 
 
@@ -433,8 +432,9 @@ def _edwards_encode_with_zinv(p: EdwardsPoint, z_inv: FieldElement51, output: Po
 
 @no_inline
 def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
-    """Strictly decode y and recover x with a power that acts like a square root"""
-    # Strict point decoding that rejects bad y and bad roots and zero x with sign set
+    """Decode canonical y and recover x; reject nonsquares and x = 0 with its sign bit set (RFC
+    8032, sec. 5.1.3).
+    """
     if len(data) != 32:
         return DecodeResult(False, EdwardsPoint())
     var y_bytes = InlineArray[UInt8, 32](fill=0)
@@ -455,7 +455,7 @@ def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
         return DecodeResult(False, EdwardsPoint())
     var x = x_opt.unsafe_value()
 
-    # Zero has no odd alternate root
+    # x = 0 has no root with odd parity (RFC 8032, sec. 5.1.3).
     var x_zero_bytes = InlineArray[UInt8, 32](fill=0)
     x.to_bytes_into(x_zero_bytes.unsafe_ptr())
     var x_is_zero = True
@@ -469,7 +469,7 @@ def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
     var x_try_bytes = InlineArray[UInt8, 32](fill=0)
     x_try.to_bytes_into(x_try_bytes.unsafe_ptr())
     if (x_try_bytes[0] & 1) != sign:
-        # Pick the root that matches the encoded parity
+        # Select the root matching the encoded x-sign bit.
         x_try = FieldElement51.ZERO() - x_try
 
     var chk = x_try.square() * v - u
@@ -487,7 +487,7 @@ def edwards_decode(data: Span[UInt8, ...], strict: Bool = True) -> DecodeResult:
 
 
 def edwards_decode_verify_compatible(data: Span[UInt8, ...]) -> DecodeResult:
-    # Strict RFC decoding only with no ZIP-215 leeway
+    # Apply RFC 8032 sec. 5.1.3 decoding; ZIP-215 encodings are not accepted.
     return edwards_decode(data, strict=True)
 
 
@@ -507,11 +507,9 @@ def _is_small_order(p: EdwardsPoint) -> Bool:
 
 @no_inline
 def sqrt_ratio_checked(u: FieldElement51, v: FieldElement51) -> Optional[FieldElement51]:
-    """Recover a square root with a power trick since p leaves five modulo eight
-    Checks both signs and fixes the negative case with the root of minus one
-    Keep it on public decodes since the success branch leaks timing"""
-    # Compute the root the RFC way for public decoding only
-    # Branches on validity so keep it away from secrets
+    """Recover sqrt(u/v) using p = 5 mod 8 and a sqrt(-1) correction. This helper branches on
+    validity and is only for public point decoding (RFC 8032, sec. 5.1.3).
+    """
     var v2 = v.square()
     var v3 = v2 * v
     var v7 = v3 * v2.square()
@@ -536,7 +534,7 @@ def sqrt_ratio_checked(u: FieldElement51, v: FieldElement51) -> Optional[FieldEl
     if is_zero:
         return Optional[FieldElement51](x)
     if is_zero2:
-        # Fix the negative case by multiplying with the root of minus one
+        # Correct the candidate root when its square is -u/v.
         var sqrtm1 = FieldElement51(
             1718705420411056, 234908883556509,
             2233514472574048, 2117202627021982, 765476049583133
@@ -706,9 +704,9 @@ def _base_table_lookup(ptr: Pointer[mut=False, UInt64, _], j: Int, digit: Int) -
 
 @no_inline
 def _mul_base_ct(scalar: Span[UInt8, ...]) -> EdwardsPoint:
-    """Fixed base multiply that recodes into sixty four signed nibbles
-    Looks each nibble up behind a mask then halves with four doubles
-    Keeps the table in affine Niels form for about sixty four adds"""
+    """Multiply the base point using 64 signed radix-16 digits and masked affine-Niels table
+    selection. Four doublings multiply the odd-digit contribution by 16.
+    """
     ref table = global_constant[ed25519_base_table()]()
     var tptr = table.unsafe_ptr()
     var digits = _radix16_digits(scalar)
@@ -772,7 +770,9 @@ def _b_odd_entry(ptr: Pointer[mut=False, UInt64, _], k: Int) -> AffineNielsPoint
 
 @no_inline
 def _double_scalar_mult_vartime(a: Span[UInt8, ...], A: EdwardsPoint, b: Span[UInt8, ...]) -> EdwardsPoint:
-    """Double scalar multiply that walks both public scalars together"""
+    """Compute a double-scalar product with variable-time control flow; both scalars must be
+    public.
+    """
     var naf_a = _naf5(a)
     var naf_b = _naf5(b)
     var d2 = ed25519_d2()
@@ -808,8 +808,7 @@ def _double_scalar_mult_vartime(a: Span[UInt8, ...], A: EdwardsPoint, b: Span[UI
 def ed25519_generate_public_key(
     private_key: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
 ) raises:
-    """Build the public key by clamping the hashed seed and multiplying the base point"""
-    # Public key comes from the pruned hash times the base point
+    """Derive the 32-byte Ed25519 public key from a 32-byte secret seed (RFC 8032, sec. 5.1.5)."""
     if len(private_key) != 32:
         raise Error("Ed25519 private key must be 32 bytes")
     if len(output) < 32:
@@ -840,8 +839,9 @@ def ed25519_sign(
     message: Span[UInt8, ...],
     output: Span[mut=True, UInt8, ...]
 ) raises:
-    """Sign with a hashed nonce and finish with S equals r plus k times s"""
-    # Pure signing hashes prefix and message into r then hashes R and A and message into k
+    """Sign with pure Ed25519: derive r from the secret prefix and message, then compute S = r +
+    k*s modulo L (RFC 8032, sec. 5.1.6).
+    """
     if len(private_key) != 32:
         raise Error("Ed25519 private key must be 32 bytes")
     if len(output) < 64:
@@ -909,7 +909,9 @@ def ed25519_sign(
 
 
 struct Ed25519SigningKey(Copyable, Movable):
-    """Pre expanded secret with prefix and public key so signing skips a multiply"""
+    """Cache the expanded secret, nonce prefix, and public key for repeated signing; wipe
+    private fields on destruction.
+    """
     var _s: Scalar
     var _prefix: InlineArray[UInt8, 32]
     var _a_enc: InlineArray[UInt8, 32]
@@ -1008,9 +1010,9 @@ struct Ed25519SigningKey(Copyable, Movable):
 @no_inline
 def ed25519_verify(public_key: Span[UInt8, ...], message: Span[UInt8, ...], signature: Span[UInt8, ...]
 ) -> Bool:
-    """Verify a signature with its hashed nonce and a small cofactor check"""
-    # Uses canonical decoding with S below L and the uncofactored equation
-    # Low order public keys are rejected by library policy
+    """Verify canonical encodings and S < L using [S]B = R + [k]A (RFC 8032, sec. 5.1.7).
+    Low-order public keys are rejected by library policy.
+    """
     if len(public_key) != 32 or len(signature) != 64:
         return False
     var A_res = edwards_decode_verify_compatible(public_key)

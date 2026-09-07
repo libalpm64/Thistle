@@ -1,4 +1,4 @@
-"""Implements Argon2id and Argon2d as specified by RFC 9106."""
+"""Argon2id (RFC 9106), with PHC password-string helpers."""
 
 from std.collections import List
 from std.base64 import b64encode, b64decode
@@ -53,13 +53,13 @@ def zero_and_free_u64(ptr: Pointer[mut=True, UInt64, _, address_space=_], len: I
 
 @always_inline
 def f_bla_mka(x: UInt64, y: UInt64) -> UInt64:
-    """Mixes two words with BlaMka multiplication then addition"""
+    """BlaMka addition: x + y + 2 * low32(x) * low32(y), modulo 2^64 (RFC 9106, sec. 3.6)."""
     return x + y + (((x & MASK32) * (y & MASK32)) << UInt64(1))
 
 
 @always_inline
 def gb(a: UInt64, b: UInt64, c: UInt64, d: UInt64) -> Tuple[UInt64, UInt64, UInt64, UInt64]:
-    """Mixes four words with BlaMka and rotations to diffuse the state"""
+    """Apply the BlaMka G function with BLAKE2b rotation constants (RFC 9106, sec. 3.6)."""
     var a_new = f_bla_mka(a, b)
     var d_new = rotate_bits_left[shift=32](d ^ a_new)
     var c_new = f_bla_mka(c, d_new)
@@ -73,7 +73,7 @@ def gb(a: UInt64, b: UInt64, c: UInt64, d: UInt64) -> Tuple[UInt64, UInt64, UInt
 
 @always_inline
 def _p_column(base: Int, v: Pointer[mut=True, UInt64, _, address_space=_]):
-    # Runs the column pass over 16 word rows
+    # Mix the four columns of a 16-word row.
     var v0, v4, v8, v12 = gb(v[unsafe_offset=base + 0], v[unsafe_offset=base + 4], v[unsafe_offset=base + 8], v[unsafe_offset=base + 12])
     var v1, v5, v9, v13 = gb(v[unsafe_offset=base + 1], v[unsafe_offset=base + 5], v[unsafe_offset=base + 9], v[unsafe_offset=base + 13])
     var v2, v6, v10, v14 = gb(v[unsafe_offset=base + 2], v[unsafe_offset=base + 6], v[unsafe_offset=base + 10], v[unsafe_offset=base + 14])
@@ -98,7 +98,7 @@ def _p_column(base: Int, v: Pointer[mut=True, UInt64, _, address_space=_]):
 
 @always_inline
 def _p_diagonal(base: Int, v: Pointer[mut=True, UInt64, _, address_space=_]):
-    # Runs the diagonal pass to complement the column pass
+    # Mix the diagonals of the same row.
     var v0, v5, v10, v15 = gb(v[unsafe_offset=base + 0], v[unsafe_offset=base + 5], v[unsafe_offset=base + 10], v[unsafe_offset=base + 15])
     var v1, v6, v11, v12 = gb(v[unsafe_offset=base + 1], v[unsafe_offset=base + 6], v[unsafe_offset=base + 11], v[unsafe_offset=base + 12])
     var v2, v7, v8, v13 = gb(v[unsafe_offset=base + 2], v[unsafe_offset=base + 7], v[unsafe_offset=base + 8], v[unsafe_offset=base + 13])
@@ -122,7 +122,9 @@ def _p_diagonal(base: Int, v: Pointer[mut=True, UInt64, _, address_space=_]):
 
 
 struct MemoryPool:
-    """Scratch space holding two temporary blocks for compression"""
+    """Pair of compression scratch buffers; owned storage is wiped on destruction, while
+    borrowed storage remains the caller's responsibility.
+    """
     var block_buffer: Pointer[UInt64, MutUntrackedOrigin]
     var temp_buffer: Pointer[UInt64, MutUntrackedOrigin]
     var buffer_size: Int
@@ -162,9 +164,9 @@ def compression_g_with_pool(
     with_xor: Bool,
     pool: MemoryPool
 ):
-    """Compression function that xors the inputs then permutes the block
-    It runs column and row passes of mixing over all the lanes"""
-    # Xors the inputs then permutes and xors again on the way out
+    """Compress two 1-KiB blocks. with_xor also folds in the prior destination for passes after
+    the first (RFC 9106, secs. 3.2 and 3.5).
+    """
     var block = pool.get_block()
     var block_xy = pool.get_temp()
 
@@ -177,12 +179,12 @@ def compression_g_with_pool(
             block_xy[unsafe_offset=i] = val
 
     for i in range(8):
-        # Runs column and diagonal mixing on each slice
+        # Apply the permutation to eight contiguous 16-word rows.
         var base = i * 16
         _p_column(base, block)
         _p_diagonal(base, block)
 
-    # Runs the row pass over the 8 by 16 layout
+    # Gather paired columns into 16-word rows for the second permutation pass.
     for col in range(8):
         var v0 = block[unsafe_offset=col * 2 + 0]
         var v1 = block[unsafe_offset=col * 2 + 1]
@@ -229,7 +231,6 @@ def compression_g_with_pool(
         block[unsafe_offset=col * 2 + 113] = v15
 
     for i in range(128):
-        # Xors the permuted block with the saved input to finish
         out_ptr[unsafe_offset=i] = block[unsafe_offset=i] ^ block_xy[unsafe_offset=i]
 
 
@@ -244,8 +245,9 @@ def store_le32(ptr: Pointer[mut=True, UInt8, _, address_space=_], offset: Int, v
 def variable_length_hash_into(
     t_len: Int, input: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
 ) raises:
-    """Hashes into variable length output using repeated Blake2b"""
-    # Short output hashes length prefix followed by input in one go
+    """Write H′ with the requested length prefixed as LE32 (RFC 9106, sec. 3.3)."""
+    # Outputs up to 64 bytes use one BLAKE2b invocation with that digest length (RFC 9106, sec.
+    # 3.3).
     if t_len < 1:
         raise Error("Argon2 variable-length hash output must not be empty")
     if t_len > len(output):
@@ -271,7 +273,6 @@ def variable_length_hash_into(
     var r = (t_len + 31) // 32 - 2
     var v_buf = StackBuffer[UInt8, 64](fill=0)
     try:
-        # First block hashes length prefix followed by input then chains forward
         var ctx1 = Blake2b(64)
         store_le32(le_buf.ptr(), 0, t_len)
         ctx1.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
@@ -281,7 +282,8 @@ def variable_length_hash_into(
         )
 
         var out_offset = 0
-        # Copies out the first half of each block and truncates the last one
+        # Emit 32-byte prefixes of chained digests, then a final digest sized to the remainder (RFC
+        # 9106, sec. 3.3).
         for _ in range(r - 1):
             for j in range(32):
                 out_ptr[unsafe_offset=out_offset + j] = v_buf.ptr()[unsafe_offset=j]
@@ -311,7 +313,7 @@ def variable_length_hash_into(
 
 
 def variable_length_hash(t_len: Int, input: Span[UInt8, ...]) raises -> List[UInt8]:
-    """Hashes into a fresh buffer by running the shared variable length helper"""
+    """Return H′ in an owned list of the requested length (RFC 9106, sec. 3.3)."""
     if t_len < 1:
         raise Error("Argon2 variable-length hash output must not be empty")
     if t_len >= (1 << 32):
@@ -341,11 +343,10 @@ def _argon2_process_lane(
     type_code: Int,
     parallelism: Int
 ):
-    """Fills one lane by picking a reference block from the pseudorandom indices
-    The first pass overwrites memory while later passes xors into what is there
-    Data dependent passes read the previous block while the first slices use a counter"""
-    # Each lane owns its own scratch for the whole hash
-    # Builds the address block then mixes previous with reference for each index
+    """Fill one lane segment. Argon2id uses independent addresses in the first two slices of pass
+    zero; later segments derive addresses from the previous block (RFC 9106, sec. 3.4.1.3).
+    """
+    # Each lane borrows its own scratch region for the duration of the hash.
     var lane_scratch = scratch.unsafe_offset(lane * 768).unsafe_origin_cast[MutUntrackedOrigin]()
     var addressing_block = lane_scratch
     var z_u64 = lane_scratch.unsafe_offset(128)
@@ -439,7 +440,6 @@ def _argon2_process_lane(
         var r_ptr = memory.unsafe_offset((ref_lane * q * 128 + ref_index * 128))
         var c_ptr = memory.unsafe_offset((lane * q * 128 + index * 128))
 
-        # Mixes previous with reference and overwrites first then xors
         compression_g_with_pool(
             c_ptr,
             p_ptr.unsafe_origin_cast[MutAnyOrigin](),
@@ -448,12 +448,12 @@ def _argon2_process_lane(
             pool
         )
 
-    # Owner wipes and frees all scratch even when something fails
+    # The hash owner wipes and frees this borrowed scratch, including on exceptions.
 
 
 def _validate_params(parallelism: Int, tag_length: Int, memory_size_kb: Int, iterations: Int, version: Int
 ) raises:
-    # RFC 9106 section 3 parameter bounds
+    # Parameter bounds (RFC 9106, sec. 3.1).
     if parallelism < 1 or parallelism >= (1 << 24):
         raise Error("Argon2 parallelism must be in [1, 2^24)")
     if tag_length < 4 or tag_length >= (1 << 32):
@@ -467,7 +467,7 @@ def _validate_params(parallelism: Int, tag_length: Int, memory_size_kb: Int, ite
 
 
 struct Argon2id:
-    """Password hasher that prehashes the inputs then fills memory with compression"""
+    """Argon2id parameters, salt, and optional secret/associated data for repeated hashing."""
     var parallelism: Int
     var tag_length: Int
     var memory_size_kb: Int
@@ -534,7 +534,9 @@ struct Argon2id:
             self.ad.append(ad[i])
 
     def hash(self, password: Span[UInt8, ...]) raises -> List[UInt8]:
-        """Hashes a password by prehashing the inputs and filling memory"""
+        """Derive a tag using the configured Argon2id costs and salt; wipe working memory on
+        exit.
+        """
         if (
             len(password) >= (1 << 32)
             or len(self.salt) >= (1 << 32)
@@ -543,9 +545,8 @@ struct Argon2id:
         ):
             raise Error("Argon2 input lengths must fit in 32 bits")
 
-        # These buffers contain password-derived state. Keeping them on the
-        # stack avoids per-block heap churn, and the outer finally guarantees
-        # cleanup on every raised path.
+        # Stack buffers hold password-derived state without per-block allocations.
+        # The outer finally wipes them on success and on exceptions.
         var le_buf = StackBuffer[UInt8, 4](fill=0)
         var h0_buf = StackBuffer[UInt8, 64](fill=0)
         var h0_input = StackBuffer[UInt8, 72](fill=0)
@@ -553,7 +554,7 @@ struct Argon2id:
         var c_block = StackBuffer[UInt64, 128](fill=0)
         var c_bytes = StackBuffer[UInt8, 1024](fill=0)
         try:
-            # Prehash feeds params then password salt and secrets in order
+            # H0 binds parameters and length-prefixed inputs (RFC 9106, sec. 3.2, step 1).
             var h0_ctx = Blake2b(64)
             store_le32(le_buf.ptr(), 0, self.parallelism)
             h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
@@ -595,7 +596,8 @@ struct Argon2id:
             var memory = alloc(Layout[UInt64](count=m_prime_blocks * 128)).unsafe_leak()
             var scratch = alloc(Layout[UInt64](count=self.parallelism * 768)).unsafe_leak()
             try:
-                # First two blocks per lane come from H0 followed by lane and block numbers
+                # Seed each lane with H′(H0 || LE32(block) || LE32(lane)) for blocks 0 and 1 (RFC
+                # 9106, sec. 3.2, steps 3-4).
                 unsafe_memcpy(dest=h0_input.ptr(), src=h0_buf.ptr(), count=64)
                 for i in range(self.parallelism):
                     for block_idx in range(2):
@@ -624,7 +626,8 @@ struct Argon2id:
                 var type_code = self.type_code
                 var parallelism = self.parallelism
 
-                # Loops passes over memory in 4 slices to stay memory hard
+                # Synchronize lanes at each slice boundary before cross-lane references advance (RFC
+                # 9106, sec. 3.4).
                 for t in range(iterations):
                     for slice_idx in range(4):
                         var seg_start = slice_idx * segment_length
@@ -665,7 +668,8 @@ struct Argon2id:
 
                         parallelize[process_lane](parallelism)
 
-                # Xors the last blocks together then hashes to the tag
+                # XOR the final block of every lane, then apply H′ to produce the tag (RFC 9106,
+                # sec. 3.2, steps 7-8).
                 zero_buffer_u64(c_block.ptr(), 128)
                 for i in range(self.parallelism):
                     var last_ptr = memory.unsafe_offset(i * q * 128 + (q - 1) * 128)
@@ -695,8 +699,7 @@ struct Argon2id:
 
 
 def argon2id_hash_string(password: String, salt: String) raises -> String:
-    """Hashes a password and returns the tag as a hex string"""
-    # Uses default memory and passes to keep it simple
+    """Return a hexadecimal Argon2id tag using the supplied salt and default costs."""
     var p_bytes = password.as_bytes()
     var s_bytes = salt.as_bytes()
     var ctx = Argon2id(s_bytes)
@@ -712,13 +715,13 @@ def argon2id_hash_string(password: String, salt: String) raises -> String:
 
 
 def _phc_base64(data: Span[mut=False, UInt8, _]) -> String:
-    # PHC encoding uses base64 without padding and strips the equals signs
+    # PHC base64 omits trailing padding.
     var encoded = b64encode(data)
     return String(encoded[byte=:(len(data) * 8 + 5) // 6])
 
 
 def _phc_decode(text: String) raises -> List[UInt8]:
-    # PHC encoding uses base64 without padding and checks the round trip matches
+    # Require canonical unpadded base64 by decoding and checking the re-encoding.
     var padded = text
     while padded.byte_length() % 4 != 0:
         padded += "="
@@ -747,8 +750,9 @@ def argon2id_hash_password(
     password: String, *, memory_size_kb: Int = 65536,
     iterations: Int = 3, parallelism: Int = 4
 ) raises -> String:
-    """Hashes a password and returns the encoded password hash string"""
-    # Uses a fresh 16 byte salt encoded as unpadded base64
+    """Return an Argon2id PHC string containing the costs, a fresh 16-byte salt, and a 32-byte
+    tag.
+    """
     var salt = random_bytes(16)
     var ctx = Argon2id(
         Span[UInt8](salt), parallelism=parallelism, tag_length=32,
@@ -770,8 +774,8 @@ def argon2id_verify_password(
     password: String, encoded: String, *, max_memory_size_kb: Int = 262144,
     max_iterations: Int = 10, max_parallelism: Int = 16
 ) raises -> Bool:
-    """Checks a password against an encoded hash in constant time"""
-    # Reject overlong encodings before costly memory-hard O(m) hashing.
+    """Verify an Argon2id PHC hash within the supplied memory, iteration, and lane limits."""
+    # Bound parsing before accepting attacker-supplied hashing costs.
     if encoded.byte_length() > 512 or max_memory_size_kb < 8 or max_iterations < 1 or max_parallelism < 1:
         return False
     var salt = List[UInt8]()
@@ -801,7 +805,7 @@ def argon2id_verify_password(
     )
     var actual = ctx.hash(password.as_bytes())
     try:
-        # Constant-time compare to avoid side-channel tag leakage.
+        # Scan the entire tag with volatile loads; do not exit on the first mismatch.
         var diff = UInt8(0)
         for i in range(len(expected)):
             diff |= actual.unsafe_ptr().unsafe_load[volatile=True](i) ^ expected[i]

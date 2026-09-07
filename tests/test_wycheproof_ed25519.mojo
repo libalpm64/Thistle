@@ -1,6 +1,4 @@
-"""
-Wycheproof Ed25519 test suite.
-"""
+"""Ed25519 verification against Wycheproof vectors."""
 
 from std.collections import List
 from std.python import Python

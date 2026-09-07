@@ -1,4 +1,6 @@
-"""Provides GPU kernels for AES block and counter-mode operations."""
+"""GPU AES kernels (FIPS 197), with ECB/CTR (NIST SP 800-38A) and the GCM counter stage (NIST SP
+800-38D).
+"""
 
 from std.gpu import global_idx
 from std.memory import stack_allocation
@@ -39,7 +41,9 @@ def aes_gpu_kernel_ecb(
     n: Int32,
     rounds: Int32
 ) -> None:
-    """runs ECB on GPU with 4 blocks per thread bitsliced"""
+    """Encrypt ECB blocks into output_data, with four bitsliced blocks per GPU thread (NIST SP
+    800-38A, sec. 6.1).
+    """
     if n <= 0 or (rounds != 10 and rounds != 12 and rounds != 14):
         return
     var tid = global_idx.x
@@ -71,7 +75,9 @@ def aes_gpu_kernel_ctr(
     nonce: Pointer[mut=True, UInt8, MutUntrackedOrigin],
     rounds: Int32
 ) -> None:
-    """runs CTR on GPU xoring nonce keystream with 4 blocks per thread"""
+    """XOR input with CTR keystream into output_data, with four blocks per GPU thread (NIST SP
+    800-38A, sec. 6.5).
+    """
     if n <= 0 or (rounds != 10 and rounds != 12 and rounds != 14):
         return
     var tid = global_idx.x
@@ -107,7 +113,9 @@ def aes_gpu_kernel_gcm_ctr(
     j0: Pointer[mut=True, UInt8, MutUntrackedOrigin],
     rounds: Int32
 ) -> None:
-    """runs the GCM counter stage on GPU from J0 plus index"""
+    """Apply GCTR from inc32(J0) (NIST SP 800-38D, secs. 6.5 and 7.1); this kernel does not
+    authenticate data.
+    """
     if n <= 0 or (rounds != 10 and rounds != 12 and rounds != 14):
         return
     var tid = global_idx.x

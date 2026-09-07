@@ -1,6 +1,4 @@
-"""
-Thistle public API.
-"""
+"""Thistle public API."""
 
 from .sha2 import sha224_hash, sha256_hash, sha384_hash, sha512_hash
 from .sha2 import SHA256Context, SHA512Context
@@ -91,4 +89,3 @@ from .random import random_bytes, random_fill
 from . import fips
 
 comptime VERSION = "1.0.5"
-"""Current Thistle package version."""

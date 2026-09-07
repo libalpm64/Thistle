@@ -1,4 +1,6 @@
-"""Small limb helpers that power both P-256 and P-384"""
+"""Shared P-256/P-384 arithmetic (SEC 2 v2.0, secs. 2.4.2 and 2.5.1) and deterministic nonces
+(RFC 6979, sec. 3.2).
+"""
 
 from std.collections import InlineArray
 from std.utils import StaticTuple
@@ -12,7 +14,7 @@ comptime _MASK64 = UInt128(0xFFFFFFFFFFFFFFFF)
 
 
 struct Limbs[N: Int](Copyable, ImplicitlyCopyable, Movable):
-    """Little endian number in N limbs with adds and compares that scale with N"""
+    """Unsigned integer stored as N little-endian 64-bit limbs."""
     var limbs: StaticTuple[UInt64, Self.N]
 
     def __init__(out self):
@@ -159,7 +161,8 @@ def to_be[N: Int](x: Limbs[N], output: Pointer[mut=True, UInt8, _, address_space
 
 
 struct Point[N: Int](Copyable, ImplicitlyCopyable, Movable):
-    """Affine point with x and y that live on the short Weierstrass curve"""
+    """Affine short-Weierstrass coordinates; callers choose ordinary or Montgomery field form.
+    """
     var x: Limbs[Self.N]
     var y: Limbs[Self.N]
     var infinity: Bool
@@ -176,7 +179,7 @@ struct Point[N: Int](Copyable, ImplicitlyCopyable, Movable):
 
 
 struct JacobianPoint[N: Int](Copyable, ImplicitlyCopyable, Movable):
-    """Jacobian point that hides division behind Z until you go back to affine"""
+    """Jacobian coordinates: x = X/Z^2 and y = Y/Z^3, with an explicit infinity flag."""
     var x: Limbs[Self.N]
     var y: Limbs[Self.N]
     var z: Limbs[Self.N]
@@ -213,12 +216,9 @@ def _p256_final_sub(
 
 @always_inline
 def _p256_mont_mul(a: Limbs[4], b: Limbs[4], p: Limbs[4]) -> Limbs[4]:
-    """Montgomery multiply with R at two to the 256 that folds with CIOS and skips the multiply since N0 is 1
-    Sparse prime shape lets the reduction fold into shifts and adds
-    Work grows with the square of the limb count"""
-    # For P-256 minus p inverse is one so each reduction digit folds with shifts and adds
-    # Keeping this path avoids a slowdown you would feel from generic CIOS
-    # N0 is one since minus p inverse is one with R at two to the 256 for the fold
+    """P-256 Montgomery multiplication with R = 2^256 and N0 = 1. The sparse prime allows
+    shift-and-add reduction.
+    """
     var a0 = a.limbs[0]
     var a1 = a.limbs[1]
     var a2 = a.limbs[2]
@@ -303,7 +303,7 @@ def _p256_mont_mul(a: Limbs[4], b: Limbs[4], p: Limbs[4]) -> Limbs[4]:
 
 @always_inline
 def _p256_mont_sqr(a: Limbs[4], p: Limbs[4]) -> Limbs[4]:
-    """P-256 Montgomery square that reuses symmetry to do less work"""
+    """Square in P-256 Montgomery form, computing each off-diagonal product once."""
     var a0 = a.limbs[0]
     var a1 = a.limbs[1]
     var a2 = a.limbs[2]
@@ -391,10 +391,9 @@ def _p256_mont_sqr(a: Limbs[4], p: Limbs[4]) -> Limbs[4]:
 
 @always_inline
 def mont_mul[N: Int, N0: UInt64](a: Limbs[N], b: Limbs[N], p: Limbs[N]) -> Limbs[N]:
-    """Montgomery multiply that folds the reduction digit into the accumulator then shifts
-    Takes the fast shift and add path when N0 is 1 and generic CIOS otherwise with R at two to the 256
-    Work grows with the square of the limb count"""
-    # Fold each reduction digit into the accumulator the Montgomery way
+    """Montgomery multiplication with R = 2^(64*N). Dispatch to the specialized P-256 reduction
+    or generic CIOS according to N and n0.
+    """
     comptime if N == 4 and N0 == UInt64(1):
         var a4 = Limbs[4](
             a.limbs[0], a.limbs[1], a.limbs[2], a.limbs[3]
@@ -464,8 +463,7 @@ def square_mod[N: Int, N0: UInt64](a: Limbs[N], p: Limbs[N], rr: Limbs[N]) -> Li
 
 @always_inline
 def mont_sqr[N: Int, N0: UInt64](a: Limbs[N], p: Limbs[N]) -> Limbs[N]:
-    """Montgomery square that halves the cross terms on the P-256 fast path"""
-    # P-256 squares halve the cross terms then reduce
+    """Square in Montgomery form, using symmetric products on the P-256 path."""
     comptime if N == 4 and N0 == UInt64(1):
         var a4 = Limbs[4](
             a.limbs[0], a.limbs[1], a.limbs[2], a.limbs[3]
@@ -516,7 +514,7 @@ def mul_small_mod[N: Int](x: Limbs[N], c: UInt64, p: Limbs[N]) -> Limbs[N]:
 
 @always_inline
 def jacobian_double_ct[N: Int, N0: UInt64](p: JacobianPoint[N], mod: Limbs[N], rr: Limbs[N]) -> JacobianPoint[N]:
-    """Jacobian doubling for a equals minus three in about eight multiplies"""
+    """Double a Jacobian point on a curve with a = -3."""
     var delta = mont_sqr[N, N0](p.z, mod)
     var gamma = mont_sqr[N, N0](p.y, mod)
     var beta = mont_mul[N, N0](p.x, gamma, mod)
@@ -568,7 +566,9 @@ def select_jacobian_ct[N: Int](a: JacobianPoint[N], b: JacobianPoint[N], choice:
 
 @always_inline
 def pow_mod[N: Int, N0: UInt64](base_in: Limbs[N], exponent: Limbs[N], rr: Limbs[N], p: Limbs[N]) -> Limbs[N]:
-    """Power by squaring and multiplying that should stay on public exponents"""
+    """Exponentiate by square-and-multiply; the exponent must be public because its bits
+    control branches.
+    """
     var one = Limbs[N].zero()
     one.limbs[0] = 1
     var res = to_mont[N, N0](one, rr, p)
@@ -590,8 +590,7 @@ def sqn[N: Int, N0: UInt64](x: Limbs[N], n: Int, p: Limbs[N]) -> Limbs[N]:
 
 @always_inline
 def inv_p[N: Int, N0: UInt64](x: Limbs[N], p: Limbs[N], rr: Limbs[N]) -> Limbs[N]:
-    # Fermat power with a chain picked for the curve size
-    # Four limbs means P-256 and six means P-384 with a faster chain than generic power
+    # Invert with the fixed Fermat addition chain for P-256 (four limbs) or P-384 (six).
     var x2 = mont_mul[N, N0](mont_sqr[N, N0](x, p), x, p)
     var x3 = mont_mul[N, N0](mont_sqr[N, N0](x2, p), x, p)
     var x6 = mont_mul[N, N0](sqn[N, N0](x3, 3, p), x3, p)
@@ -637,7 +636,9 @@ def jacobian_infinity[N: Int](one_mont: Limbs[N]) -> JacobianPoint[N]:
 
 @always_inline
 def scalar_mult[N: Int, N0: UInt64](k: Limbs[N], p: Point[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]) -> Point[N]:
-    """Variable base scalar multiply with a small window and one shared inversion"""
+    """Multiply a variable base with a 4-bit window; batch-normalize the table with one
+    inversion.
+    """
     return jacobian_to_affine[N, N0](
         scalar_mult_jacobian[N, N0](k, p, mod, rr, one_mont), mod, rr
     )
@@ -730,9 +731,9 @@ def _booth_recode_w7(value: UInt64) -> UInt64:
 def scalar_mult_jacobian_w5[N: Int, N0: UInt64](
     k: Limbs[N], p: Point[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]
 ) -> JacobianPoint[N]:
-    """Scalar multiply with a five bit Booth window over odd digits and sixteen entries
-    Picks behind a mask and fixes all the Zs with one shared inversion
-    Steps five bits at a time so adds drop to about a fifth"""
+    """Multiply with signed 5-bit Booth windows and masked selection among 16 magnitudes.
+    Batch-normalize the table with one inversion.
+    """
     var pm = Point[N](to_mont[N, N0](p.x, rr, mod), to_mont[N, N0](p.y, rr, mod), False)
     var jac = InlineArray[JacobianPoint[N], 16](fill=JacobianPoint[N]())
     jac[0] = JacobianPoint[N](pm.x, pm.y, one_mont, False)
@@ -786,7 +787,7 @@ def scalar_mult_jacobian_w5[N: Int, N0: UInt64](
 
 @always_inline
 def mod_inv_ct[N: Int, N0: UInt64](x: Limbs[N], m: Limbs[N], rr: Limbs[N], m_minus2: Limbs[N], one_mont: Limbs[N]) -> Limbs[N]:
-    # Fixed window power for x to the m minus two
+    # Fixed-window exponentiation by m - 2; the exponent and table indices are public.
     var base = to_mont[N, N0](x, rr, m)
     var powers = InlineArray[Limbs[N], 16](fill=Limbs[N].zero())
     powers[0] = one_mont
@@ -851,7 +852,7 @@ def base_table_entry[N: Int](tptr: Pointer[UInt64, _], j: Int, d: UInt64) -> Poi
 @always_inline
 def scalar_mult_base[N: Int, N0: UInt64](tptr: Pointer[UInt64, _], k: Limbs[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]
 ) -> Point[N]:
-    """Fixed base comb that picks behind a mask and shares one inversion"""
+    """Multiply the fixed base using masked selection from the precomputed comb table."""
     return jacobian_to_affine[N, N0](
         scalar_mult_base_jacobian[N, N0](tptr, k, mod, rr, one_mont), mod, rr
     )
@@ -953,11 +954,10 @@ def _rfc6979_impl[N: Int, H: RFC6979HMAC & Deinitable](
                     h_ptr.unsafe_store[volatile=True](i, UInt64(0))
                 return candidate^
             accepted += 1
-        # wipe the rejected candidate
         var c_ptr = Pointer(to=candidate).unsafe_bitcast[UInt64]()
         for i in range(N):
             c_ptr.unsafe_store[volatile=True](i, UInt64(0))
-        # RFC 6979 section 3.2.h.3: rekey with V || 0x00, then update V.
+        # Rekey with V || 0x00, then update V (RFC 6979, sec. 3.2.h.3).
         for i in range(N * 8):
             seed[i] = v[i]
         seed[N * 8] = 0
@@ -976,7 +976,9 @@ def _rfc6979_impl[N: Int, H: RFC6979HMAC & Deinitable](
 
 
 def rfc6979[N: Int](private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int, n: Limbs[N]) -> Limbs[N]:
-    """Deterministic nonce from HMAC DRBG that retries until it lands in range"""
+    """Derive a nonce with HMAC-DRBG (RFC 6979, sec. 3.2). skip counts accepted candidates so
+    signing retries follow the prescribed rekeying sequence.
+    """
     comptime if N == 4:
         return _rfc6979_impl[N, HMACSHA256State](private_key, digest, skip, n)
     else:

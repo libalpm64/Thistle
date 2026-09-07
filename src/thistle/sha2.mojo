@@ -1,4 +1,4 @@
-"""Implements SHA-224, SHA-256, SHA-384, and SHA-512."""
+"""Implements SHA-224, SHA-256, SHA-384, and SHA-512 (FIPS 180-4)."""
 
 from std.collections import List
 from std.memory import Pointer, unsafe_memcpy, unsafe_memset_zero
@@ -11,7 +11,7 @@ from std.os import abort
 from .sha_ni import sha512ni_transform_blocks, sha256ni_transform_blocks, sha256ni_hash
 from .utils import bytes_to_hex, string_to_bytes, load_32be, load_64be
 
-# first 64 prime cube roots as 32 bit words
+# Fractional cube roots of the first 64 primes, scaled by 2^32 (FIPS 180-4, sec. 4.2.2).
 comptime SHA256_K = SIMD[DType.uint32, 64](
     0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5, 0x3956C25B,
     0x59F111F1, 0x923F82A4, 0xAB1C5ED5, 0xD807AA98, 0x12835B01,
@@ -28,7 +28,7 @@ comptime SHA256_K = SIMD[DType.uint32, 64](
     0x90BEFFFA, 0xA4506CEB, 0xBEF9A3F7, 0xC67178F2
 )
 
-# first 80 prime cube roots as 64 bit words
+# Fractional cube roots of the first 80 primes, scaled by 2^64 (FIPS 180-4, sec. 4.2.3).
 comptime SHA512_K = StaticTuple[UInt64, 80](
     0x428A2F98D728AE22, 0x7137449123EF65CD, 0xB5C0FBCFEC4D3B2F, 0xE9B5DBA58189DBBC, 0x3956C25BF348B538,
     0x59F111F1B605D019, 0x923F82A4AF194F9B, 0xAB1C5ED5DA6D8118, 0xD807AA98A3030242, 0x12835B0145706FBE,
@@ -155,7 +155,7 @@ comptime SHA384_IV = SIMD[DType.uint64, 8](
 
 
 struct SHA256Context(Movable):
-    """streaming SHA-256 that chews through 64 byte blocks over 64 rounds"""
+    """Streaming SHA-256 state with a 64-byte partial-block buffer."""
     var state: SIMD[DType.uint32, 8]
     var count: UInt64
     var buffer: InlineArray[UInt8, 64]
@@ -208,7 +208,7 @@ def sha256_transform_blocks(
     data: Pointer[mut=False, UInt8, _, address_space=_],
     nblocks: Int
 ):
-    """runs the SHA-256 compression over 64 rounds with K and Sigma mixed in"""
+    """Compress one 64-byte block into the SHA-256 chaining state (FIPS 180-4, sec. 6.2.2)."""
     comptime if (CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86()) or (CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]()):
         sha256ni_transform_blocks(state, data, nblocks)
         return
@@ -333,9 +333,10 @@ def sha256_final(mut ctx: SHA256Context) -> List[UInt8]:
 
 
 def sha256_hash(data: Span[UInt8, ...]) -> List[UInt8]:
-    """SHA-256 hashes in 64 byte blocks with 0x80 padding and length at the end"""
-    # SHA256Context currently produces pathological x86
-    # codegen in Mojo 1.0 Despite having SHA instructions.
+    """Return a 32-byte SHA-256 digest, selecting the backend from compile-time features (FIPS
+    180-4, sec. 6.2).
+    """
+    # Use the dedicated hardware path to avoid the generic context codegen overhead.
     comptime if (CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86()) or (CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]()):
         return sha256ni_hash(data)
 
@@ -387,7 +388,7 @@ def sha256_final_to_buffer(mut ctx: SHA256Context, output: Pointer[mut=True, UIn
 
 
 struct SHA512Context(Movable):
-    """streaming SHA-512 that chews through 128 byte blocks over 80 rounds"""
+    """Streaming SHA-512 state with a 128-byte partial-block buffer."""
     var state: SIMD[DType.uint64, 8]
     var count_high: UInt64
     var count_low: UInt64
@@ -460,7 +461,7 @@ def sha512_transform_blocks(
     data: Pointer[mut=False, UInt8, _, address_space=_],
     nblocks: Int
 ):
-    """runs the SHA-512 compression over 80 rounds on 128 byte blocks"""
+    """Compress one 128-byte block into the SHA-512 chaining state (FIPS 180-4, sec. 6.4.2)."""
     comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["sha3"]() and not CompilationTarget.is_x86():
         sha512ni_transform_blocks(state, data, nblocks)
         return
@@ -586,7 +587,7 @@ def sha512_final(mut ctx: SHA512Context) -> List[UInt8]:
 
 
 def sha512_hash(data: Span[UInt8, ...]) -> List[UInt8]:
-    """SHA-512 hashes in 128 byte blocks with 0x80 padding and length at the end"""
+    """Return a 64-byte SHA-512 digest (FIPS 180-4, sec. 6.4)."""
     var ctx = SHA512Context(SHA512_IV)
     sha512_update(ctx, data)
     return sha512_final(ctx)
@@ -648,7 +649,7 @@ def sha256_final_with_len(mut ctx: SHA256Context, output_len: Int) -> List[UInt8
 
 
 def sha224_hash(data: Span[UInt8, ...]) -> List[UInt8]:
-    """Same as sha256_hash but truncated to 28 bytes with its own IV"""
+    """Return a 28-byte SHA-224 digest using the SHA-224 IV (FIPS 180-4, secs. 5.3.2 and 6.3)."""
     var ctx = SHA256Context(SHA224_IV)
     sha256_update(ctx, data)
     return sha256_final_with_len(ctx, 28)
@@ -723,7 +724,7 @@ def sha512_final_with_len(mut ctx: SHA512Context, output_len: Int) -> List[UInt8
 
 
 def sha384_hash(data: Span[UInt8, ...]) -> List[UInt8]:
-    """Same as sha512_hash but truncated to 48 bytes with its own IV"""
+    """Return a 48-byte SHA-384 digest using the SHA-384 IV (FIPS 180-4, secs. 5.3.4 and 6.5)."""
     var ctx = SHA512Context(SHA384_IV)
     sha512_update(ctx, data)
     return sha512_final_with_len(ctx, 48)

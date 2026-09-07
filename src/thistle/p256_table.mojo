@@ -1,4 +1,4 @@
-# P-256 precomputed comb table for fast scalar multiplication
+# Precomputed P-256 base-point tables; regenerate rather than editing values by hand.
 from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
 from std.collections import InlineArray

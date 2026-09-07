@@ -1,4 +1,4 @@
-"""Implements the Camellia block cipher specified by RFC 3713."""
+"""Camellia block cipher (RFC 3713)."""
 
 from std.memory import bitcast, Pointer
 from std.bit import byte_swap, rotate_bits_left
@@ -44,9 +44,9 @@ comptime _CAM_OC: UInt8 = 0x9A
 
 comptime _U8x16 = SIMD[DType.uint8, 16]
 
-# y = LO[x & 15] ^ HI[x >> 4], constant LO side only.
-# s2 = rotl1(s1), s3 = rotr1(s1) fold rotated POST copies;
-# s4 = s1(rotl1(x)) folds rotl1 into pre matrix.
+# Affine maps use LO[x & 15] ^ HI[x >> 4]; only LO includes the constant term.
+# S2 = rotl1(S1) and S3 = rotr1(S1) (RFC 3713, sec. 2.4.1) use rotated POST maps.
+# S4 = S1(rotl1(x)) (RFC 3713, sec. 2.4.1) folds the input rotation into PRE.
 
 
 def _mk_tbl(
@@ -106,9 +106,8 @@ def _tbl16(table: _U8x16, idx: _U8x16) -> _U8x16:
 
 @always_inline
 def _aes_sub16(t: _U8x16) -> _U8x16:
-    # AESE/AESENCLAST compute SubBytes(ShiftRows(x)).
-	# Lane 16 bytes per blocks.
-	# pre-shuffling with InvShiftRows cancels which is required for no lane movement
+    # AESENCLAST/AESE apply both SubBytes and ShiftRows to each 16-byte lane.
+	# InvShiftRows cancels the permutation so the S-box preserves byte positions.
     var s = t.shuffle[0, 13, 10, 7, 4, 1, 14, 11, 8, 5, 2, 15, 12, 9, 6, 3]()
     comptime if has_arm_crypto():
         return _aese(s, _U8x16(0))
@@ -133,7 +132,6 @@ def _sbox_bs_post[pos: Int](t0: _U8x16) -> _U8x16:
 
 @always_inline
 def _sbox_bs[pos: Int](x: _U8x16) -> _U8x16:
-    # tbl/AES/tbl.
     comptime if pos == 3 or pos == 6:
         return _sbox_bs_post[pos](
             _tbl16(_PRE4_LO, x & 0x0F) ^ _tbl16(_PRE4_HI, x >> 4)
@@ -535,7 +533,7 @@ def _flinv_scalar(y: UInt64, ke: UInt64) -> UInt64:
 
 
 struct CamelliaCipher:
-    """Camellia with 18 or 24 Feistel rounds plus FL and FLINV mixing"""
+    """Camellia with 128-, 192-, or 256-bit keys and a 16-byte block size (RFC 3713, sec. 2)."""
     var kw: SIMD[DType.uint64, 4]
     var k: InlineArray[UInt64, 24]
     var ke: InlineArray[UInt64, 6]
@@ -809,11 +807,9 @@ def _batch[encrypt: Bool, W: Int](
         _decrypt_batch[W](cipher, buf)
 
 
-# FL/FLINV BE words, bounce via scalar registers (1/6 rounds)
-# 16 blocks transposed j holds byte positon of j of all 16 blocks
-# The AES round instruction computes 16 blocks worth of one S-Box pos
-# S2/S3/S4 rotations go to per positon tables P functiions register XORS
-# ZIP network byte positon j row _BITREV4[j] block b in row _BITREV[B]
+# The transpose groups each byte position across 16 blocks for parallel S-boxes.
+# Its ZIP stages put byte j in row _BITREV4[j] and block b in lane _BITREV4[b].
+# Position-specific affine maps absorb the S2/S3/S4 rotations.
 comptime _BITREV4 = StaticTuple[Int, 16](
     0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15
 )
@@ -821,7 +817,7 @@ comptime _BITREV4 = StaticTuple[Int, 16](
 
 @always_inline
 def _transpose16(mut m: InlineArray[_U8x16, 16]):
-    # 16x16 byte matrix transpose setup 4 zip stages.
+    # Transpose the 16x16 byte matrix through 8-, 16-, 32-, and 64-bit interleaves.
     var t = InlineArray[_U8x16, 16](fill=_U8x16(0))
     comptime for i in range(8):
         var il = m[2 * i].interleave(m[2 * i + 1])
@@ -858,9 +854,8 @@ def _f_bs(
     mut r: InlineArray[_U8x16, 8],
     k: UInt64
 ):
-    # Runs byte sliced F on 16 blocks with the subkey already byte swapped
-    # P function written out so the compiler can fold the xors
-    # y_{4+i} = a_{i,i+1} ^ (s ^ x_{5+i}), y_i = x_i ^ a_{i+2,i+3} ^ ...
+    # Apply F to 16 blocks; k has already been byte-swapped for _splat_byte (RFC 3713, sec. 2.4.1).
+    # Factor the P transform into shared XOR terms.
     var y = InlineArray[_U8x16, 8](fill=_U8x16(0))
     comptime for j in range(8):
         y[j] = _sbox_bs[j](l[j] ^ _splat_byte(k, j))
@@ -886,9 +881,8 @@ def _f_bs(
 
 @always_inline
 def _fl_rot_bs(mut h: InlineArray[_U8x16, 8], ke: UInt64):
-    # FL mixes x2 with x1 and key and the layout keeps x1 first then x2
-    # ke is big endian with the high half first then the low half
-    # rotl by one splits across words with wrap from last to first
+    # h holds x1 then x2 in big-endian byte order; ke holds k1 then k2.
+    # Rotate x1 & k1 across its four byte positions, including the wraparound bit.
     var t0 = h[0] & _splat_byte(ke, 7)
     var t1 = h[1] & _splat_byte(ke, 6)
     var t2 = h[2] & _splat_byte(ke, 5)
@@ -901,7 +895,7 @@ def _fl_rot_bs(mut h: InlineArray[_U8x16, 8], ke: UInt64):
 
 @always_inline
 def _fl_bs[inv: Bool](mut h: InlineArray[_U8x16, 8], ke: UInt64):
-    # x2 ^= rotl1(x1 & k1), x1 ^= (x2 | k2)
+    # x2 ^= rotl1(x1 & k1), x1 ^= (x2 | k2) (RFC 3713, sec. 2.4.2).
     comptime if inv:
         comptime for j in range(4):
             h[j] ^= h[4 + j] | _splat_byte(ke, 3 - j)

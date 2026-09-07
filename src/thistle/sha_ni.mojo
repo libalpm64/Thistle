@@ -1,4 +1,4 @@
-"""Provides hardware-accelerated SHA-2 transforms."""
+"""Provides hardware-accelerated SHA-2 transforms (FIPS 180-4)."""
 
 from std.sys import (
     llvm_intrinsic,
@@ -128,7 +128,7 @@ def prefetch_next_block(ptr: Pointer[mut=False, UInt8, _, address_space=_]):
 
 
 def sha256ni_transform(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]) -> SIMD[DType.uint32, 8]:
-    # fall back to the scalar transform so unsupported CPUs never get zeros
+    # Use the scalar transform when the compilation target lacks SHA instructions.
     comptime if CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]():
         return _sha256ni_transform_x86(state, block)
     elif CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86():
@@ -182,7 +182,7 @@ def _sha256ni_transform_x86(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...
     var old_s0 = s0
     var old_s1 = s1
     
-    # expand all 64 words to 16 simd registers
+    # Expand the 64-word schedule into 16 SIMD vectors.
     var w0 = Load(ptr)
     var w1 = Load(ptr.unsafe_offset(16))
     var w2 = Load(ptr.unsafe_offset(32))
@@ -282,7 +282,9 @@ def sha256ni_transform_blocks(
     data: Pointer[mut=False, UInt8, _, address_space=_],
     nblocks: Int
 ):
-    """hardware SHA-256 using x86 or ARM crypto with the state kept in registers"""
+    """Hash with the SHA-256 backend selected by compile-time target features (FIPS 180-4, sec.
+    6.2).
+    """
     comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86():
         var st0 = SIMD128(state[0], state[1], state[2], state[3])
         var st1 = SIMD128(state[4], state[5], state[6], state[7])
@@ -440,7 +442,9 @@ def sha512ni_transform_blocks(
     data: Pointer[mut=False, UInt8, _, address_space=_],
     nblocks: Int
 ):
-    """hardware SHA-512 using ARM crypto over 40 paired steps with DIT on"""
+    """Hash with ARM SHA-512 instructions while DIT is enabled; restore the prior DIT state on
+    exit.
+    """
     var previous_dit = _sha512_dit_begin()
     var ab = SIMD64x2(state[0], state[1])
     var cd = SIMD64x2(state[2], state[3])

@@ -1,11 +1,10 @@
-# This file is to test table generation ignore this file it's not useful
-# Mostly for auditing purposes.
+# Generate the P-384 base-point comb table for src/thistle/p384_table.mojo.
 from thistle.p384 import U384, P384Point, _scalar_mult, _to_mont
 
 
 def main() raises:
-    # T[j][d] = d * 16^(2j) * G, Montgomery-form affine, j in 0..47, d in 1..15
-    # flat layout: ((j * 15) + (d - 1)) * 12 + limb; x limbs 0..5, y limbs 6..11
+    # T[j][d] = d * 16^(2*j) * G in Montgomery affine form; j = 0..47, d = 1..15.
+    # Entry offset: (j * 15 + d - 1) * 12; x occupies limbs 0..5, y occupies limbs 6..11.
     var values = List[UInt64](capacity=8704)
     for j in range(48):
         for d in range(1, 16):

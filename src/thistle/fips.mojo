@@ -1,4 +1,6 @@
-"""Re-exports the FIPS-approved hash and password-based primitives."""
+"""Re-export SHA-2 (FIPS 180-4), SHA-3 (FIPS 202), and PBKDF2-HMAC-SHA-2 (RFC 8018, sec. 5.2; RFC
+2104).
+"""
 
 from .sha2 import (
     sha224_hash,

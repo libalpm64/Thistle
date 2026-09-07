@@ -1,13 +1,8 @@
-"""
-ML-DSA implementation in Mojo.
+"""ML-DSA key generation, signing, and verification (FIPS 204).
 
-Security notice:
-ML-DSA is incredibly difficult to implement safely because signing uses rejection sampling
-and large polynomial/vector states. Source-level optimizations can accidentally bring in
-secret-dependent control-flow, memory access, allocator timing, and temporary writes of sensitive
-state into external buffers. By no means is this a perfect implementation. We aim to keep
-sensitive signing state in private scratch, avoid early-exit checks on secret-derived polynomial
-data, zeroize sensitive temporaries with volatile stores when practical.
+Signing uses rejection sampling (FIPS 204, Algorithm 7), so the number of attempts varies.
+Keep secret-derived polynomial checks as full scans, retain private scratch across attempts,
+and use volatile stores when wiping sensitive state.
 """
 
 from std.collections import List
@@ -120,7 +115,7 @@ struct DSAPolyVec[ROWS: Int](Movable):
 
 @fieldwise_init
 struct MLDSAPublicKey(Copyable, Movable):
-    """Expanded public key holding the matrix and hashed public data"""
+    """Expanded public key containing the matrix and hashed public-key encoding."""
     var p: MLDSAParams
     var raw: List[UInt8]
     var a: List[List[UInt32]]
@@ -130,7 +125,9 @@ struct MLDSAPublicKey(Copyable, Movable):
 
 @fieldwise_init
 struct MLDSAPrivateKey(Copyable, Movable):
-    """Expanded secret key holding the small secrets and seed material"""
+    """Expanded private key containing small secret polynomials, seed material, and the public
+    key.
+    """
     var p: MLDSAParams
     var seed: List[UInt8]
     var pub: MLDSAPublicKey
@@ -354,7 +351,7 @@ def _append_bytes_stack(mut out: StackBuffer[UInt8, ...], src: Span[UInt8, ...])
 def _ct_bool_to_u32(b: Bool) -> UInt32:
     return UInt32(Int(b))
 
-# volatile stores so the wipe can't be optimized away
+# Volatile stores preserve the wipe against dead-store elimination.
 
 
 def _zero_list_u8(mut data: List[UInt8]):
@@ -392,7 +389,7 @@ def _bytes_equal(a: Span[UInt8, ...], b: Span[UInt8, ...]) -> Bool:
 
 @always_inline
 def _field_reduce_once(a: UInt32) -> UInt32:
-    # Runs without branches so it is safe on secrets
+    # Use arithmetic masking for the secret-dependent correction.
     var t = a - Q
     return t + ((UInt32(0) - (t >> 31)) & Q)
 
@@ -409,8 +406,7 @@ def _field_sub(a: UInt32, b: UInt32) -> UInt32:
 
 @always_inline
 def _montgomery_reduce(x: UInt64) -> UInt32:
-    """Reduces a wide product back into Montgomery form"""
-    # Montgomery reduction over the field modulus with a branchless final fixup
+    """Reduce a wide product modulo q and remove one factor of the Montgomery radix."""
     var t = UInt32(x) * Q_NEG_INV
     var u = (x + UInt64(t) * UInt64(Q)) >> 32
     return _field_reduce_once(UInt32(u))
@@ -554,9 +550,7 @@ def _ntt_inplace(mut f: List[UInt32]):
 
 
 def _dsa_ntt_inplace(mut f: DSAPoly):
-    """Number theoretic transform over the field modulus with eight layers
-    It runs scalar and vector butterflies together to build the signing state
-    The result feeds the kappa loop that samples y then hashes w1 to get the challenge"""
+    """Apply the eight-layer NTT with scalar and SIMD butterflies (FIPS 204, Algorithm 41)."""
     var p = f.unsafe_ptr()
     var m = 0
     var length = 128
@@ -612,8 +606,7 @@ def _inverse_ntt_inplace(mut f: List[UInt32]):
 
 
 def _dsa_inverse_ntt_inplace(mut f: DSAPoly):
-    """Inverse transform that walks the layers backwards in place
-    It finishes by scaling every coefficient by 16382"""
+    """Apply the inverse NTT (FIPS 204, Algorithm 42), using Montgomery-scaled factor 16382."""
     var p = f.unsafe_ptr()
     var m = 255
     var length = 1
@@ -1392,7 +1385,9 @@ def mldsa_private_key_from_semiexpanded(sk: Span[UInt8, ...], p: MLDSAParams) ra
 
 
 def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: Span[UInt8, ...]) raises -> List[UInt8]:
-    """Signs the prehashed digest using rejection sampling over a few tries"""
+    """Sign with a supplied 64-byte mu and 32-byte randomizer, continuing FIPS 204 Algorithm 7
+    after mu derivation.
+    """
     if not _private_key_shape_valid(priv):
         raise Error("invalid ML-DSA private key structure")
     if len(mu) != 64 or len(random) != 32:
@@ -1411,7 +1406,7 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
     var nonce = shake256(Span[UInt8, ...](unsafe_ptr=h_input.ptr(), length=h_input.len()), 64)
     zero_stack_u8(h_input)
 
-    # signing scratch allocated once and reused across attempts
+    # Allocate signing scratch once and reuse it across rejection attempts.
     var y = DSAPolyVec[MAX_L]()
     var y_hat = DSAPolyVec[MAX_L]()
     var w = DSAPolyVec[MAX_K]()
@@ -1573,7 +1568,9 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
 
 def mldsa_sign(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Span[UInt8, ...], random: Span[UInt8, ...]
 ) raises -> List[UInt8]:
-    """Signs a message by hashing it with the public hash then signing the digest"""
+    """Bind the public-key hash, context, and message into mu, then sign with the supplied
+    randomizer (FIPS 204, Algorithms 2 and 7).
+    """
     if not _private_key_shape_valid(priv):
         raise Error("invalid ML-DSA private key structure")
     var mu = _compute_message_hash(Span[UInt8, ...](priv.pub.tr), msg, context)
@@ -1584,7 +1581,9 @@ def mldsa_sign(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Span[UInt8
 
 
 def mldsa_verify_external_mu(pub: MLDSAPublicKey, mu: Span[UInt8, ...], sig: Span[UInt8, ...]) raises -> Bool:
-    """Verifies a signature by checking the response bounds and the challenge hash"""
+    """Verify a signature with a supplied 64-byte mu, continuing FIPS 204 Algorithm 8 after mu
+    derivation.
+    """
     if not _public_key_shape_valid(pub) or len(mu) != 64:
         return False
     var p = pub.p.copy()
@@ -1639,7 +1638,9 @@ def mldsa_verify_external_mu(pub: MLDSAPublicKey, mu: Span[UInt8, ...], sig: Spa
 
 def mldsa_verify(pub: MLDSAPublicKey, msg: Span[UInt8, ...], sig: Span[UInt8, ...], context: Span[UInt8, ...]
 ) raises -> Bool:
-    """Verifies a message by hashing it with the public hash then checking the signature"""
+    """Verify a message signature with the supplied context and expanded public key (FIPS 204,
+    Algorithms 3 and 8).
+    """
     if not _public_key_shape_valid(pub):
         return False
     var mu = _compute_message_hash(Span[UInt8, ...](pub.tr), msg, context)
@@ -1650,60 +1651,61 @@ def mldsa_verify(pub: MLDSAPublicKey, msg: Span[UInt8, ...], sig: Span[UInt8, ..
 
 
 def mldsa44_public_key(pk: Span[UInt8, ...]) raises -> MLDSAPublicKey:
-    """Just builds the 44 public key from its packed bytes"""
+    """Decode and expand an ML-DSA-44 public key (FIPS 204, Algorithms 23 and 32)."""
     return new_public_key(pk, params44())
 
 
 def mldsa65_public_key(pk: Span[UInt8, ...]) raises -> MLDSAPublicKey:
-    """Just builds the 65 public key from its packed bytes"""
+    """Decode and expand an ML-DSA-65 public key (FIPS 204, Algorithms 23 and 32)."""
     return new_public_key(pk, params65())
 
 
 def mldsa87_public_key(pk: Span[UInt8, ...]) raises -> MLDSAPublicKey:
-    """Just builds the 87 public key from its packed bytes"""
+    """Decode and expand an ML-DSA-87 public key (FIPS 204, Algorithms 23 and 32)."""
     return new_public_key(pk, params87())
 
 
 def mldsa44_private_key_from_seed(seed: Span[UInt8, ...]) raises -> MLDSAPrivateKey:
-    """Just expands the private key from a seed using the 44 parameters"""
+    """Derive an expanded ML-DSA-44 private key from a 32-byte seed (FIPS 204, Algorithm 6)."""
     return mldsa_private_key_from_seed(seed, params44())
 
 
 def mldsa65_private_key_from_seed(seed: Span[UInt8, ...]) raises -> MLDSAPrivateKey:
-    """Just expands the private key from a seed using the 65 parameters"""
+    """Derive an expanded ML-DSA-65 private key from a 32-byte seed (FIPS 204, Algorithm 6)."""
     return mldsa_private_key_from_seed(seed, params65())
 
 
 def mldsa87_private_key_from_seed(seed: Span[UInt8, ...]) raises -> MLDSAPrivateKey:
-    """Just expands the private key from a seed using the 87 parameters"""
+    """Derive an expanded ML-DSA-87 private key from a 32-byte seed (FIPS 204, Algorithm 6)."""
     return mldsa_private_key_from_seed(seed, params87())
 
 
 def mldsa44_private_key_from_semiexpanded(sk: Span[UInt8, ...]) raises -> MLDSAPrivateKey:
-    """Just rebuilds the 44 private key from its semiexpanded encoding"""
+    """Rebuild an ML-DSA-44 private key from its semiexpanded encoding (FIPS 204, Algorithm 25)."""
     return mldsa_private_key_from_semiexpanded(sk, params44())
 
 
 def mldsa65_private_key_from_semiexpanded(sk: Span[UInt8, ...]) raises -> MLDSAPrivateKey:
-    """Just rebuilds the 65 private key from its semiexpanded encoding"""
+    """Rebuild an ML-DSA-65 private key from its semiexpanded encoding (FIPS 204, Algorithm 25)."""
     return mldsa_private_key_from_semiexpanded(sk, params65())
 
 
 def mldsa87_private_key_from_semiexpanded(sk: Span[UInt8, ...]) raises -> MLDSAPrivateKey:
-    """Just rebuilds the 87 private key from its semiexpanded encoding"""
+    """Rebuild an ML-DSA-87 private key from its semiexpanded encoding (FIPS 204, Algorithm 25)."""
     return mldsa_private_key_from_semiexpanded(sk, params87())
 
 
 def _zero_random32() -> List[UInt8]:
-    # Deterministic ML-DSA signing uses rnd = {0}^32.
+    # Deterministic signing uses rnd = {0}^32 (FIPS 204, sec. 3.4).
     var r = List[UInt8](unsafe_uninit_length=MLDSA_RNDBYTES)
     _zero_list_u8(r)
     return r^
 
 
 def mldsa_keygen(p: MLDSAParams) raises -> MLDSAPrivateKey:
-    """Generates a fresh keypair from random bytes by expanding the matrix"""
-    # Samples fresh randomness then runs the internal keygen
+    """Generate a fresh expanded private key, including its public key, from OS randomness (FIPS
+    204, Algorithm 1).
+    """
     _require_valid_params(p)
     var xi = random_bytes(MLDSA_SEEDBYTES)
     try:
@@ -1713,23 +1715,28 @@ def mldsa_keygen(p: MLDSAParams) raises -> MLDSAPrivateKey:
 
 
 def mldsa44_keygen() raises -> MLDSAPrivateKey:
-    """Just runs the generic keygen with the 44 parameters"""
+    """Generate a fresh expanded ML-DSA-44 private key and its embedded public key (FIPS 204,
+    Table 1).
+    """
     return mldsa_keygen(params44())
 
 
 def mldsa65_keygen() raises -> MLDSAPrivateKey:
-    """Just runs the generic keygen with the 65 parameters"""
+    """Generate a fresh expanded ML-DSA-65 private key and its embedded public key (FIPS 204,
+    Table 1).
+    """
     return mldsa_keygen(params65())
 
 
 def mldsa87_keygen() raises -> MLDSAPrivateKey:
-    """Just runs the generic keygen with the 87 parameters"""
+    """Generate a fresh expanded ML-DSA-87 private key and its embedded public key (FIPS 204,
+    Table 1).
+    """
     return mldsa_keygen(params87())
 
 
 def mldsa_sign_hedged(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Span[UInt8, ...]) raises -> List[UInt8]:
-    """Signs with fresh randomness using the default hedged variant"""
-    # Samples fresh randomness for the default path
+    """Sign with a fresh 32-byte randomizer from OS entropy (FIPS 204, sec. 3.4)."""
     var rnd = random_bytes(MLDSA_RNDBYTES)
     try:
         return mldsa_sign(priv, msg, context, Span[UInt8, ...](rnd))
@@ -1738,8 +1745,9 @@ def mldsa_sign_hedged(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Spa
 
 
 def mldsa_sign_deterministic(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Span[UInt8, ...]) raises -> List[UInt8]:
-    """Signs without randomness by fixing the nonce to zero"""
-    # Uses all zero randomness for the deterministic path
+    """Sign deterministically with rnd = 0^32 (FIPS 204, sec. 3.4); the nonce seed still depends
+    on the key and message.
+    """
     var rnd = _zero_random32()
     try:
         return mldsa_sign(priv, msg, context, Span[UInt8, ...](rnd))
@@ -1748,7 +1756,9 @@ def mldsa_sign_deterministic(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], conte
 
 
 def mldsa_sign_external_mu_hedged(priv: MLDSAPrivateKey, mu: Span[UInt8, ...]) raises -> List[UInt8]:
-    """Just signs the digest with fresh randomness"""
+    """Sign an externally computed 64-byte mu with a fresh 32-byte randomizer (FIPS 204, sec.
+    3.4).
+    """
     var rnd = random_bytes(MLDSA_RNDBYTES)
     try:
         return mldsa_sign_external_mu(priv, mu, Span[UInt8, ...](rnd))
@@ -1757,7 +1767,9 @@ def mldsa_sign_external_mu_hedged(priv: MLDSAPrivateKey, mu: Span[UInt8, ...]) r
 
 
 def mldsa_sign_external_mu_deterministic(priv: MLDSAPrivateKey, mu: Span[UInt8, ...]) raises -> List[UInt8]:
-    """Just signs the digest with the nonce fixed to zero"""
+    """Sign an externally computed 64-byte mu deterministically with rnd = 0^32 (FIPS 204, sec.
+    3.4).
+    """
     var rnd = _zero_random32()
     try:
         return mldsa_sign_external_mu(priv, mu, Span[UInt8, ...](rnd))

@@ -1,5 +1,5 @@
-# Ed25519 precomputed comb table for fast scalar multiplication
-# Each entry stores sixteen limbs and must not be edited by hand
+# Precomputed Ed25519 base-point comb table.
+# Each entry stores 16 limbs; regenerate rather than editing table values by hand.
 from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
 from std.collections import InlineArray

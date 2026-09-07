@@ -1,9 +1,9 @@
-"""Implements the Poly1305 one-time authenticator from RFC 8439."""
+"""Poly1305 one-time authenticator (RFC 8439, sec. 2.5)."""
 
 from std.memory import Pointer
 from std.collections import InlineArray
 
-# limb masks for a 44 44 and 42 bit split
+# Masks for the 44/44/42-bit representation modulo 2^130 - 5.
 comptime _M44: UInt64 = 0xFFFFFFFFFFF
 comptime _M42: UInt64 = 0x3FFFFFFFFFF
 
@@ -94,7 +94,9 @@ def _limbs_at(ptr: Pointer[mut=False, UInt8, _, address_space=_], offset: Int, h
 
 
 struct Poly1305:
-    """Poly1305 that keeps r mod 2 to the 130 minus 5 in three limbs and batches with Horner"""
+    """One-time authenticator with a 32-byte key (RFC 8439, sec. 2.5). The API becomes terminal
+    after wiping or successful finalization; invalid output sizes remain retryable.
+    """
     var r: _RPower
     var r2: _RPower
     var r3: _RPower
@@ -390,7 +392,9 @@ def poly1305_mac(
     message: Span[UInt8, ...],
     output: Span[mut=True, UInt8, ...]
 ) raises:
-    """one shot Poly1305 that clamps r then folds each block in and adds s at the end"""
+    """Return a 16-byte Poly1305 tag; the 32-byte key must be unique to this message (RFC 8439,
+    secs. 2.5 and 4).
+    """
     if len(output) < 16:
         raise Error("Poly1305 output needs at least 16 writable bytes")
     var p = Poly1305(key)

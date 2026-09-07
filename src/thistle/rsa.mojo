@@ -1,4 +1,6 @@
-"""RSA PSS signing plus PKCS1 v1 dot 5 verification you can call directly"""
+"""RSA-PSS signing and verification, plus PKCS #1 v1.5 verification (RFC 8017, secs. 8.1 and
+8.2).
+"""
 
 from std.collections import List, InlineArray
 from std.memory import Pointer
@@ -167,7 +169,7 @@ def _mgf1(
         block[i] = seed[unsafe_offset=i]
     var done = 0
     var counter: UInt32 = 0
-    # MGF1 hashes the seed with a big endian counter each round
+    # MGF1 hashes seed || I2OSP(counter, 4), with a big-endian counter (RFC 8017, Appendix B.2.1).
     while done < mask_len:
         block[seed_len] = UInt8((counter >> 24) & 0xFF)
         block[seed_len + 1] = UInt8((counter >> 16) & 0xFF)
@@ -195,6 +197,7 @@ def _emsa_pss_encode(
     em_bits: Int,
     output: Pointer[mut=True, UInt8, _, address_space=_]
 ) raises -> Bool:
+    """Encode EMSA-PSS with caller-supplied salt (RFC 8017, sec. 9.1.1)."""
     var h_len = _hash_len(sha)
     _ = _hash_len(mgf_sha)
     var em_len = (em_bits + 7) // 8
@@ -358,10 +361,9 @@ def _mont_mul_k[K: Int](
     n: StaticTuple[UInt64, _NL],
     n0: UInt64
 ) -> StaticTuple[UInt64, _NL]:
-    """CIOS multiply that folds two rows at once to save loop trips
-    Carries ripple in two chains and work grows with the square of the limbs
-    Feeds the cubic time modexp that squares and multiplies"""
-    # Fold each pair into t the Montgomery way
+    """CIOS Montgomery multiplication with two operand rows processed per iteration and
+    separate carry chains.
+    """
     var t = StaticTuple[UInt64, _NL]()
     comptime for z in range(K):
         t[z] = 0
@@ -539,7 +541,7 @@ def _mont_mul(
 
 
 struct RsaPublicKey:
-    """RSA public key that verifies with Montgomery modexp in cubic time"""
+    """RSA public key with cached Montgomery parameters for signature verification."""
     var n: StaticTuple[UInt64, _NL]
     var k: Int
     var nb: Int
@@ -673,6 +675,7 @@ struct RsaPublicKey:
         mgf_sha: Int,
         salt_len: Int
     ) raises -> Bool:
+        """Verify RSASSA-PSS and its encoded message (RFC 8017, secs. 8.1.2 and 9.1.2)."""
         var h_len = _hash_len(sha)
         _ = _hash_len(mgf_sha)
         if salt_len < 0:
@@ -821,12 +824,13 @@ def _bn_sub_mod_into(
 
 
 def _bn_inverse_odd(a: StaticTuple[UInt64, _NL], key: RsaPublicKey) -> Tuple[StaticTuple[UInt64, _NL], Bool]:
-    """Binary extended GCD with a fixed budget that halves evens and subtracts odds
-    Picks each step behind a mask and returns x with a times x is one mod n for blinding"""
-    # Binary GCD with a public fixed budget where each active step halves something even
-    # At most twice the bit width reaches the end and extra steps leave things fixed
-    # Use addressable limbs in the hot loop instead of rebuilding StaticTuples.
-    # Four state rows and four scratch rows remain live until the final wipe.
+    """Compute a^-1 mod n for RSA blinding using masked binary extended GCD with a public
+    iteration budget.
+    """
+    # Each active step removes at least one bit from the product of the GCD operands.
+    # Twice the modulus bit width bounds the steps; completed states remain unchanged.
+    # Addressable limbs avoid rebuilding StaticTuples in the hot loop.
+    # Keep four state rows and four scratch rows alive until the final wipe.
     var state = InlineArray[UInt64, 4 * _NL](fill=0)
     var scratch = InlineArray[UInt64, 4 * _NL](fill=0)
     var u = state.unsafe_ptr()
@@ -886,8 +890,8 @@ struct _RsaBlinding:
     def __init__(out self, key: RsaPublicKey) raises:
         self.factor = _bn_zero()
         self.inverse = _bn_zero()
-        # Rejection sampling keeps r uniform and randomness failures bubble up
-        # so signing never falls back to an unblinded private operation
+        # Rejection sampling gives a uniform blinding factor; OS randomness errors propagate.
+        # Never fall back to an unblinded private operation.
         for _ in range(128):
             var bytes = random_bytes(key.nb)
             bytes[0] &= UInt8(0xFF) >> UInt8(8 * key.nb - key.mod_bits)
@@ -936,7 +940,7 @@ struct _RsaBlinding:
 
 
 struct RsaPrivateKey:
-    """RSA private key that signs blinded and windowed in cubic time"""
+    """RSA private key using message blinding and fixed-window private exponentiation."""
     var public: RsaPublicKey
     var d: InlineArray[UInt8, 528]
 
@@ -1197,7 +1201,7 @@ struct _RsaExponentBlinding:
 
 
 struct RsaCrtPrivateKey:
-    """RSA CRT key that combines two half size powers with Garner for a big speedup"""
+    """RSA CRT private key using two half-size exponentiations and Garner recombination."""
     var public: RsaPublicKey
     var p: RsaPublicKey
     var q: RsaPublicKey
@@ -1313,8 +1317,9 @@ struct RsaCrtPrivateKey:
         self, encoded: Span[UInt8, ...],
         signature: Pointer[mut=True, UInt8, _, address_space=_]
     ) raises -> Bool:
-        """Blind the message then run two half size powers and Garner them back together
-        Blinds the exponent too and wipes everything before returning"""
+        """Apply message and exponent blinding, exponentiate modulo p and q, and recombine with
+        Garner. Wipe private-operation scratch before returning.
+        """
         if len(encoded) != self.public.nb:
             return False
         # PSS encodings are already below n; decode and reject noncanonical inputs.
@@ -1469,6 +1474,7 @@ def _pkcs1_v15_verify(
     signature: Span[UInt8, ...],
     sha: Int
 ) raises -> Bool:
+    """Require exact EMSA-PKCS1-v1_5 padding and DigestInfo (RFC 8017, sec. 9.2)."""
     var h_len = _hash_len(sha)
     var prefix_len = _digest_info_prefix_len(sha)
     var t_len = prefix_len + h_len
@@ -1506,7 +1512,9 @@ def rsa_pss_verify(
     mgf_sha: Int,
     salt_len: Int
 ) raises -> Bool:
-    """RSA PSS verify with MGF1 salt and Montgomery modexp under the hood"""
+    """Verify an RSA-PSS signature with the selected hash, MGF1 hash, and salt length (RFC 8017,
+    sec. 8.1.2).
+    """
     var key: RsaPublicKey
     try:
         key = RsaPublicKey(modulus, exponent)
@@ -1524,7 +1532,9 @@ def rsa_pss_sign_with_salt(
     sha: Int,
     mgf_sha: Int
 ) raises -> List[UInt8]:
-    """Same as PSS signing but with a salt you hand over"""
+    """Sign with RSA-PSS using caller-supplied salt and a blinded private operation (RFC 8017,
+    sec. 8.1.1).
+    """
     var key = RsaPrivateKey(modulus, exponent, private_exponent)
     var signature = List[UInt8](unsafe_uninit_length=key.public.nb)
     if not key.pss_sign_with_salt(
@@ -1543,7 +1553,9 @@ def rsa_pss_sign(
     mgf_sha: Int,
     salt_len: Int
 ) raises -> List[UInt8]:
-    """Same as PSS verify but on the signing side"""
+    """Sign with RSA-PSS using fresh random salt and a blinded private operation (RFC 8017, sec.
+    8.1.1).
+    """
     var key = RsaPrivateKey(modulus, exponent, private_exponent)
     return key.pss_sign(message, sha, mgf_sha, salt_len)
 
@@ -1555,7 +1567,9 @@ def rsa_pss_crt_sign_with_salt(
     coefficient: Span[UInt8, ...], message: Span[UInt8, ...],
     salt: Span[UInt8, ...], sha: Int, mgf_sha: Int
 ) raises -> List[UInt8]:
-    """Same as PSS signing with salt but split with CRT for speed"""
+    """Sign with RSA-PSS using caller-supplied salt and a blinded CRT private operation (RFC
+    8017, sec. 8.1.1).
+    """
     var key = RsaCrtPrivateKey(
         modulus, exponent, prime1, prime2, exponent1, exponent2, coefficient
     )
@@ -1574,7 +1588,9 @@ def rsa_pss_crt_sign(
     coefficient: Span[UInt8, ...], message: Span[UInt8, ...],
     sha: Int, mgf_sha: Int, salt_len: Int
 ) raises -> List[UInt8]:
-    """Same as PSS signing but split with CRT for speed"""
+    """Sign with RSA-PSS using fresh random salt and a blinded CRT private operation (RFC 8017,
+    sec. 8.1.1).
+    """
     var key = RsaCrtPrivateKey(
         modulus, exponent, prime1, prime2, exponent1, exponent2, coefficient
     )
@@ -1585,7 +1601,7 @@ def rsa_pss_sha256_sign(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     private_exponent: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
-    """PSS signing that uses SHA-256 with thirty two bytes of salt"""
+    """Sign with RSA-PSS/SHA-256 and a fresh 32-byte salt (RFC 8017, sec. 8.1.1)."""
     return rsa_pss_sign(modulus, exponent, private_exponent, message, SHA256, SHA256, 32)
 
 
@@ -1593,7 +1609,7 @@ def rsa_pss_sha384_sign(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     private_exponent: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
-    """PSS signing that uses SHA-384 with forty eight bytes of salt"""
+    """Sign with RSA-PSS/SHA-384 and a fresh 48-byte salt (RFC 8017, sec. 8.1.1)."""
     return rsa_pss_sign(modulus, exponent, private_exponent, message, SHA384, SHA384, 48)
 
 
@@ -1601,7 +1617,7 @@ def rsa_pss_sha512_sign(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     private_exponent: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
-    """PSS signing that uses SHA-512 with sixty four bytes of salt"""
+    """Sign with RSA-PSS/SHA-512 and a fresh 64-byte salt (RFC 8017, sec. 8.1.1)."""
     return rsa_pss_sign(modulus, exponent, private_exponent, message, SHA512, SHA512, 64)
 
 
@@ -1611,7 +1627,7 @@ def rsa_pss_crt_sha256_sign(
     exponent1: Span[UInt8, ...], exponent2: Span[UInt8, ...],
     coefficient: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
-    """CRT PSS signing that uses SHA-256 under the hood"""
+    """Sign with RSA-PSS/SHA-256 and a fresh 32-byte salt using CRT (RFC 8017, sec. 8.1.1)."""
     return rsa_pss_crt_sign(
         modulus, exponent, prime1, prime2, exponent1, exponent2,
         coefficient, message, SHA256, SHA256, 32
@@ -1624,7 +1640,7 @@ def rsa_pss_crt_sha384_sign(
     exponent1: Span[UInt8, ...], exponent2: Span[UInt8, ...],
     coefficient: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
-    """CRT PSS signing that uses SHA-384 under the hood"""
+    """Sign with RSA-PSS/SHA-384 and a fresh 48-byte salt using CRT (RFC 8017, sec. 8.1.1)."""
     return rsa_pss_crt_sign(
         modulus, exponent, prime1, prime2, exponent1, exponent2,
         coefficient, message, SHA384, SHA384, 48
@@ -1637,7 +1653,7 @@ def rsa_pss_crt_sha512_sign(
     exponent1: Span[UInt8, ...], exponent2: Span[UInt8, ...],
     coefficient: Span[UInt8, ...], message: Span[UInt8, ...]
 ) raises -> List[UInt8]:
-    """CRT PSS signing that uses SHA-512 under the hood"""
+    """Sign with RSA-PSS/SHA-512 and a fresh 64-byte salt using CRT (RFC 8017, sec. 8.1.1)."""
     return rsa_pss_crt_sign(
         modulus, exponent, prime1, prime2, exponent1, exponent2,
         coefficient, message, SHA512, SHA512, 64
@@ -1650,7 +1666,7 @@ def rsa_pss_sha256_verify(
     message: Span[UInt8, ...],
     signature: Span[UInt8, ...]
 ) raises -> Bool:
-    """PSS verify that uses SHA-256 with thirty two bytes of salt"""
+    """Verify RSA-PSS/SHA-256 with a 32-byte salt (RFC 8017, sec. 8.1.2)."""
     return rsa_pss_verify(modulus, exponent, message, signature, SHA256, SHA256, 32)
 
 
@@ -1660,7 +1676,7 @@ def rsa_pss_sha384_verify(
     message: Span[UInt8, ...],
     signature: Span[UInt8, ...]
 ) raises -> Bool:
-    """PSS verify that uses SHA-384 with forty eight bytes of salt"""
+    """Verify RSA-PSS/SHA-384 with a 48-byte salt (RFC 8017, sec. 8.1.2)."""
     return rsa_pss_verify(modulus, exponent, message, signature, SHA384, SHA384, 48)
 
 
@@ -1670,7 +1686,7 @@ def rsa_pss_sha512_verify(
     message: Span[UInt8, ...],
     signature: Span[UInt8, ...]
 ) raises -> Bool:
-    """PSS verify that uses SHA-512 with sixty four bytes of salt"""
+    """Verify RSA-PSS/SHA-512 with a 64-byte salt (RFC 8017, sec. 8.1.2)."""
     return rsa_pss_verify(modulus, exponent, message, signature, SHA512, SHA512, 64)
 
 
@@ -1681,7 +1697,9 @@ def rsa_pkcs1_v15_verify(
     signature: Span[UInt8, ...],
     sha: Int
 ) raises -> Bool:
-    """PKCS1 v1 dot 5 verify that checks DigestInfo padding in cubic time"""
+    """Verify PKCS #1 v1.5 signatures, requiring the selected DigestInfo prefix and exact padding
+    (RFC 8017, secs. 8.2.2 and 9.2).
+    """
     var key: RsaPublicKey
     try:
         key = RsaPublicKey(modulus, exponent)
@@ -1694,7 +1712,7 @@ def rsa_pkcs1_v15_sha1_verify(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     message: Span[UInt8, ...], signature: Span[UInt8, ...]
 ) raises -> Bool:
-    """PKCS1 verify that uses SHA-1 under the hood"""
+    """Verify a PKCS #1 v1.5 signature with SHA-1 (RFC 8017, sec. 8.2.2)."""
     return rsa_pkcs1_v15_verify(modulus, exponent, message, signature, SHA1)
 
 
@@ -1702,7 +1720,7 @@ def rsa_pkcs1_v15_sha256_verify(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     message: Span[UInt8, ...], signature: Span[UInt8, ...]
 ) raises -> Bool:
-    """PKCS1 verify that uses SHA-256 under the hood"""
+    """Verify a PKCS #1 v1.5 signature with SHA-256 (RFC 8017, sec. 8.2.2)."""
     return rsa_pkcs1_v15_verify(modulus, exponent, message, signature, SHA256)
 
 
@@ -1710,7 +1728,7 @@ def rsa_pkcs1_v15_sha384_verify(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     message: Span[UInt8, ...], signature: Span[UInt8, ...]
 ) raises -> Bool:
-    """PKCS1 verify that uses SHA-384 under the hood"""
+    """Verify a PKCS #1 v1.5 signature with SHA-384 (RFC 8017, sec. 8.2.2)."""
     return rsa_pkcs1_v15_verify(modulus, exponent, message, signature, SHA384)
 
 
@@ -1718,5 +1736,5 @@ def rsa_pkcs1_v15_sha512_verify(
     modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
     message: Span[UInt8, ...], signature: Span[UInt8, ...]
 ) raises -> Bool:
-    """PKCS1 verify that uses SHA-512 under the hood"""
+    """Verify a PKCS #1 v1.5 signature with SHA-512 (RFC 8017, sec. 8.2.2)."""
     return rsa_pkcs1_v15_verify(modulus, exponent, message, signature, SHA512)

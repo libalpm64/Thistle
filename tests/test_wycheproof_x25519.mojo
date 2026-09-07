@@ -1,6 +1,4 @@
-"""
-Wycheproof X25519 test suite.
-"""
+"""X25519 key agreement against Wycheproof vectors."""
 from std.collections import List
 from std.python import Python
 from thistle.x25519 import x25519

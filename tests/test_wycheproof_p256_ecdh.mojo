@@ -1,6 +1,4 @@
-"""
-This test file is for testing the Wycheproof P-256 ECDH test vectors.
-"""
+"""P-256 ECDH against Wycheproof vectors, with test-only ASN.1 point extraction."""
 from std.collections import List
 from std.python import Python
 from thistle.p256 import p256_ecdh
@@ -21,15 +19,12 @@ def hex_to_bytes(s: String) -> List[UInt8]:
 
 
 def extract_p256_public_key(public_der: List[UInt8]) -> List[UInt8]:
-    # RFC 5480 section 2.1 identifies EC public keys with id-ecPublicKey plus
-    # a namedCurve OID. SEC 2 v2.0 appendix A assigns secp256r1:
-    # 1.2.840.10045.3.1.7, DER-encoded as 06 08 2A 86 48 CE 3D 03 01 07.
+    # Require the secp256r1 OID (SEC 2 appendix A; RFC 5480 namedCurve):
+    # 1.2.840.10045.3.1.7, encoded as 06 08 2A 86 48 CE 3D 03 01 07.
     #
-    # RFC 5480 section 2.2 stores the SEC 1 ECPoint in subjectPublicKey as a
-    # BIT STRING. Wycheproof includes malformed-but-acceptable ASN.1 wrappers;
-    # this test harness deliberately extracts only the final SEC 1 point when
-    # the P-256 OID is present. The production p256_ecdh API receives raw SEC 1
-    # point bytes and does not parse ASN.1.
+    # RFC 5480 places the SEC 1 point in a BIT STRING. This harness extracts that
+    # point even from malformed ASN.1 wrappers accepted by some Wycheproof cases.
+    # Production p256_ecdh receives raw SEC 1 bytes and does not parse ASN.1.
     var has_p256_oid = False
     for i in range(len(public_der) - 9):
         if (
@@ -83,8 +78,7 @@ def extract_trailing_sec1_p256_public_key(
 
 
 def normalize_p256_private_key(var private_key: List[UInt8]) -> List[UInt8]:
-    # DER INTEGER values may include a leading 00 octet to keep the integer
-    # positive. SEC 1 scalar input to p256_ecdh is the fixed 32-octet value.
+    # DER may prefix a positive INTEGER with 00; strip it to obtain the 32-byte scalar.
     if len(private_key) == 32:
         return private_key^
     if len(private_key) == 33 and private_key[0] == 0:
@@ -124,9 +118,8 @@ def run_case(
     var public_der = hex_to_bytes(public_hex)
     var public_key = extract_p256_public_key(public_der)
     if (is_valid or is_acceptable) and len(public_key) == 0:
-        # Several Wycheproof "acceptable" cases intentionally corrupt the
-        # ASN.1 wrapper but leave a recoverable SEC 1 point. This fallback is
-        # test-harness-only; the p256_ecdh API accepts raw SEC 1.
+        # Test-only fallback for Wycheproof cases with damaged ASN.1 and a recoverable point.
+        # Production p256_ecdh accepts raw SEC 1 points.
         public_key = extract_trailing_sec1_p256_public_key(public_der)
     var expected = hex_to_bytes(shared_hex)
     var actual = StackInlineArray[UInt8, 32](fill=0)

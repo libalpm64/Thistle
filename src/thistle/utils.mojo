@@ -1,4 +1,4 @@
-"""Provides bounded stack buffers and constant-time utility operations."""
+"""Bounded stack storage, encoding helpers, and masked utility operations."""
 
 from std.bit import byte_swap
 from std.os import abort
@@ -6,7 +6,7 @@ from std.memory import Pointer
 
 
 struct StackInlineArray[ElementType: Copyable & Deinitable, size: Int](Copyable):
-    """fixed size stack array that aborts if you go out of bounds"""
+    """Fixed-capacity stack array with checked indexing; out-of-bounds access aborts."""
     var _data: InlineArray[Self.ElementType, Self.size]
 
     @always_inline
@@ -97,7 +97,7 @@ struct StackInlineArray[ElementType: Copyable & Deinitable, size: Int](Copyable)
 
 
 struct StackBuffer[T: Copyable & Deinitable & Defaultable, N: Int](Movable):
-    """stack buffer with a runtime length that aborts if you overflow"""
+    """Stack buffer with a runtime length and fixed capacity; overflow aborts."""
     var _data: InlineArray[Self.T, Self.N]
     var _len: Int
 
@@ -214,8 +214,7 @@ def store_64be(p: Pointer[mut=True, UInt8, _, address_space=_], off: Int, v: UIn
 
 @always_inline
 def transpose8x8(x0: UInt64) -> UInt64:
-    # Flips an 8x8 bit matrix so rows become columns
-    # Hackers Delight chapter 7 has the full trick
+    # Transpose an 8x8 bit matrix with staged swaps; see Hacker's Delight, chapter 7.
     var x = x0
     var t = (x ^ (x >> 7)) & 0x00AA00AA00AA00AA
     x ^= t ^ (t << 7)
@@ -228,7 +227,7 @@ def transpose8x8(x0: UInt64) -> UInt64:
 
 @always_inline
 def u64_nonzero_choice(x: UInt64) -> UInt64:
-    """checks for nonzero without branching using the top bit of x or minus x"""
+    """Return a nonzero indicator from the high bit of x | -x."""
     return ((x | (UInt64(0) - x)) >> UInt64(63)) & UInt64(1)
 
 
@@ -288,12 +287,12 @@ def bytes_to_hex(data: List[UInt8]) -> String:
 
 
 def bytes_to_hex(data: Span[UInt8, ...]) -> String:
-    """same as bytes_to_hex but for a span"""
+    """Encode a byte span as lowercase hexadecimal."""
     return bytes_to_hex_simd(data.unsafe_ptr(), len(data))
 
 
 def bytes_to_hex(data: SIMD[DType.uint8, 16]) -> String:
-    """same as bytes_to_hex but for a 16 byte vector"""
+    """Encode a 16-byte vector as lowercase hexadecimal."""
     var result = String(capacity=32)
     for i in range(16):
         var b = data[i]

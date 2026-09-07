@@ -1,4 +1,4 @@
-"""Encodes and decodes ECDSA signatures using the DER format."""
+"""ECDSA signature encoding as a DER SEQUENCE of INTEGER r and s (RFC 3279, sec. 2.2.3)."""
 
 from std.collections import List
 
@@ -6,7 +6,7 @@ from std.collections import List
 def ecdsa_der_encode(
     signature: Span[UInt8, ...], size: Int
 ) raises -> List[UInt8]:
-    """encodes r and s as DER with short lengths and rejects bodies over 127 bytes"""
+    """Encode r and s in DER (RFC 3279, sec. 2.2.3); this codec limits the body to 127 bytes."""
     # This codec intentionally supports only DER's one-byte length form.  A
     # 60-byte scalar is the largest one whose two padded INTEGERs can fit.
     if size <= 0 or size > 60 or len(signature) != 2 * size:
@@ -19,7 +19,7 @@ def ecdsa_der_encode(
         s_start += 1
     var r_len = size - r_start
     var s_len = size - s_start
-    # pad with 0x00 when the top bit is set so INTEGER stays positive
+    # Prefix a positive INTEGER with 00 when its high bit is set.
     var r_pad = Int((signature[r_start] >> 7) & 1)
     var s_pad = Int((signature[size + s_start] >> 7) & 1)
     var body_len = 4 + r_pad + r_len + s_pad + s_len
@@ -45,7 +45,7 @@ def ecdsa_der_encode(
 
 
 def ecdsa_der_decode(signature: Span[UInt8, ...], size: Int) -> List[UInt8]:
-    """decodes DER back to r and s and returns empty on bad input"""
+    """Decode DER r and s (RFC 3279, sec. 2.2.3), returning an empty list on invalid input."""
     if size <= 0 or size > 60 or len(signature) < 6 or signature[0] != 0x30:
         return List[UInt8]()
     if signature[1] >= 0x80 or Int(signature[1]) != len(signature) - 2:

@@ -1,4 +1,7 @@
-"""Implements the BLAKE3 cryptographic hash function."""
+"""BLAKE3 cryptographic hash function.
+
+Specification and design rationale: https://github.com/BLAKE3-team/BLAKE3-specs
+"""
 
 from max.algorithm import parallelize
 from std.collections import List
@@ -17,18 +20,12 @@ comptime IV = SIMD[DType.uint32, 8](
     0x1F83D9AB,
     0x5BE0CD19
 )
-"""The BLAKE3 initial chaining value."""
 
 comptime CHUNK_START = UInt8(1 << 0)
-"""Flag indicating the start of a chunk."""
 comptime CHUNK_END = UInt8(1 << 1)
-"""Flag indicating the end of a chunk."""
 comptime PARENT = UInt8(1 << 2)
-"""Flag indicating a parent node in the hash tree."""
 comptime ROOT = UInt8(1 << 3)
-"""Flag indicating the root node of the hash tree."""
 comptime CHUNK_LEN = 1024
-"""The length of a BLAKE3 chunk in bytes."""
 
 
 @always_inline
@@ -92,7 +89,7 @@ def g_idx[
     x: SIMD[DType.uint32, w],
     y: SIMD[DType.uint32, w]
 ):
-    # copy in/out so we never hold two mut refs into the same array
+    # Copy values in and out to avoid simultaneous mutable references into one array.
     var a = v[ai]
     var b = v[bi]
     var c = v[ci]
@@ -116,7 +113,7 @@ def compress_internal[
     flags: UInt8,
     out_ptr: Pointer[mut=True, SIMD[DType.uint32, w], _, address_space=_]
 ):
-    """Runs 7 rounds of G with message permutation for BLAKE3 compression"""
+    """Apply seven BLAKE3 rounds, permuting message words between rounds."""
     var v: StackInlineArray[SIMD[DType.uint32, w], 16] = [
         cv[0], cv[1], cv[2], cv[3], cv[4], cv[5], cv[6], cv[7],
         UInt32(0x6A09E667), UInt32(0xBB67AE85), UInt32(0x3C6EF372), UInt32(0xA54FF53A),
@@ -243,7 +240,7 @@ def compress_internal_16way(
 
 # fmt: on
 struct Hasher:
-    """BLAKE3 tree hasher splitting input into 1KiB chunks with 7 rounds of G"""
+    """Streaming BLAKE3 tree state with 1024-byte chunks and extendable output."""
     var key: SIMD[DType.uint32, 8]
     var original_key: SIMD[DType.uint32, 8]
     var cv_stack: StackInlineArray[SIMD[DType.uint32, 8], 54]
@@ -309,7 +306,7 @@ struct Hasher:
                         self.blocks_compressed = 0
                         self.buf_len = 0
                     else:
-                        # finalize() will handle it as ROOT if needed.
+                        # Retain the final chunk block so finalize() can apply ROOT when needed.
                         return
                 else:
                     var res = compress_core(
@@ -436,7 +433,9 @@ struct Hasher:
 
 @always_inline
 def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> List[UInt8]:
-    """BLAKE3 output of any length batching 64 chunks in parallel past 64KiB"""
+    """Return BLAKE3 output of the requested length. Large inputs use 64-chunk batches; a
+    single batch runs without the parallel scheduler.
+    """
     if out_len < 0:
         raise Error("BLAKE3 output length must be non-negative")
     var d = input
@@ -605,5 +604,5 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
 
 
 def blake3_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> List[UInt8]:
-    """same as blake3_parallel_hash defaulting to 32 bytes"""
+    """Return a 32-byte BLAKE3 digest using the shared batched implementation."""
     return blake3_parallel_hash(input, out_len)

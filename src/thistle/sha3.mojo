@@ -1,4 +1,4 @@
-"""Implements SHA-3 and SHAKE as specified by FIPS 202."""
+"""SHA-3 and SHAKE sponge functions (FIPS 202)."""
 
 from std.collections import List
 from std.memory import Pointer, unsafe_memcpy, unsafe_memset_zero
@@ -10,7 +10,7 @@ from std.builtin.dtype import DType
 from std.sys import llvm_intrinsic, CompilationTarget
 from std.utils import StaticTuple
 
-# 24 round constants for Keccak-f 1600
+# Round constants for the 24 rounds of Keccak-f[1600] (FIPS 202, sec. 3.2.5).
 comptime KECCAK_RC = StaticTuple[UInt64, 24](
     0x0000000000000001, 0x0000000000008082,
     0x800000000000808A, 0x8000000080008000,
@@ -101,7 +101,7 @@ def _keccak_f1600_hw(state: Pointer[mut=True, UInt64, _, address_space=_]):
         var d3 = _rax1(c2, c4)
         var d4 = _rax1(c3, c0)
 
-        # theta xor, rho rotate, and pi permute fused into one XAR per lane
+        # Fuse theta XOR, rho rotation, and pi permutation into one XAR per lane.
         var b0 = a0 ^ d0
         var b1 = _xar[44](a6, d1)
         var b2 = _xar[43](a12, d2)
@@ -182,7 +182,7 @@ def _keccak_f1600_hw(state: Pointer[mut=True, UInt64, _, address_space=_]):
 
 
 def keccak_f1600(state: Pointer[mut=True, UInt64, _, address_space=_]):
-    """runs Keccak-f 1600 through all 24 rounds of theta rho pi chi and iota"""
+    """Apply all 24 rounds of Keccak-f[1600] to the 25-lane state (FIPS 202, sec. 3.3)."""
     comptime if _has_sha3_ext:
         _keccak_f1600_hw(state)
         return
@@ -337,7 +337,7 @@ def _keccak_f1600_scalar(state: Pointer[mut=True, UInt64, _, address_space=_]):
 
 
 struct SHA3Context(Movable):
-    """sponge state holding the rate in bytes ready for 24 rounds of Keccak"""
+    """Keccak sponge state; the constructor accepts rate bits and stores the rate in bytes."""
     var state: StackBuffer[UInt64, 25]
     var rate_bytes: Int
     var buffer: StackBuffer[UInt8, 168]
@@ -483,7 +483,9 @@ def sha3_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], o
 
 @always_inline
 def sha3_hash(rate_bits: Int, data: Span[UInt8, ...], output_len: Int) -> List[UInt8]:
-    """soaks up input at rate r then pads with 0x06 and 0x80 and squeezes out the result"""
+    """Hash with rate r in bits, SHA-3 domain suffix 0x06, and the requested output length (FIPS
+    202, sec. 6.1 and Appendix B.2).
+    """
     var ctx = SHA3Context(rate_bits)
     sha3_update(ctx, data)
     return sha3_final(ctx, output_len)
@@ -498,22 +500,22 @@ def sha3_hash_into(mut output: StackBuffer[UInt8, ...], rate_bits: Int, data: Sp
 
 
 def sha3_224(data: Span[UInt8, ...]) -> List[UInt8]:
-    """same as sha3_hash with rate 1152 giving 28 bytes out"""
+    """Return a 28-byte SHA3-224 digest (FIPS 202, sec. 6.1)."""
     return sha3_hash(1152, data, 28)
 
 
 def sha3_256(data: Span[UInt8, ...]) -> List[UInt8]:
-    """same as sha3_hash with rate 1088 giving 32 bytes out"""
+    """Return a 32-byte SHA3-256 digest (FIPS 202, sec. 6.1)."""
     return sha3_hash(1088, data, 32)
 
 
 def sha3_384(data: Span[UInt8, ...]) -> List[UInt8]:
-    """same as sha3_hash with rate 832 giving 48 bytes out"""
+    """Return a 48-byte SHA3-384 digest (FIPS 202, sec. 6.1)."""
     return sha3_hash(832, data, 48)
 
 
 def sha3_512(data: Span[UInt8, ...]) -> List[UInt8]:
-    """same as sha3_hash with rate 576 giving 64 bytes out"""
+    """Return a 64-byte SHA3-512 digest (FIPS 202, sec. 6.1)."""
     return sha3_hash(576, data, 64)
 
 
@@ -652,7 +654,9 @@ def shake_final_into(mut ctx: SHA3Context, mut output: StackBuffer[UInt8, ...], 
 
 @always_inline
 def shake_hash(rate_bits: Int, data: Span[UInt8, ...], output_len: Int) -> List[UInt8]:
-    """SHAKE sponge that pads with 0x1F and 0x80 and squeezes as much as you ask for"""
+    """Squeeze the requested output length with rate r in bits and SHAKE domain suffix 0x1F (FIPS
+    202, sec. 6.2 and Appendix B.2).
+    """
     var ctx = SHA3Context(rate_bits)
     sha3_update(ctx, data)
     return shake_final(ctx, output_len)
@@ -667,12 +671,12 @@ def shake_hash_into(mut output: StackBuffer[UInt8, ...], rate_bits: Int, data: S
 
 
 def shake128(data: Span[UInt8, ...], output_len_bytes: Int) -> List[UInt8]:
-    """same as shake_hash with rate 1344"""
+    """Return the requested number of SHAKE128 output bytes (FIPS 202, sec. 6.2)."""
     return shake_hash(1344, data, output_len_bytes)
 
 
 def shake256(data: Span[UInt8, ...], output_len_bytes: Int) -> List[UInt8]:
-    """same as shake_hash with rate 1088"""
+    """Return the requested number of SHAKE256 output bytes (FIPS 202, sec. 6.2)."""
     return shake_hash(1088, data, output_len_bytes)
 
 
