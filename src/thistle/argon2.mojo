@@ -3,12 +3,11 @@
 from std.collections import List
 from std.base64 import b64encode, b64decode
 from .random import random_bytes
-from .utils import volatile_wipe
+from .utils import StackBuffer, bytes_to_hex, volatile_wipe
 from std.memory import Layout, Pointer, alloc, unsafe_memcpy, unsafe_memset_zero
 from max.algorithm import parallelize
 from std.bit import rotate_bits_left
 from .blake2b import Blake2b
-from .utils import StackBuffer
 
 comptime MASK32 = 0xFFFFFFFF
 
@@ -240,6 +239,27 @@ def store_le32(ptr: Pointer[mut=True, UInt8, _, address_space=_], offset: Int, v
     ptr[unsafe_offset=offset + 1] = UInt8((val >> 8) & 0xFF)
     ptr[unsafe_offset=offset + 2] = UInt8((val >> 16) & 0xFF)
     ptr[unsafe_offset=offset + 3] = UInt8((val >> 24) & 0xFF)
+
+
+@always_inline
+def _h0_update_u32(
+    mut ctx: Blake2b,
+    value: Int,
+    scratch: Pointer[mut=True, UInt8, _, address_space=_],
+):
+    store_le32(scratch, 0, value)
+    ctx.update(Span[UInt8, ...](unsafe_ptr=scratch, length=4))
+
+
+@always_inline
+def _h0_update_field(
+    mut ctx: Blake2b,
+    data: Span[UInt8, ...],
+    scratch: Pointer[mut=True, UInt8, _, address_space=_],
+):
+    """Append LE32(length) and the input bytes to H0 (RFC 9106, sec. 3.2, step 1)."""
+    _h0_update_u32(ctx, len(data), scratch)
+    ctx.update(data)
 
 
 def variable_length_hash_into(
@@ -547,80 +567,63 @@ struct Argon2id:
 
         # Stack buffers hold password-derived state without per-block allocations.
         # The outer finally wipes them on success and on exceptions.
-        var le_buf = StackBuffer[UInt8, 4](fill=0)
+        var word_bytes = StackBuffer[UInt8, 4](fill=0)
         var h0_buf = StackBuffer[UInt8, 64](fill=0)
-        var h0_input = StackBuffer[UInt8, 72](fill=0)
-        var b_bytes = StackBuffer[UInt8, 1024](fill=0)
-        var c_block = StackBuffer[UInt64, 128](fill=0)
-        var c_bytes = StackBuffer[UInt8, 1024](fill=0)
+        var initial_block_input = StackBuffer[UInt8, 72](fill=0)
+        var initial_block_bytes = StackBuffer[UInt8, 1024](fill=0)
+        var final_block = StackBuffer[UInt64, 128](fill=0)
+        var final_bytes = StackBuffer[UInt8, 1024](fill=0)
         try:
             # H0 binds parameters and length-prefixed inputs (RFC 9106, sec. 3.2, step 1).
             var h0_ctx = Blake2b(64)
-            store_le32(le_buf.ptr(), 0, self.parallelism)
-            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
-            store_le32(le_buf.ptr(), 0, self.tag_length)
-            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
-            store_le32(le_buf.ptr(), 0, self.memory_size_kb)
-            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
-            store_le32(le_buf.ptr(), 0, self.iterations)
-            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
-            store_le32(le_buf.ptr(), 0, self.version)
-            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
-            store_le32(le_buf.ptr(), 0, self.type_code)
-            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
-            store_le32(le_buf.ptr(), 0, len(password))
-            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
-            h0_ctx.update(password)
-            store_le32(le_buf.ptr(), 0, len(self.salt))
-            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
-            h0_ctx.update(Span[UInt8, ...](self.salt))
-            store_le32(le_buf.ptr(), 0, len(self.secret))
-            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
-            h0_ctx.update(Span[UInt8, ...](self.secret))
-            store_le32(le_buf.ptr(), 0, len(self.ad))
-            h0_ctx.update(Span[UInt8, ...](unsafe_ptr=le_buf.ptr(), length=4))
-            h0_ctx.update(Span[UInt8, ...](self.ad))
-            h0_ctx.finalize_into(
-                Span[mut=True, UInt8, ...](unsafe_ptr=h0_buf.ptr(), length=64)
-            )
+            _h0_update_u32(h0_ctx, self.parallelism, word_bytes.ptr())
+            _h0_update_u32(h0_ctx, self.tag_length, word_bytes.ptr())
+            _h0_update_u32(h0_ctx, self.memory_size_kb, word_bytes.ptr())
+            _h0_update_u32(h0_ctx, self.iterations, word_bytes.ptr())
+            _h0_update_u32(h0_ctx, self.version, word_bytes.ptr())
+            _h0_update_u32(h0_ctx, self.type_code, word_bytes.ptr())
+            _h0_update_field(h0_ctx, password, word_bytes.ptr())
+            _h0_update_field(h0_ctx, Span[UInt8, ...](self.salt), word_bytes.ptr())
+            _h0_update_field(h0_ctx, Span[UInt8, ...](self.secret), word_bytes.ptr())
+            _h0_update_field(h0_ctx, Span[UInt8, ...](self.ad), word_bytes.ptr())
+            h0_ctx.finalize_into(Span[mut=True, UInt8, ...](unsafe_ptr=h0_buf.ptr(), length=64))
 
-            var m_blocks = self.memory_size_kb
-            var m_prime_blocks = (
-                4 * self.parallelism * (m_blocks // (4 * self.parallelism))
+            var memory_blocks = (
+                4 * self.parallelism * (self.memory_size_kb // (4 * self.parallelism))
             )
-            if m_prime_blocks < 8 * self.parallelism:
-                m_prime_blocks = 8 * self.parallelism
-            var q = m_prime_blocks // self.parallelism
-            var segment_length = q // 4
+            if memory_blocks < 8 * self.parallelism:
+                memory_blocks = 8 * self.parallelism
+            var lane_length = memory_blocks // self.parallelism
+            var segment_length = lane_length // 4
 
-            var memory = alloc(Layout[UInt64](count=m_prime_blocks * 128)).unsafe_leak()
+            var memory = alloc(Layout[UInt64](count=memory_blocks * 128)).unsafe_leak()
             var scratch = alloc(Layout[UInt64](count=self.parallelism * 768)).unsafe_leak()
             try:
                 # Seed each lane with H′(H0 || LE32(block) || LE32(lane)) for blocks 0 and 1 (RFC
                 # 9106, sec. 3.2, steps 3-4).
-                unsafe_memcpy(dest=h0_input.ptr(), src=h0_buf.ptr(), count=64)
-                for i in range(self.parallelism):
+                unsafe_memcpy(dest=initial_block_input.ptr(), src=h0_buf.ptr(), count=64)
+                for lane in range(self.parallelism):
                     for block_idx in range(2):
-                        store_le32(h0_input.ptr(), 64, block_idx)
-                        store_le32(h0_input.ptr(), 68, i)
+                        store_le32(initial_block_input.ptr(), 64, block_idx)
+                        store_le32(initial_block_input.ptr(), 68, lane)
                         variable_length_hash_into(
                             1024,
-                            Span[UInt8, ...](unsafe_ptr=h0_input.ptr(), length=72),
+                            Span[UInt8, ...](unsafe_ptr=initial_block_input.ptr(), length=72),
                             Span[mut=True, UInt8, ...](
-                                unsafe_ptr=b_bytes.ptr(), length=1024
+                                unsafe_ptr=initial_block_bytes.ptr(), length=1024
                             ),
                         )
                         for k in range(128):
                             var word = (
-                                b_bytes.ptr()
+                                initial_block_bytes.ptr()
                                 .unsafe_offset(k * 8)
                                 .unsafe_bitcast[UInt64]()
                                 .unsafe_load[width=1, alignment=1]()
                             )
                             memory[
-                                unsafe_offset=i * q * 128 + block_idx * 128 + k
+                                unsafe_offset=lane * lane_length * 128 + block_idx * 128 + k
                             ] = word
-                        zero_buffer(b_bytes.ptr(), 1024)
+                        zero_buffer(initial_block_bytes.ptr(), 1024)
 
                 var iterations = self.iterations
                 var type_code = self.type_code
@@ -628,7 +631,7 @@ struct Argon2id:
 
                 # Synchronize lanes at each slice boundary before cross-lane references advance (RFC
                 # 9106, sec. 3.4).
-                for t in range(iterations):
+                for pass_index in range(iterations):
                     for slice_idx in range(4):
                         var seg_start = slice_idx * segment_length
                         var seg_end = (slice_idx + 1) * segment_length
@@ -640,9 +643,9 @@ struct Argon2id:
                             seg_start,
                             seg_end,
                             segment_length,
-                            q,
-                            m_prime_blocks,
-                            t,
+                            lane_length,
+                            memory_blocks,
+                            pass_index,
                             slice_idx,
                             iterations,
                             type_code,
@@ -654,13 +657,13 @@ struct Argon2id:
                                 scratch,
                                 memory,
                                 lane,
-                                t,
+                                pass_index,
                                 slice_idx,
                                 seg_start,
                                 seg_end,
                                 segment_length,
-                                q,
-                                m_prime_blocks,
+                                lane_length,
+                                memory_blocks,
                                 iterations,
                                 type_code,
                                 parallelism,
@@ -670,48 +673,41 @@ struct Argon2id:
 
                 # XOR the final block of every lane, then apply H′ to produce the tag (RFC 9106,
                 # sec. 3.2, steps 7-8).
-                zero_buffer_u64(c_block.ptr(), 128)
-                for i in range(self.parallelism):
-                    var last_ptr = memory.unsafe_offset(i * q * 128 + (q - 1) * 128)
+                zero_buffer_u64(final_block.ptr(), 128)
+                for lane in range(self.parallelism):
+                    var last_ptr = memory.unsafe_offset(
+                        lane * lane_length * 128 + (lane_length - 1) * 128
+                    )
                     for k in range(128):
-                        c_block.ptr()[unsafe_offset=k] ^= last_ptr[unsafe_offset=k]
+                        final_block.ptr()[unsafe_offset=k] ^= last_ptr[unsafe_offset=k]
 
                 for k in range(128):
-                    (
-                        c_bytes.ptr().unsafe_offset(k * 8)
-                    ).unsafe_bitcast[UInt64]().unsafe_store[
+                    (final_bytes.ptr().unsafe_offset(k * 8)).unsafe_bitcast[UInt64]().unsafe_store[
                         alignment=1
-                    ](0, c_block.ptr()[unsafe_offset=k])
+                    ](0, final_block.ptr()[unsafe_offset=k])
                 return variable_length_hash(
                     self.tag_length,
-                    Span[UInt8, ...](unsafe_ptr=c_bytes.ptr(), length=1024),
+                    Span[UInt8, ...](unsafe_ptr=final_bytes.ptr(), length=1024),
                 )
             finally:
                 zero_and_free_u64(scratch, self.parallelism * 768)
-                zero_and_free_u64(memory, m_prime_blocks * 128)
+                zero_and_free_u64(memory, memory_blocks * 128)
         finally:
-            zero_buffer(le_buf.ptr(), 4)
+            zero_buffer(word_bytes.ptr(), 4)
             zero_buffer(h0_buf.ptr(), 64)
-            zero_buffer(h0_input.ptr(), 72)
-            zero_buffer(b_bytes.ptr(), 1024)
-            zero_buffer_u64(c_block.ptr(), 128)
-            zero_buffer(c_bytes.ptr(), 1024)
+            zero_buffer(initial_block_input.ptr(), 72)
+            zero_buffer(initial_block_bytes.ptr(), 1024)
+            zero_buffer_u64(final_block.ptr(), 128)
+            zero_buffer(final_bytes.ptr(), 1024)
 
 
 def argon2id_hash_string(password: String, salt: String) raises -> String:
     """Return a hexadecimal Argon2id tag using the supplied salt and default costs."""
-    var p_bytes = password.as_bytes()
-    var s_bytes = salt.as_bytes()
-    var ctx = Argon2id(s_bytes)
-    var h = ctx.hash(p_bytes)
-    var res = String()
-    for i in range(len(h)):
-        var b = h[i]
-        var high = Int((b >> 4) & 0x0F)
-        var low = Int(b & 0x0F)
-        res += chr(high + 48 if high < 10 else high - 10 + 97)
-        res += chr(low + 48 if low < 10 else low - 10 + 97)
-    return res
+    var password_bytes = password.as_bytes()
+    var salt_bytes = salt.as_bytes()
+    var ctx = Argon2id(salt_bytes)
+    var digest = ctx.hash(password_bytes)
+    return bytes_to_hex(digest)
 
 
 def _phc_base64(data: Span[mut=False, UInt8, _]) -> String:
@@ -747,22 +743,25 @@ def _phc_cost(text: String, name: String, maximum: Int) raises -> Int:
 
 
 def argon2id_hash_password(
-    password: String, *, memory_size_kb: Int = 65536,
-    iterations: Int = 3, parallelism: Int = 4
+    password: String, *, memory_size_kb: Int = 65536, iterations: Int = 3, parallelism: Int = 4
 ) raises -> String:
     """Return an Argon2id PHC string containing the costs, a fresh 16-byte salt, and a 32-byte
     tag.
     """
     var salt = random_bytes(16)
     var ctx = Argon2id(
-        Span[UInt8](salt), parallelism=parallelism, tag_length=32,
-        memory_size_kb=memory_size_kb, iterations=iterations
+        Span[UInt8](salt),
+        parallelism=parallelism,
+        tag_length=32,
+        memory_size_kb=memory_size_kb,
+        iterations=iterations,
     )
     var digest = ctx.hash(password.as_bytes())
     try:
         return (
             "$argon2id$v=19$m=" + String(memory_size_kb)
-            + ",t=" + String(iterations) + ",p=" + String(parallelism)
+            + ",t=" + String(iterations)
+            + ",p=" + String(parallelism)
             + "$" + _phc_base64(Span[UInt8](salt))
             + "$" + _phc_base64(Span[UInt8](digest))
         )
@@ -771,12 +770,21 @@ def argon2id_hash_password(
 
 
 def argon2id_verify_password(
-    password: String, encoded: String, *, max_memory_size_kb: Int = 262144,
-    max_iterations: Int = 10, max_parallelism: Int = 16
+    password: String,
+    encoded: String,
+    *,
+    max_memory_size_kb: Int = 262144,
+    max_iterations: Int = 10,
+    max_parallelism: Int = 16,
 ) raises -> Bool:
     """Verify an Argon2id PHC hash within the supplied memory, iteration, and lane limits."""
     # Bound parsing before accepting attacker-supplied hashing costs.
-    if encoded.byte_length() > 512 or max_memory_size_kb < 8 or max_iterations < 1 or max_parallelism < 1:
+    if (
+        encoded.byte_length() > 512
+        or max_memory_size_kb < 8
+        or max_iterations < 1
+        or max_parallelism < 1
+    ):
         return False
     var salt = List[UInt8]()
     var expected = List[UInt8]()
@@ -785,7 +793,12 @@ def argon2id_verify_password(
     var lanes: Int
     try:
         var fields = encoded.split("$")
-        if len(fields) != 6 or String(fields[0]) != "" or String(fields[1]) != "argon2id" or String(fields[2]) != "v=19":
+        if (
+            len(fields) != 6
+            or String(fields[0]) != ""
+            or String(fields[1]) != "argon2id"
+            or String(fields[2]) != "v=19"
+        ):
             return False
         var costs = String(fields[3]).split(",")
         if len(costs) != 3:
@@ -800,8 +813,11 @@ def argon2id_verify_password(
     except:
         return False
     var ctx = Argon2id(
-        Span[UInt8](salt), parallelism=lanes, tag_length=len(expected),
-        memory_size_kb=memory, iterations=iterations
+        Span[UInt8](salt),
+        parallelism=lanes,
+        tag_length=len(expected),
+        memory_size_kb=memory,
+        iterations=iterations,
     )
     var actual = ctx.hash(password.as_bytes())
     try:

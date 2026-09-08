@@ -461,7 +461,7 @@ def sha512_transform_blocks(
     data: Pointer[mut=False, UInt8, _, address_space=_],
     nblocks: Int
 ):
-    """Compress one 128-byte block into the SHA-512 chaining state (FIPS 180-4, sec. 6.4.2)."""
+    """Compress 128-byte blocks into the SHA-512 chaining state (FIPS 180-4, sec. 6.4.2)."""
     comptime if CompilationTarget.has_neon() and CompilationTarget._has_feature["sha3"]() and not CompilationTarget.is_x86():
         sha512ni_transform_blocks(state, data, nblocks)
         return
@@ -476,49 +476,58 @@ def sha512_transform_blocks(
     var h0 = state[7]
 
     for blk in range(nblocks):
-        var x = InlineArray[UInt64, 89](uninitialized=True)
-        var xp = x.unsafe_ptr()
-        var fptr = xp.unsafe_offset(80)
+        # Expand adjacent schedule words together, keeping the 16-word ring in
+        # vectors and the eight round-state words in scalars.
+        var w = InlineArray[SIMD[DType.uint64, 2], 8](uninitialized=True)
         var a = a0
+        var b = b0
+        var c = c0
+        var d = d0
         var e = e0
-        fptr.unsafe_store(1, b0)
-        fptr.unsafe_store(2, c0)
-        fptr.unsafe_store(3, d0)
-        fptr.unsafe_store(5, f0)
-        fptr.unsafe_store(6, g0)
-        fptr.unsafe_store(7, h0)
+        var f = f0
+        var g = g0
+        var h = h0
         var block = data.unsafe_offset(blk * 128)
 
-        comptime for i in range(16):
-            var t = load_64be(block, i * 8)
-            fptr.unsafe_store(0, a)
-            fptr.unsafe_store(4, e)
-            fptr.unsafe_store(8, t)
-            t += fptr.unsafe_load(7) + sigma1_64(e) + ch64(e, fptr.unsafe_load(5), fptr.unsafe_load(6)) + SHA512_K[i]
-            e = fptr.unsafe_load(3) + t
-            a = t + sigma0_64(a) + maj64(a, fptr.unsafe_load(1), fptr.unsafe_load(2))
-            fptr = fptr.unsafe_offset(-1)
-
-        comptime for i in range(16, 80):
-            var t = small_sigma0_64(fptr.unsafe_load(8 + 16 - 1))
-            t += small_sigma1_64(fptr.unsafe_load(8 + 16 - 14))
-            t += fptr.unsafe_load(8 + 16) + fptr.unsafe_load(8 + 16 - 9)
-            fptr.unsafe_store(0, a)
-            fptr.unsafe_store(4, e)
-            fptr.unsafe_store(8, t)
-            t += fptr.unsafe_load(7) + sigma1_64(e) + ch64(e, fptr.unsafe_load(5), fptr.unsafe_load(6)) + SHA512_K[i]
-            e = fptr.unsafe_load(3) + t
-            a = t + sigma0_64(a) + maj64(a, fptr.unsafe_load(1), fptr.unsafe_load(2))
-            fptr = fptr.unsafe_offset(-1)
+        comptime for pair in range(40):
+            var wt: SIMD[DType.uint64, 2]
+            comptime if pair < 8:
+                wt = byte_swap(
+                    block.unsafe_offset(pair * 16).unsafe_bitcast[UInt64]().unsafe_load[
+                        width=2, alignment=1
+                    ]()
+                )
+            else:
+                var wm2 = w[(pair - 1) % 8]
+                var wm7 = w[(pair - 4) % 8].shuffle[1, 2](w[(pair - 3) % 8])
+                var wm15 = w[pair % 8].shuffle[1, 2](w[(pair - 7) % 8])
+                var s0 = rotate_bits_right[1](wm15) ^ rotate_bits_right[8](wm15) ^ (wm15 >> 7)
+                var s1 = rotate_bits_right[19](wm2) ^ rotate_bits_right[61](wm2) ^ (wm2 >> 6)
+                wt = w[pair % 8] + wm7 + s0 + s1
+            w[pair % 8] = wt
+            comptime for lane in range(2):
+                var t1 = (
+                    h + sigma1_64(e) + ch64(e, f, g)
+                    + SHA512_K[2 * pair + lane] + wt[lane]
+                )
+                var t2 = sigma0_64(a) + maj64(a, b, c)
+                h = g
+                g = f
+                f = e
+                e = d + t1
+                d = c
+                c = b
+                b = a
+                a = t1 + t2
 
         a0 += a
-        b0 += xp.unsafe_load(1)
-        c0 += xp.unsafe_load(2)
-        d0 += xp.unsafe_load(3)
+        b0 += b
+        c0 += c
+        d0 += d
         e0 += e
-        f0 += xp.unsafe_load(5)
-        g0 += xp.unsafe_load(6)
-        h0 += xp.unsafe_load(7)
+        f0 += f
+        g0 += g
+        h0 += h
 
     state = SIMD[DType.uint64, 8](a0, b0, c0, d0, e0, f0, g0, h0)
 

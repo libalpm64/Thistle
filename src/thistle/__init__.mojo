@@ -88,4 +88,4 @@ from .random import random_bytes, random_fill
 
 from . import fips
 
-comptime VERSION = "1.0.5"
+comptime VERSION = "1.1.0"

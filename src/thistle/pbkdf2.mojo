@@ -3,7 +3,7 @@ from std.collections import List
 from std.memory import unsafe_memcpy, Pointer
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
-from .utils import StackBuffer
+from .utils import StackBuffer, volatile_wipe
 from .sha2 import (
     SHA384_IV,
     SHA256Context,
@@ -14,7 +14,6 @@ from .sha2 import (
     sha256_final_to_buffer,
     sha512_update,
     sha512_final_to_buffer,
-    sha512_final_with_len
 )
 
 comptime PBKDF2_SHA256_MAX_DKLEN: Int = 0xFFFFFFFF * 32
@@ -22,14 +21,9 @@ comptime PBKDF2_SHA512_MAX_DKLEN: Int = 0xFFFFFFFF * 64
 
 
 @always_inline
-def _secure_zero(ptr: Pointer[mut=True, UInt8, _, address_space=_], count: Int):
-    # Volatile stores preserve password and pad wiping against dead-store elimination.
-    for i in range(count):
-        ptr.unsafe_store[volatile=True](i, UInt8(0))
-
-
-@always_inline
-def _xor_block[WIDTH: Int](dst: Pointer[mut=True, UInt8, _, address_space=_], src: Pointer[mut=True, UInt8, _, address_space=_]
+def _xor_block[WIDTH: Int](
+    dst: Pointer[mut=True, UInt8, _, address_space=_],
+    src: Pointer[mut=True, UInt8, _, address_space=_],
 ):
     # XOR each U value into the PBKDF2 block accumulator without early exits.
     var d = dst.unsafe_bitcast[UInt64]().unsafe_load[width=WIDTH, alignment=1]()
@@ -39,8 +33,10 @@ def _xor_block[WIDTH: Int](dst: Pointer[mut=True, UInt8, _, address_space=_], sr
 
 trait HMACer(Movable):
     """HMAC backend for the shared PBKDF2 loop, including a salt-and-counter first round."""
+
     comptime BLOCK: Int
     comptime HASH: Int
+
     def hmac(mut self, data: Span[UInt8, ...]): ...
     def hmac_with_counter(mut self, data: Span[UInt8, ...], counter: UInt32): ...
     def _hmac_fixed_unchecked(mut self, data: Span[UInt8, ...]): ...
@@ -48,7 +44,9 @@ trait HMACer(Movable):
 
 
 @always_inline
-def _pbkdf2_derive[H: HMACer](mut h: H, salt: Span[UInt8, ...], iterations: Int, dklen: Int) raises -> List[UInt8]:
+def _pbkdf2_derive[H: HMACer](
+    mut h: H, salt: Span[UInt8, ...], iterations: Int, dklen: Int
+) raises -> List[UInt8]:
     """Derive blocks T_i = U_1 XOR ... XOR U_c, where U_1 = PRF(P, S || INT32_BE(i)) and U_j =
     PRF(P, U_{j-1}) (RFC 8018, sec. 5.2).
     """
@@ -79,13 +77,14 @@ def _pbkdf2_derive[H: HMACer](mut h: H, salt: Span[UInt8, ...], iterations: Int,
         var to_copy = hLen if remaining > hLen else remaining
         for b in range(to_copy):
             derived_key.append(t_block[b])
-    _secure_zero(t_block.unsafe_ptr(), 64)
-    _secure_zero(input_block.unsafe_ptr(), 64)
+    volatile_wipe(t_block.unsafe_ptr(), 64)
+    volatile_wipe(input_block.unsafe_ptr(), 64)
     return derived_key^
 
 
 struct PBKDF2SHA256(HMACer):
     """Cache HMAC-SHA-256 pad states for PBKDF2 derivations with one password (RFC 2104, sec. 4)."""
+
     comptime BLOCK = 64
     comptime HASH = 32
     var ipad: StackBuffer[UInt8, 64]
@@ -97,6 +96,7 @@ struct PBKDF2SHA256(HMACer):
     var outer_ctx: SHA256Context
     var inner_state: SIMD[DType.uint32, 8]
     var outer_state: SIMD[DType.uint32, 8]
+
     def u_block_ptr(mut self) -> Pointer[UInt8, MutUntrackedOrigin]:
         return self.u_block.ptr().unsafe_origin_cast[MutUntrackedOrigin]()
 
@@ -122,20 +122,20 @@ struct PBKDF2SHA256(HMACer):
         for i in range(64):
             self.ipad[i] = k[i] ^ 0x36
             self.opad[i] = k[i] ^ 0x5C
-        _secure_zero(k.ptr(), 64)
+        volatile_wipe(k.ptr(), 64)
         sha256_update(self.inner_ctx, Span[UInt8, ...](unsafe_ptr=self.ipad.ptr(), length=64))
         sha256_update(self.outer_ctx, Span[UInt8, ...](unsafe_ptr=self.opad.ptr(), length=64))
         self.inner_state = self.inner_ctx.state
         self.outer_state = self.outer_ctx.state
 
     def __deinit__(deinit self):
-        _secure_zero(Pointer(to=self.inner_state).unsafe_bitcast[UInt8](), 32)
-        _secure_zero(Pointer(to=self.outer_state).unsafe_bitcast[UInt8](), 32)
-        _secure_zero(self.ipad.ptr(), 64)
-        _secure_zero(self.opad.ptr(), 64)
-        _secure_zero(self.inner_hash.ptr(), 32)
-        _secure_zero(self.u_block.ptr(), 32)
-        _secure_zero(self.counter_bytes.ptr(), 4)
+        volatile_wipe(Pointer(to=self.inner_state).unsafe_bitcast[UInt8](), 32)
+        volatile_wipe(Pointer(to=self.outer_state).unsafe_bitcast[UInt8](), 32)
+        volatile_wipe(self.ipad.ptr(), 64)
+        volatile_wipe(self.opad.ptr(), 64)
+        volatile_wipe(self.inner_hash.ptr(), 32)
+        volatile_wipe(self.u_block.ptr(), 32)
+        volatile_wipe(self.counter_bytes.ptr(), 4)
 
     @always_inline
     def hmac(mut self, data: Span[UInt8, ...]):
@@ -182,7 +182,9 @@ struct PBKDF2SHA256(HMACer):
         self.inner_ctx.reset(self.inner_state)
         self.inner_ctx.count = 512
         sha256_update(self.inner_ctx, data)
-        sha256_update(self.inner_ctx, Span[UInt8, ...](unsafe_ptr=self.counter_bytes.ptr(), length=4))
+        sha256_update(
+            self.inner_ctx, Span[UInt8, ...](unsafe_ptr=self.counter_bytes.ptr(), length=4)
+        )
         sha256_final_to_buffer(self.inner_ctx, self.inner_hash.ptr())
 
         self.outer_ctx.reset(self.outer_state)
@@ -214,6 +216,7 @@ def pbkdf2_hmac_sha256(
 
 struct PBKDF2SHA512(HMACer):
     """Cache HMAC-SHA-512 pad states for PBKDF2 derivations with one password (RFC 2104, sec. 4)."""
+
     comptime BLOCK = 128
     comptime HASH = 64
     var ipad: StackBuffer[UInt8, 128]
@@ -225,6 +228,7 @@ struct PBKDF2SHA512(HMACer):
     var outer_ctx: SHA512Context
     var inner_state: SIMD[DType.uint64, 8]
     var outer_state: SIMD[DType.uint64, 8]
+
     def u_block_ptr(mut self) -> Pointer[UInt8, MutUntrackedOrigin]:
         return self.u_block.ptr().unsafe_origin_cast[MutUntrackedOrigin]()
 
@@ -250,20 +254,20 @@ struct PBKDF2SHA512(HMACer):
         for i in range(128):
             self.ipad[i] = k[i] ^ 0x36
             self.opad[i] = k[i] ^ 0x5C
-        _secure_zero(k.ptr(), 128)
+        volatile_wipe(k.ptr(), 128)
         sha512_update(self.inner_ctx, Span[UInt8, ...](unsafe_ptr=self.ipad.ptr(), length=128))
         sha512_update(self.outer_ctx, Span[UInt8, ...](unsafe_ptr=self.opad.ptr(), length=128))
         self.inner_state = self.inner_ctx.state
         self.outer_state = self.outer_ctx.state
 
     def __deinit__(deinit self):
-        _secure_zero(Pointer(to=self.inner_state).unsafe_bitcast[UInt8](), 64)
-        _secure_zero(Pointer(to=self.outer_state).unsafe_bitcast[UInt8](), 64)
-        _secure_zero(self.ipad.ptr(), 128)
-        _secure_zero(self.opad.ptr(), 128)
-        _secure_zero(self.inner_hash.ptr(), 64)
-        _secure_zero(self.u_block.ptr(), 64)
-        _secure_zero(self.counter_bytes.ptr(), 4)
+        volatile_wipe(Pointer(to=self.inner_state).unsafe_bitcast[UInt8](), 64)
+        volatile_wipe(Pointer(to=self.outer_state).unsafe_bitcast[UInt8](), 64)
+        volatile_wipe(self.ipad.ptr(), 128)
+        volatile_wipe(self.opad.ptr(), 128)
+        volatile_wipe(self.inner_hash.ptr(), 64)
+        volatile_wipe(self.u_block.ptr(), 64)
+        volatile_wipe(self.counter_bytes.ptr(), 4)
 
     @always_inline
     def hmac(mut self, data: Span[UInt8, ...]):
@@ -312,7 +316,9 @@ struct PBKDF2SHA512(HMACer):
         self.inner_ctx.reset(self.inner_state)
         self.inner_ctx.count_low = 1024
         sha512_update(self.inner_ctx, data)
-        sha512_update(self.inner_ctx, Span[UInt8, ...](unsafe_ptr=self.counter_bytes.ptr(), length=4))
+        sha512_update(
+            self.inner_ctx, Span[UInt8, ...](unsafe_ptr=self.counter_bytes.ptr(), length=4)
+        )
         sha512_final_to_buffer(self.inner_ctx, self.inner_hash.ptr())
 
         self.outer_ctx.reset(self.outer_state)
@@ -344,14 +350,19 @@ def pbkdf2_hmac_sha512(
 
 trait RFC6979HMAC(Movable):
     """HMAC backend for deterministic nonce generation (RFC 6979, sec. 3.2)."""
+
     def __init__(out self, key: Span[UInt8, ...]): ...
-    def hmac_into(mut self, data: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]): ...
+
+    def hmac_into(
+        mut self, data: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]
+    ): ...
 
 
 struct HMACSHA256State(RFC6979HMAC):
     """Cache keyed SHA-256 inner and outer states for repeated HMAC operations (RFC 2104, sec.
     4).
     """
+
     var inner_state: SIMD[DType.uint32, 8]
     var outer_state: SIMD[DType.uint32, 8]
 
@@ -377,9 +388,9 @@ struct HMACSHA256State(RFC6979HMAC):
         var outer = SHA256Context()
         sha256_update(outer, Span[UInt8, ...](unsafe_ptr=opad.ptr(), length=64))
         self.outer_state = outer.state
-        _secure_zero(k.ptr(), 64)
-        _secure_zero(ipad.ptr(), 64)
-        _secure_zero(opad.ptr(), 64)
+        volatile_wipe(k.ptr(), 64)
+        volatile_wipe(ipad.ptr(), 64)
+        volatile_wipe(opad.ptr(), 64)
 
     def __deinit__(deinit self):
         var ip = Pointer(to=self.inner_state).unsafe_bitcast[UInt32]()
@@ -389,7 +400,9 @@ struct HMACSHA256State(RFC6979HMAC):
             op.unsafe_store[volatile=True](i, UInt32(0))
 
     @always_inline
-    def hmac_into(mut self, data: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]):
+    def hmac_into(
+        mut self, data: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]
+    ):
         """Write a 32-byte HMAC-SHA-256 tag without consuming the cached keyed states."""
         var inner = SHA256Context(self.inner_state)
         inner.count = 512
@@ -400,13 +413,14 @@ struct HMACSHA256State(RFC6979HMAC):
         outer.count = 512
         sha256_update(outer, Span[UInt8, ...](unsafe_ptr=digest.ptr(), length=32))
         sha256_final_to_buffer(outer, output)
-        _secure_zero(digest.ptr(), 32)
+        volatile_wipe(digest.ptr(), 32)
 
 
 struct HMACSHA384State(RFC6979HMAC):
     """Cache keyed SHA-384 inner and outer states for repeated HMAC operations (RFC 2104, sec.
     4).
     """
+
     var inner_state: SIMD[DType.uint64, 8]
     var outer_state: SIMD[DType.uint64, 8]
 
@@ -432,9 +446,9 @@ struct HMACSHA384State(RFC6979HMAC):
         var outer = SHA512Context(SHA384_IV)
         sha512_update(outer, Span[UInt8, ...](unsafe_ptr=opad.ptr(), length=128))
         self.outer_state = outer.state
-        _secure_zero(k.ptr(), 128)
-        _secure_zero(ipad.ptr(), 128)
-        _secure_zero(opad.ptr(), 128)
+        volatile_wipe(k.ptr(), 128)
+        volatile_wipe(ipad.ptr(), 128)
+        volatile_wipe(opad.ptr(), 128)
 
     def __deinit__(deinit self):
         var ip = Pointer(to=self.inner_state).unsafe_bitcast[UInt64]()
@@ -444,7 +458,9 @@ struct HMACSHA384State(RFC6979HMAC):
             op.unsafe_store[volatile=True](i, UInt64(0))
 
     @always_inline
-    def hmac_into(mut self, data: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]):
+    def hmac_into(
+        mut self, data: Span[UInt8, ...], output: Pointer[mut=True, UInt8, _, address_space=_]
+    ):
         """Write a 48-byte HMAC-SHA-384 tag without consuming the cached keyed states."""
         var inner = SHA512Context(self.inner_state)
         inner.count_low = 1024
@@ -457,7 +473,7 @@ struct HMACSHA384State(RFC6979HMAC):
         sha512_final_to_buffer(outer, digest.ptr())
         for i in range(48):
             output.unsafe_store(i, digest[i])
-        _secure_zero(digest.ptr(), 64)
+        volatile_wipe(digest.ptr(), 64)
 
 
 def hmac_sha256(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
@@ -482,43 +498,7 @@ def hmac_sha512(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
 
 def hmac_sha384(key: Span[UInt8, ...], data: Span[UInt8, ...]) -> List[UInt8]:
     """Return the 48-byte HMAC-SHA-384 tag for key and data (RFC 2104, sec. 2)."""
-    var k = StackBuffer[UInt8, 128](fill=0)
-    if len(key) > 128:
-        var kh = sha384_hash(key)
-        unsafe_memcpy(dest=k.ptr(), src=kh.unsafe_ptr(), count=48)
-        var khp = kh.unsafe_ptr()
-        for i in range(48):
-            khp.unsafe_store[volatile=True](i, UInt8(0))
-    else:
-        for i in range(len(key)):
-            k[i] = key[i]
-
-    var ipad = StackBuffer[UInt8, 128](fill=0)
-    var opad = StackBuffer[UInt8, 128](fill=0)
-    for i in range(128):
-        ipad[i] = k[i] ^ 0x36
-        opad[i] = k[i] ^ 0x5C
-
-    var inner = SHA512Context(SHA384_IV)
-    sha512_update(inner, Span[UInt8, ...](unsafe_ptr=ipad.ptr(), length=128))
-    sha512_update(inner, data)
-    var inner_hash = sha512_final_with_len(inner, 48)
-
-    var outer = SHA512Context(SHA384_IV)
-    sha512_update(outer, Span[UInt8, ...](unsafe_ptr=opad.ptr(), length=128))
-    sha512_update(outer, Span[UInt8, ...](inner_hash))
-    var result = sha512_final_with_len(outer, 48)
-
-    var kp = k.ptr()
-    var ip = ipad.ptr()
-    var op = opad.ptr()
-    for i in range(128):
-        kp.unsafe_store[volatile=True](i, UInt8(0))
-        ip.unsafe_store[volatile=True](i, UInt8(0))
-        op.unsafe_store[volatile=True](i, UInt8(0))
-    var ihp = inner_hash.unsafe_ptr()
-    for i in range(48):
-        ihp.unsafe_store[volatile=True](i, UInt8(0))
-    inner.wipe()
-    outer.wipe()
+    var ctx = HMACSHA384State(key)
+    var result = List[UInt8](unsafe_uninit_length=48)
+    ctx.hmac_into(data, result.unsafe_ptr())
     return result^

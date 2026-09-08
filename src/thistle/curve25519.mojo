@@ -26,6 +26,16 @@ def _u128_shr[shift: Int](x: UInt128) -> UInt128:
                     return UInt128(hi >> UInt64(shift - 64))
 
 
+@always_inline
+def _scale19[small_limbs: Bool](x: UInt64) -> UInt128:
+    # The X25519 ladder bounds its limbs below 2^53, so 19*x fits in UInt64.
+    # General field arithmetic retains the full-width intermediate.
+    comptime if small_limbs:
+        return UInt128(x * UInt64(19))
+    else:
+        return UInt128(x) * UInt128(19)
+
+
 struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
     """Field element in five 51-bit limbs; intermediate values need not be canonical."""
     var limbs: SIMD[DType.uint64, 8]
@@ -158,9 +168,12 @@ struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
 
     @always_inline
     def __mul__(self, other: FieldElement51) -> FieldElement51:
-        """Multiply modulo 2^255 - 19, folding high products with 19 before propagating
-        carries.
-        """
+        """Multiply modulo 2^255 - 19, folding high products with 19."""
+        return self._mul[False](other)
+
+    @always_inline
+    def _mul[small_limbs: Bool](self, other: FieldElement51) -> FieldElement51:
+        """Multiply with optional narrow pre-scaling; small_limbs requires limbs < 2^53."""
         var a = self.limbs
         var b = other.limbs
 
@@ -169,10 +182,10 @@ struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
         var b2 = UInt128(b[2])
         var b3 = UInt128(b[3])
         var b4 = UInt128(b[4])
-        var b1_19 = b1 * 19
-        var b2_19 = b2 * 19
-        var b3_19 = b3 * 19
-        var b4_19 = b4 * 19
+        var b1_19 = _scale19[small_limbs](b[1])
+        var b2_19 = _scale19[small_limbs](b[2])
+        var b3_19 = _scale19[small_limbs](b[3])
+        var b4_19 = _scale19[small_limbs](b[4])
         # Pre-scale wrapped terms by 19 because 2^255 = 19 modulo p.
 
         var a0 = UInt128(a[0])
@@ -205,6 +218,11 @@ struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
     @always_inline
     def square(self) -> FieldElement51:
         """Square modulo 2^255 - 19, computing each off-diagonal product once."""
+        return self._square[False]()
+
+    @always_inline
+    def _square[small_limbs: Bool](self) -> FieldElement51:
+        """Square with optional narrow pre-scaling; small_limbs requires limbs < 2^53."""
         var a = self.limbs
         var a0 = UInt128(a[0])
         var a1 = UInt128(a[1])
@@ -212,8 +230,8 @@ struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
         var a3 = UInt128(a[3])
         var a4 = UInt128(a[4])
         
-        var a3_19 = a3 * 19
-        var a4_19 = a4 * 19
+        var a3_19 = _scale19[small_limbs](a[3])
+        var a4_19 = _scale19[small_limbs](a[4])
 
         var c0 = a0 * a0 + (a1 * a4_19 + a2 * a3_19) * 2
         var c1 = a3 * a3_19 + (a0 * a1 + a2 * a4_19) * 2

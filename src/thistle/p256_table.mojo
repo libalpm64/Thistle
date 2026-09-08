@@ -2980,7 +2980,14 @@ def p256_w7_fill(p: Pointer[mut=True, UInt64, _]):
 def _p256_w7_table() -> InlineArray[UInt64, 37 * 64 * 8]:
     var table = InlineArray[UInt64, 37 * 64 * 8](fill=0)
     p256_w7_fill(table.unsafe_ptr())
-    return table^
+    # Transpose the generated points at compile time for vectorized masked scans.
+    # Layout: window, coordinate limb (x then y), magnitude 1..64.
+    var columns = InlineArray[UInt64, 37 * 64 * 8](fill=0)
+    for j in range(37):
+        for limb in range(8):
+            for t in range(64):
+                columns[j * 512 + limb * 64 + t] = table[j * 512 + t * 8 + limb]
+    return columns^
 
 
 # Materialize all 37 windows for the caller's read-only global table.

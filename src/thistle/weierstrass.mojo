@@ -580,15 +580,16 @@ def pow_mod[N: Int, N0: UInt64](base_in: Limbs[N], exponent: Limbs[N], rr: Limbs
     return from_mont[N, N0](res, p)
 
 
-@always_inline
+@no_inline
 def sqn[N: Int, N0: UInt64](x: Limbs[N], n: Int, p: Limbs[N]) -> Limbs[N]:
+    # Keep one squaring loop instead of expanding it at every addition-chain step.
     var r = x
     for _ in range(n):
         r = mont_sqr[N, N0](r, p)
     return r
 
 
-@always_inline
+@no_inline
 def inv_p[N: Int, N0: UInt64](x: Limbs[N], p: Limbs[N], rr: Limbs[N]) -> Limbs[N]:
     # Invert with the fixed Fermat addition chain for P-256 (four limbs) or P-384 (six).
     var x2 = mont_mul[N, N0](mont_sqr[N, N0](x, p), x, p)
@@ -992,14 +993,15 @@ def jacobian_add_affine_non_equal_ct[N: Int, N0: UInt64](p: JacobianPoint[N], q:
     var u2 = mont_mul[N, N0](q.x, z1z1, mod)
     var s2 = mont_mul[N, N0](q.y, mont_mul[N, N0](p.z, z1z1, mod), mod)
     var h = sub_mod(u2, p.x, mod)
-    var r = mul_small_mod(sub_mod(s2, p.y, mod), 2, mod)
-    var i = mont_sqr[N, N0](mul_small_mod(h, 2, mod), mod)
+    # (X3, Y3, Z3) and (4*X3, 8*Y3, 2*Z3) encode the same affine point.
+    # Keep H and R undoubled and compute Z3 directly to reduce field operations.
+    var r = sub_mod(s2, p.y, mod)
+    var z3 = mont_mul[N, N0](p.z, h, mod)
+    var i = mont_sqr[N, N0](h, mod)
     var j = mont_mul[N, N0](h, i, mod)
     var v = mont_mul[N, N0](p.x, i, mod)
     var x3 = sub_mod(sub_mod(mont_sqr[N, N0](r, mod), j, mod), mul_small_mod(v, 2, mod), mod)
-    var y3 = sub_mod(mont_mul[N, N0](r, sub_mod(v, x3, mod), mod), mul_small_mod(mont_mul[N, N0](p.y, j, mod), 2, mod), mod)
-    var hh = mont_sqr[N, N0](h, mod)
-    var z3 = sub_mod(sub_mod(mont_sqr[N, N0](add_mod(p.z, h, mod), mod), z1z1, mod), hh, mod)
+    var y3 = sub_mod(mont_mul[N, N0](r, sub_mod(v, x3, mod), mod), mont_mul[N, N0](p.y, j, mod), mod)
     var generic = JacobianPoint[N](x3, y3, z3, False)
     var q_as_jac = JacobianPoint[N](q.x, q.y, one_mont, False)
     var p_is_inf = zero_choice(p.z)
