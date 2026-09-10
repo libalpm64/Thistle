@@ -441,7 +441,7 @@ def run_nist_encapdecap_file(prompt_path: String, expected_path: String, py: Pyt
                     continue
                 passed += 1
             else:
-                # The pure Mojo API does not expose standalone key-check functions yet.
+                # Standalone key-check operations are outside the exposed ML-KEM API.
                 pass
     return passed, failed
 
@@ -508,7 +508,8 @@ def main() raises:
     passed += result[0]
     failed += result[1]
 
-    # ML-KEM vectors cover the pure Mojo implementation; key-check-only ACVP groups are skipped.
+    # Keygen, encapsulation, and decapsulation vectors cover the exposed ML-KEM API;
+    # ACVP groups containing only standalone key-check operations are out of scope.
     print("ML-KEM test suite: ", passed, " passed, ", failed, " failed")
     if failed > 0:
         raise Error("ML-KEM test suite failed")

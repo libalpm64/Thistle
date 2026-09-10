@@ -478,8 +478,17 @@ def _abs_i32(x: Int32) -> UInt32:
 
 
 def _poly_add_into(mut r: List[UInt32], b: List[UInt32]):
-    for i in range(N):
-        r[i] = _field_add(r[i], b[i])
+    var rp = r.unsafe_ptr()
+    var bp = b.unsafe_ptr()
+    var i = 0
+    while i < N:
+        rp.unsafe_store(
+            i,
+            _field_reduce_once_v(
+                rp.unsafe_load[width=_VW](i) + bp.unsafe_load[width=_VW](i)
+            ),
+        )
+        i += _VW
 
 
 def _dsa_poly_add_into(mut r: DSAPoly, b: DSAPoly):
@@ -503,8 +512,7 @@ def _dsa_copy_poly_into(mut r: DSAPoly, a: DSAPoly):
 
 
 def _ntt_mul_into(mut r: List[UInt32], a: List[UInt32], b: List[UInt32]):
-    for i in range(N):
-        r[i] = _montgomery_mul(a[i], b[i])
+    _ntt_mul_ptrs(r.unsafe_ptr(), a.unsafe_ptr(), b.unsafe_ptr())
 
 
 @always_inline
@@ -532,26 +540,14 @@ def _dsa_ntt_mul_into(mut r: DSAPoly, a: DSAPoly, b: List[UInt32]):
 
 
 def _ntt_inplace(mut f: List[UInt32]):
-    var m = 0
-    var length = 128
-    while length >= 1:
-        var start = 0
-        while start < 256:
-            m += 1
-            var zeta = _zeta(m)
-            var j = start
-            while j < start + length:
-                var t = _montgomery_mul(zeta, f[j + length])
-                f[j + length] = _field_sub(f[j], t)
-                f[j] = _field_add(f[j], t)
-                j += 1
-            start += 2 * length
-        length //= 2
+    if len(f) < N:
+        abort("ML-DSA NTT polynomial too short")
+    _ntt_ptr(f.unsafe_ptr())
 
 
-def _dsa_ntt_inplace(mut f: DSAPoly):
+@always_inline
+def _ntt_ptr(p: Pointer[mut=True, UInt32, _, address_space=_]):
     """Apply the eight-layer NTT with scalar and SIMD butterflies (FIPS 204, Algorithm 41)."""
-    var p = f.unsafe_ptr()
     var m = 0
     var length = 128
     while length >= 1:
@@ -572,12 +568,18 @@ def _dsa_ntt_inplace(mut f: DSAPoly):
             else:
                 var j = start
                 while j < start + length:
-                    var t = _montgomery_mul(zeta, f[j + length])
-                    f[j + length] = _field_sub(f[j], t)
-                    f[j] = _field_add(f[j], t)
+                    var a = p.unsafe_load(j)
+                    var b = p.unsafe_load(j + length)
+                    var t = _montgomery_mul(zeta, b)
+                    p.unsafe_store(j + length, _field_sub(a, t))
+                    p.unsafe_store(j, _field_add(a, t))
                     j += 1
             start += 2 * length
         length //= 2
+
+
+def _dsa_ntt_inplace(mut f: DSAPoly):
+    _ntt_ptr(f.unsafe_ptr())
 
 
 def _ntt(var f: List[UInt32]) -> List[UInt32]:
@@ -586,28 +588,14 @@ def _ntt(var f: List[UInt32]) -> List[UInt32]:
 
 
 def _inverse_ntt_inplace(mut f: List[UInt32]):
-    var m = 255
-    var length = 1
-    while length < 256:
-        var start = 0
-        while start < 256:
-            var zeta = _zeta(m)
-            m -= 1
-            var j = start
-            while j < start + length:
-                var t = f[j]
-                f[j] = _field_add(t, f[j + length])
-                f[j + length] = _montgomery_mul_sub(zeta, f[j + length], t)
-                j += 1
-            start += 2 * length
-        length *= 2
-    for i in range(N):
-        f[i] = _montgomery_mul(f[i], 16382)
+    if len(f) < N:
+        abort("ML-DSA inverse NTT polynomial too short")
+    _inverse_ntt_ptr(f.unsafe_ptr())
 
 
-def _dsa_inverse_ntt_inplace(mut f: DSAPoly):
+@always_inline
+def _inverse_ntt_ptr(p: Pointer[mut=True, UInt32, _, address_space=_]):
     """Apply the inverse NTT (FIPS 204, Algorithm 42), using Montgomery-scaled factor 16382."""
-    var p = f.unsafe_ptr()
     var m = 255
     var length = 1
     while length < 256:
@@ -632,9 +620,10 @@ def _dsa_inverse_ntt_inplace(mut f: DSAPoly):
             else:
                 var j = start
                 while j < start + length:
-                    var t = f[j]
-                    f[j] = _field_add(t, f[j + length])
-                    f[j + length] = _montgomery_mul_sub(zeta, f[j + length], t)
+                    var a = p.unsafe_load(j)
+                    var b = p.unsafe_load(j + length)
+                    p.unsafe_store(j, _field_add(a, b))
+                    p.unsafe_store(j + length, _montgomery_mul_sub(zeta, b, a))
                     j += 1
             start += 2 * length
         length *= 2
@@ -642,6 +631,10 @@ def _dsa_inverse_ntt_inplace(mut f: DSAPoly):
     while i < N:
         p.unsafe_store(i, _montgomery_mul_v(p.unsafe_load[width=_VW](i), _U32v(16382)))
         i += _VW
+
+
+def _dsa_inverse_ntt_inplace(mut f: DSAPoly):
+    _inverse_ntt_ptr(f.unsafe_ptr())
 
 
 def _inverse_ntt(var f: List[UInt32]) -> List[UInt32]:
@@ -1406,7 +1399,7 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
     var nonce = shake256(Span[UInt8, ...](unsafe_ptr=h_input.ptr(), length=h_input.len()), 64)
     zero_stack_u8(h_input)
 
-    # Allocate signing scratch once and reuse it across rejection attempts.
+    # Signing scratch is allocated once and reused across rejection attempts.
     var y = DSAPolyVec[MAX_L]()
     var y_hat = DSAPolyVec[MAX_L]()
     var w = DSAPolyVec[MAX_K]()

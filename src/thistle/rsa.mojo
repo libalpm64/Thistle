@@ -741,8 +741,8 @@ struct RsaPublicKey:
 
 
 def _wipe_bn(mut value: StaticTuple[UInt64, _NL], k: Int):
-    # StaticTuple indexing returns an element by value. Take the address of the
-    # aggregate itself so the volatile stores target the caller's tuple storage.
+    # StaticTuple indexing returns values, so volatile wiping addresses the aggregate
+    # storage directly.
     var ptr = Pointer(to=value).unsafe_bitcast[UInt64]()
     for i in range(k):
         ptr.unsafe_store[volatile=True](i, UInt64(0))
@@ -829,8 +829,8 @@ def _bn_inverse_odd(a: StaticTuple[UInt64, _NL], key: RsaPublicKey) -> Tuple[Sta
     """
     # Each active step removes at least one bit from the product of the GCD operands.
     # Twice the modulus bit width bounds the steps; completed states remain unchanged.
-    # Addressable limbs avoid rebuilding StaticTuples in the hot loop.
-    # Keep four state rows and four scratch rows alive until the final wipe.
+    # Store GCD state and scratch values in contiguous limb rows so each iteration
+    # updates them in place; retain all rows through the final wipe.
     var state = InlineArray[UInt64, 4 * _NL](fill=0)
     var scratch = InlineArray[UInt64, 4 * _NL](fill=0)
     var u = state.unsafe_ptr()

@@ -89,7 +89,7 @@ def g_idx[
     x: SIMD[DType.uint32, w],
     y: SIMD[DType.uint32, w]
 ):
-    # Copy values in and out to avoid simultaneous mutable references into one array.
+    # Local copies satisfy Mojo's aliasing rules for four simultaneous state words.
     var a = v[ai]
     var b = v[bi]
     var c = v[ci]
@@ -306,7 +306,7 @@ struct Hasher:
                         self.blocks_compressed = 0
                         self.buf_len = 0
                     else:
-                        # Retain the final chunk block so finalize() can apply ROOT when needed.
+                        # The final chunk block remains buffered so finalize() can apply ROOT.
                         return
                 else:
                     var res = compress_core(

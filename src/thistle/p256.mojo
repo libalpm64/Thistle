@@ -4,7 +4,7 @@ with RFC 6979 nonces.
 
 from .p256_table import P256_W7_TABLE
 from std.builtin.globals import global_constant
-from .utils import u64_nonzero_choice, u64_zero_choice
+from .utils import u64_nonzero_choice
 from .sha2 import sha256_hash
 from .pbkdf2 import hmac_sha256
 from std.utils import StaticTuple
@@ -348,29 +348,37 @@ def _scalar_mult_jacobian(k: U256, p: P256Point) -> P256JacobianPoint:
 def _base_table_entry_w7(
     tptr: Pointer[mut=False, UInt64, _], j: Int, d: UInt64
 ) -> P256Point:
+    # Scan all 64 magnitudes four at a time. Table addresses depend only on the
+    # public window index and scan counter; the secret magnitude is used only in masks.
+    var sums = InlineArray[SIMD[DType.uint64, 4], 8](fill=SIMD[DType.uint64, 4](0))
+    var indexes = SIMD[DType.uint64, 4](1, 2, 3, 4)
+    for t in range(16):
+        var mask = indexes.eq(SIMD[DType.uint64, 4](d))
+        comptime for limb in range(8):
+            var values = tptr.unsafe_load[width=4, alignment=8](j * 512 + limb * 64 + t * 4)
+            sums[limb] |= mask.select(values, SIMD[DType.uint64, 4](0))
+        indexes += SIMD[DType.uint64, 4](4)
     var qx = U256()
     var qy = U256()
-    for t in range(1, 65):
-        var hit = u64_zero_choice(UInt64(t) ^ d)
-        var base = (j * 64 + (t - 1)) * 8
-        var ex = U256()
-        var ey = U256()
-        for i in range(4):
-            ex.limbs[i] = tptr[unsafe_offset=base + i]
-            ey.limbs[i] = tptr[unsafe_offset=base + 4 + i]
-        qx = ws_select(qx, ex, hit)
-        qy = ws_select(qy, ey, hit)
+    comptime for limb in range(4):
+        var sx = sums[limb]
+        var sy = sums[limb + 4]
+        qx.limbs[limb] = sx[0] | sx[1] | sx[2] | sx[3]
+        qy.limbs[limb] = sy[0] | sy[1] | sy[2] | sy[3]
     return P256Point(qx, qy, False)
 
 
 @always_inline
 def _window_bits_w7(k: U256, start: Int) -> UInt64:
-    var value: UInt64 = 0
-    for j in range(8):
-        var bit_index = start + j
-        if bit_index >= 0 and bit_index < 256:
-            value |= k.bit(bit_index) << UInt64(j)
-    return value
+    # The first window includes the implicit zero bit below bit 0.
+    if start < 0:
+        return (k.limbs[0] << 1) & UInt64(255)
+    var word = start // 64
+    var shift = start % 64
+    var value = k.limbs[word] >> UInt64(shift)
+    if shift > 56 and word < 3:
+        value |= k.limbs[word + 1] << UInt64(64 - shift)
+    return value & UInt64(255)
 
 
 @always_inline
@@ -382,34 +390,93 @@ def _booth_recode_w7(value: UInt64) -> UInt64:
     return (digit << 1) + (sign & UInt64(1))
 
 
+struct P256XYZZPoint(Copyable, ImplicitlyCopyable, Movable):
+    """Projective point with cached Z^2 and Z^3, all in Montgomery form."""
+    var x: U256
+    var y: U256
+    var zz: U256
+    var zzz: U256
+
+    def __init__(out self, x: U256, y: U256, zz: U256, zzz: U256):
+        self.x = x
+        self.y = y
+        self.zz = zz
+        self.zzz = zzz
+
+
+@always_inline
+def _select_xyzz_ct(a: P256XYZZPoint, b: P256XYZZPoint, choice: UInt64) -> P256XYZZPoint:
+    return P256XYZZPoint(
+        ws_select(a.x, b.x, choice), ws_select(a.y, b.y, choice),
+        ws_select(a.zz, b.zz, choice), ws_select(a.zzz, b.zzz, choice)
+    )
+
+
+@always_inline
+def _xyzz_add_affine_non_equal_ct(p: P256XYZZPoint, q: P256Point) -> P256XYZZPoint:
+    # Fixed-base windows cannot add equal nonzero points. XYZZ coordinates retain
+    # Z^2 and Z^3 so mixed addition can reuse them directly.
+    var u2 = _mont_mul(q.x, p.zz)
+    var s2 = _mont_mul(q.y, p.zzz)
+    var h = _sub_mod(u2, p.x)
+    var r = _sub_mod(s2, p.y)
+    var hh = _mont_sqr(h)
+    var hhh = _mont_mul(h, hh)
+    var v = _mont_mul(p.x, hh)
+    var x3 = _sub_mod(_sub_mod(_mont_sqr(r), hhh), _add_mod(v, v))
+    var y3 = _sub_mod(_mont_mul(r, _sub_mod(v, x3)), _mont_mul(p.y, hhh))
+    var zz3 = _mont_mul(p.zz, hh)
+    var zzz3 = _mont_mul(p.zzz, hhh)
+    var result = P256XYZZPoint(x3, y3, zz3, zzz3)
+    var q_as_xyzz = P256XYZZPoint(q.x, q.y, _one_mont(), _one_mont())
+    return _select_xyzz_ct(result, q_as_xyzz, _u256_zero_choice(p.zz))
+
+
 @no_inline
-def _scalar_mult_base_jacobian_w7(k: U256) -> P256JacobianPoint:
-    """Multiply the generator with 37 signed 7-bit windows. Each window scans all 64
-    precomputed magnitudes under masks; the result stays in Jacobian form.
-    """
+def _scalar_mult_base_xyzz_w7(k: U256) -> P256XYZZPoint:
+    """Multiply the generator with masked scans of all 37 signed 7-bit windows."""
     ref table = global_constant[P256_W7_TABLE]()
     var tptr = table.unsafe_ptr()
-
-    var acc = _jacobian_infinity()
-    for j in range(37):
+    # Initialize from window zero; a zero digit keeps the accumulator at infinity.
+    var recoded0 = _booth_recode_w7(_window_bits_w7(k, -1))
+    var magnitude0 = recoded0 >> 1
+    var q0 = _base_table_entry_w7(tptr, 0, magnitude0)
+    q0.y = ws_select(q0.y, _sub_mod(_p(), q0.y, _p()), recoded0 & UInt64(1))
+    var z0 = ws_select(U256(), _one_mont(), u64_nonzero_choice(magnitude0))
+    var acc = P256XYZZPoint(q0.x, q0.y, z0, z0)
+    for j in range(1, 37):
         var recoded = _booth_recode_w7(_window_bits_w7(k, 7 * j - 1))
         var magnitude = recoded >> 1
         var q = _base_table_entry_w7(tptr, j, magnitude)
         var neg_y = _sub_mod(_p(), q.y, _p())
         q.y = ws_select(q.y, neg_y, recoded & UInt64(1))
-        var gp = JacobianPoint[4](acc.x, acc.y, acc.z, acc.infinity)
-        var gq = Point[4](q.x, q.y, q.infinity)
-        var sum = ws_jacobian_add_affine[4, _N0](
-            gp, gq, _p(), _rr(), _one_mont()
-        )
-        var sum_p = P256JacobianPoint(sum.x, sum.y, sum.z, sum.infinity)
-        acc = _select_jacobian_ct(acc, sum_p, u64_nonzero_choice(magnitude))
+        var sum = _xyzz_add_affine_non_equal_ct(acc, q)
+        acc = _select_xyzz_ct(acc, sum, u64_nonzero_choice(magnitude))
     return acc
 
 
 @always_inline
+def _xyzz_to_affine(p: P256XYZZPoint) -> P256Point:
+    if _u256_zero_choice(p.zz) == UInt64(1):
+        return P256Point()
+    var zzz_inv = _inv_p(p.zzz)
+    var z_inv = _mont_mul(p.zz, zzz_inv)
+    var zz_inv = _mont_sqr(z_inv)
+    return P256Point(
+        _from_mont(_mont_mul(p.x, zz_inv)), _from_mont(_mont_mul(p.y, zzz_inv)), False
+    )
+
+
+@always_inline
 def _scalar_mult_base(k: U256) -> P256Point:
-    return _jacobian_to_affine(_scalar_mult_base_jacobian_w7(k))
+    return _xyzz_to_affine(_scalar_mult_base_xyzz_w7(k))
+
+
+@always_inline
+def _scalar_mult_base_jacobian_w7(k: U256) -> P256JacobianPoint:
+    var p = _scalar_mult_base_xyzz_w7(k)
+    # Use Z^2 as the Jacobian Z: X' = X*Z^2 and Y' = Y*Z^3.
+    return P256JacobianPoint(_mont_mul(p.x, p.zz), _mont_mul(p.y, p.zzz), p.zz, False)
 
 
 @always_inline
@@ -470,6 +537,21 @@ def p256_encode_uncompressed(
     return True
 
 
+@always_inline
+def _encode_uncompressed_trusted(
+    point: P256Point, output: Span[mut=True, UInt8, ...]
+) -> Bool:
+    # Trusted internal points are finite and on-curve (for example, q = d*G with
+    # 1 <= d < n on a prime-order curve), so this path writes the SEC1 encoding directly.
+    if len(output) < P256_POINT_SIZE or point.infinity:
+        return False
+    var out_ptr = output.unsafe_ptr()
+    out_ptr[unsafe_offset=0] = 0x04
+    _to_be(point.x, out_ptr.unsafe_offset(1))
+    _to_be(point.y, out_ptr.unsafe_offset(33))
+    return True
+
+
 @no_inline
 def p256_public_key(
     private_key: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
@@ -486,7 +568,7 @@ def p256_public_key(
             dp.unsafe_store[volatile=True](i, UInt64(0))
         return False
     var q = _scalar_mult_base(d)
-    var ok = p256_encode_uncompressed(q, output)
+    var ok = _encode_uncompressed_trusted(q, output)
     var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
     for i in range(4):
         dp.unsafe_store[volatile=True](i, UInt64(0))
@@ -692,6 +774,182 @@ def _p256_add_public(a: P256Point, b: P256Point) -> P256Point:
     return P256Point(res.x, res.y, res.infinity)
 
 
+@no_inline
+def _n_inv_public(x: U256) -> U256:
+    """Invert a public scalar with binary GCD; requires 0 < x < n.
+    The coefficients satisfy u = a*x and v = b*x modulo n.
+    """
+    var u = x
+    var v = _n()
+    var a = U256.one()
+    var b = U256()
+    while not _eq(u, U256.one()) and not _eq(v, U256.one()):
+        while (u.limbs[0] & 1) == 0:
+            u = _shift_right_one(u)
+            a = _half_mod_n_public(a)
+        while (v.limbs[0] & 1) == 0:
+            v = _shift_right_one(v)
+            b = _half_mod_n_public(b)
+        if _cmp(u, v) >= 0:
+            u = _sub_raw(u, v)[0]
+            a = _sub_mod(a, b, _n())
+        else:
+            v = _sub_raw(v, u)[0]
+            b = _sub_mod(b, a, _n())
+    return a if _eq(u, U256.one()) else b
+
+
+@always_inline
+def _shift_right_one(x: U256, carry: UInt64 = 0) -> U256:
+    var out = U256()
+    comptime for i in range(3):
+        out.limbs[i] = (x.limbs[i] >> 1) | (x.limbs[i + 1] << 63)
+    out.limbs[3] = (x.limbs[3] >> 1) | (carry << 63)
+    return out
+
+
+@always_inline
+def _half_mod_n_public(x: U256) -> U256:
+    if (x.limbs[0] & 1) == 0:
+        return _shift_right_one(x)
+    var sum, carry = _add_raw(x, _n())
+    return _shift_right_one(sum, carry)
+
+
+@no_inline
+def _jacobian_add_public(p: P256JacobianPoint, q: P256JacobianPoint) -> P256JacobianPoint:
+    """Add public points, branching on the exceptional cases."""
+    if p.z.is_zero():
+        return q
+    if q.z.is_zero():
+        return p
+    var z1z1 = _mont_sqr(p.z)
+    var z2z2 = _mont_sqr(q.z)
+    var u1 = _mont_mul(p.x, z2z2)
+    var u2 = _mont_mul(q.x, z1z1)
+    var s1 = _mont_mul(p.y, _mont_mul(q.z, z2z2))
+    var s2 = _mont_mul(q.y, _mont_mul(p.z, z1z1))
+    var h = _sub_mod(u2, u1)
+    var r = _sub_mod(s2, s1)
+    if h.is_zero():
+        if r.is_zero():
+            return _jacobian_double_ct(p)
+        return _jacobian_infinity()
+    var hh = _mont_sqr(h)
+    var hhh = _mont_mul(h, hh)
+    var v = _mont_mul(u1, hh)
+    var x3 = _sub_mod(_sub_mod(_mont_sqr(r), hhh), _add_mod(v, v))
+    var y3 = _sub_mod(_mont_mul(r, _sub_mod(v, x3)), _mont_mul(s1, hhh))
+    return P256JacobianPoint(x3, y3, _mont_mul(h, _mont_mul(p.z, q.z)), False)
+
+
+@no_inline
+def _jacobian_add_affine_public(p: P256JacobianPoint, q: P256Point) -> P256JacobianPoint:
+    """Add a public affine point in Montgomery form, including equal/opposite points."""
+    if p.z.is_zero():
+        return P256JacobianPoint(q.x, q.y, _one_mont(), False)
+    var z2 = _mont_sqr(p.z)
+    var h = _sub_mod(_mont_mul(q.x, z2), p.x)
+    var r = _sub_mod(_mont_mul(q.y, _mont_mul(p.z, z2)), p.y)
+    if h.is_zero():
+        if r.is_zero():
+            return _jacobian_double_ct(p)
+        return _jacobian_infinity()
+    var hh = _mont_sqr(h)
+    var hhh = _mont_mul(h, hh)
+    var v = _mont_mul(p.x, hh)
+    var x3 = _sub_mod(_sub_mod(_mont_sqr(r), hhh), _add_mod(v, v))
+    var y3 = _sub_mod(_mont_mul(r, _sub_mod(v, x3)), _mont_mul(p.y, hhh))
+    return P256JacobianPoint(x3, y3, _mont_mul(p.z, h), False)
+
+
+def _naf_public[width: Int](k: U256) -> InlineArray[Int, 257]:
+    """Recode a public scalar as signed odd digits, allowing a carry into bit 256."""
+    var naf = InlineArray[Int, 257](fill=0)
+    var words = InlineArray[UInt64, 5](fill=0)
+    for i in range(4):
+        words[i] = k.limbs[i]
+    var pos = 0
+    var carry = UInt64(0)
+    while pos < 257:
+        var idx = pos >> 6
+        var bit = pos & 63
+        var bits = words[idx] >> UInt64(bit)
+        if bit > 64 - width:
+            bits |= words[idx + 1] << UInt64(64 - bit)
+        var window = carry + (bits & UInt64((1 << width) - 1))
+        if (window & UInt64(1)) == 0:
+            pos += 1
+            continue
+        if window < UInt64(1 << (width - 1)):
+            carry = 0
+            naf[pos] = Int(window)
+        else:
+            carry = 1
+            naf[pos] = Int(window) - (1 << width)
+        pos += width
+    return naf^
+
+
+@no_inline
+def _double_scalar_mult_public(u1: U256, u2: U256, p: P256Point) -> P256JacobianPoint:
+    """Compute u1*G + u2*P for verification. Both scalars and P must be public:
+    digits control branches and table indices. P must be a validated, finite point.
+    Secret multiplication uses the masked paths.
+    """
+    var naf = _naf_public[5](u2)
+    var naf_g = _naf_public[7](u1)
+    ref base_table = global_constant[P256_W7_TABLE]()
+    var tptr = base_table.unsafe_ptr()
+    var pm = P256Point(_to_mont(p.x), _to_mont(p.y), False)
+    var jac = InlineArray[P256JacobianPoint, 8](fill=_jacobian_infinity())
+    jac[0] = P256JacobianPoint(pm.x, pm.y, _one_mont(), False)
+    var twice = _jacobian_double_ct(jac[0])
+    for i in range(1, 8):
+        jac[i] = _jacobian_add_public(jac[i - 1], twice)
+    # Batch-normalize P, 3P, ..., 15P with one inversion.
+    var prefix = InlineArray[U256, 8](fill=U256())
+    prefix[0] = jac[0].z
+    for i in range(1, 8):
+        prefix[i] = _mont_mul(prefix[i - 1], jac[i].z)
+    var inv = _inv_p(prefix[7])
+    var table = InlineArray[P256Point, 8](fill=P256Point())
+    for i in range(7, -1, -1):
+        var zi = inv
+        if i > 0:
+            zi = _mont_mul(inv, prefix[i - 1])
+            inv = _mont_mul(inv, jac[i].z)
+        var z2 = _mont_sqr(zi)
+        table[i] = P256Point(
+            _mont_mul(jac[i].x, z2), _mont_mul(jac[i].y, _mont_mul(z2, zi)), False
+        )
+    var acc = _jacobian_infinity()
+    var start = 256
+    while start > 0 and naf[start] == 0 and naf_g[start] == 0:
+        start -= 1
+    for i in range(start, -1, -1):
+        acc = _jacobian_double_ct(acc)
+        var digit = naf[i]
+        if digit != 0:
+            var q = table[(abs(digit) - 1) >> 1]
+            if digit < 0:
+                q.y = _sub_mod(U256(), q.y)
+            acc = _jacobian_add_affine_public(acc, q)
+        digit = naf_g[i]
+        if digit != 0:
+            # The first generator-table window contains G, 2G, ..., 64G.
+            var offset = abs(digit) - 1
+            var qx = U256()
+            var qy = U256()
+            for limb in range(4):
+                qx.limbs[limb] = tptr[unsafe_offset=offset + limb * 64]
+                qy.limbs[limb] = tptr[unsafe_offset=offset + (4 + limb) * 64]
+            if digit < 0:
+                qy = _sub_mod(U256(), qy)
+            acc = _jacobian_add_affine_public(acc, P256Point(qx, qy, False))
+    return acc
+
+
 def p256_ecdsa_verify_digest(
     public_key: Span[UInt8, ...],
     digest: Span[UInt8, ...],
@@ -708,15 +966,21 @@ def p256_ecdsa_verify_digest(
     if r.is_zero() or s.is_zero() or _cmp(r, _n()) >= 0 or _cmp(s, _n()) >= 0:
         return False
     var z = _reduce_n(_from_be(digest))
-    var w = _n_inv(s)
+    var w = _n_inv_public(s)
     var u1 = _n_mul(z, w)
     var u2 = _n_mul(r, w)
-    var p1 = _scalar_mult_base_jacobian(u1)
-    var p2 = _scalar_mult_jacobian(u2, q)
-    var point = _jacobian_to_affine(_jacobian_add(p1, p2))
-    if point.infinity:
+    var point = _double_scalar_mult_public(u1, u2, q)
+    if point.infinity or point.z.is_zero():
         return False
-    return _eq(_reduce_n(point.x), r)
+    # Since p < 2n and x = X/Z^2 lies in [0, p), x mod n = r permits only
+    # x = r or x = r + n.
+    var z2 = _mont_sqr(point.z)
+    if _eq(point.x, _mont_mul(_to_mont(r), z2)):
+        return True
+    var r_plus_n, carry = _add_raw(r, _n())
+    if carry != 0 or _cmp(r_plus_n, _p()) >= 0:
+        return False
+    return _eq(point.x, _mont_mul(_to_mont(r_plus_n), z2))
 
 
 def p256_ecdsa_verify(

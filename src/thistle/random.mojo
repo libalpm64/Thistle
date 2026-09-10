@@ -22,7 +22,8 @@ def _getrandom_linux_x86(buf: Pointer[mut=True, UInt8, _, address_space=_], leng
 @always_inline
 def _getrandom_linux_arm(buf: Pointer[mut=True, UInt8, _, address_space=_], length: Int) -> Int:
     # Linux AArch64 getrandom: syscall 278, flags = 0.
-    # Stage inputs in scratch registers to avoid inline-assembly constraint conflicts.
+    # Stage buffer and length in x9/x10 before moving them into syscall argument
+    # registers x0/x1.
     return Int(
         inlined_assembly[
             """

@@ -2,6 +2,7 @@
 
 from std.memory import Pointer
 from std.collections import InlineArray
+from .utils import volatile_wipe
 
 # Masks for the 44/44/42-bit representation modulo 2^130 - 5.
 comptime _M44: UInt64 = 0xFFFFFFFFFFF
@@ -55,8 +56,13 @@ struct _RPower(Copyable, ImplicitlyCopyable, Movable):
 
 @always_inline
 def _mul_acc(
-    h0: UInt64, h1: UInt64, h2: UInt64, r: _RPower,
-    mut d0: UInt128, mut d1: UInt128, mut d2: UInt128
+    h0: UInt64,
+    h1: UInt64,
+    h2: UInt64,
+    r: _RPower,
+    mut d0: UInt128,
+    mut d1: UInt128,
+    mut d2: UInt128,
 ):
     d0 += UInt128(h0) * UInt128(r.r0) + UInt128(h1) * UInt128(r.s2) + UInt128(h2) * UInt128(r.s1)
     d1 += UInt128(h0) * UInt128(r.r1) + UInt128(h1) * UInt128(r.r0) + UInt128(h2) * UInt128(r.s2)
@@ -64,8 +70,7 @@ def _mul_acc(
 
 
 @always_inline
-def _reduce(mut h0: UInt64, mut h1: UInt64, mut h2: UInt64, d0: UInt128, d1: UInt128, d2: UInt128
-):
+def _reduce(mut h0: UInt64, mut h1: UInt64, mut h2: UInt64, d0: UInt128, d1: UInt128, d2: UInt128):
     var c = d0 >> 44
     h0 = d0.cast[DType.uint64]() & _M44
     var e1 = d1 + c
@@ -81,15 +86,13 @@ def _reduce(mut h0: UInt64, mut h1: UInt64, mut h2: UInt64, d0: UInt128, d1: UIn
 
 
 @always_inline
-def _limbs_at(ptr: Pointer[mut=False, UInt8, _, address_space=_], offset: Int, hibit: UInt64
+def _limbs_at(
+    ptr: Pointer[mut=False, UInt8, _, address_space=_], offset: Int, hibit: UInt64
 ) -> SIMD[DType.uint64, 4]:
     var t0 = _le64(ptr, offset)
     var t1 = _le64(ptr, offset + 8)
     return SIMD[DType.uint64, 4](
-        t0 & _M44,
-        ((t0 >> 44) | (t1 << 20)) & _M44,
-        ((t1 >> 24) & _M42) | hibit,
-        0
+        t0 & _M44, ((t0 >> 44) | (t1 << 20)) & _M44, ((t1 >> 24) & _M42) | hibit, 0
     )
 
 
@@ -97,6 +100,7 @@ struct Poly1305:
     """One-time authenticator with a 32-byte key (RFC 8439, sec. 2.5). The API becomes terminal
     after wiping or successful finalization; invalid output sizes remain retryable.
     """
+
     var r: _RPower
     var r2: _RPower
     var r3: _RPower
@@ -125,7 +129,7 @@ struct Poly1305:
         self.r = _RPower(
             t0 & 0xFFC0FFFFFFF,
             ((t0 >> 44) | (t1 << 20)) & 0xFFFFFC0FFFF,
-            (t1 >> 24) & 0x00FFFFFFC0F
+            (t1 >> 24) & 0x00FFFFFFC0F,
         )
         self.pad0 = _le64(kp, 16)
         self.pad1 = _le64(kp, 24)
@@ -198,8 +202,7 @@ struct Poly1305:
         _reduce(self.h0, self.h1, self.h2, d0, d1, d2)
 
     @no_inline
-    def _blocks8(mut self, ptr: Pointer[mut=False, UInt8, _, address_space=_], count8: Int
-    ):
+    def _blocks8(mut self, ptr: Pointer[mut=False, UInt8, _, address_space=_], count8: Int):
         var h0 = self.h0
         var h1 = self.h1
         var h2 = self.h2
@@ -231,8 +234,7 @@ struct Poly1305:
         self.h2 = h2
 
     @no_inline
-    def _blocks4(mut self, ptr: Pointer[mut=False, UInt8, _, address_space=_], count4: Int
-    ):
+    def _blocks4(mut self, ptr: Pointer[mut=False, UInt8, _, address_space=_], count4: Int):
         var h0 = self.h0
         var h1 = self.h1
         var h2 = self.h2
@@ -256,48 +258,46 @@ struct Poly1305:
         self.h2 = h2
 
     def update(mut self, data: Span[UInt8, ...]):
-        var n = len(data)
-        if n == 0:
+        var input_len = len(data)
+        if input_len == 0:
             return
-        var ptr = data.unsafe_ptr()
-        var i = 0
+        var input_ptr = data.unsafe_ptr()
+        var offset = 0
 
         if self.buf_len > 0:
-            while self.buf_len < 16 and i < n:
-                self.buf[self.buf_len] = ptr[unsafe_offset=i]
+            while self.buf_len < 16 and offset < input_len:
+                self.buf[self.buf_len] = input_ptr[unsafe_offset=offset]
                 self.buf_len += 1
-                i += 1
+                offset += 1
             if self.buf_len == 16:
                 var bp = self.buf.unsafe_ptr()
                 self._block(_le64(bp, 0), _le64(bp, 8), UInt64(1) << 40)
                 self.buf_len = 0
 
-        var octs = (n - i) >> 7
-        if octs > 0:
+        var groups8 = (input_len - offset) >> 7
+        if groups8 > 0:
             if not self.powers8_ready:
                 self._make_powers8()
-            self._blocks8(ptr.unsafe_offset(i), octs)
-            i += octs << 7
+            self._blocks8(input_ptr.unsafe_offset(offset), groups8)
+            offset += groups8 << 7
 
-        var quads = (n - i) >> 6
-        if quads > 0 and (self.powers4_ready or quads > 1):
+        var groups4 = (input_len - offset) >> 6
+        if groups4 > 0 and (self.powers4_ready or groups4 > 1):
             if not self.powers4_ready:
                 self._make_powers4()
-            self._blocks4(ptr.unsafe_offset(i), quads)
-            i += quads << 6
+            self._blocks4(input_ptr.unsafe_offset(offset), groups4)
+            offset += groups4 << 6
 
-        while i + 16 <= n:
-            self._block(_le64(ptr, i), _le64(ptr, i + 8), UInt64(1) << 40)
-            i += 16
+        while offset + 16 <= input_len:
+            self._block(_le64(input_ptr, offset), _le64(input_ptr, offset + 8), UInt64(1) << 40)
+            offset += 16
 
-        while i < n:
-            self.buf[self.buf_len] = ptr[unsafe_offset=i]
+        while offset < input_len:
+            self.buf[self.buf_len] = input_ptr[unsafe_offset=offset]
             self.buf_len += 1
-            i += 1
+            offset += 1
 
-    def _finalize_into_unchecked(
-        mut self, output: Pointer[mut=True, UInt8, _, address_space=_]
-    ):
+    def _finalize_into_unchecked(mut self, output: Pointer[mut=True, UInt8, _, address_space=_]):
         if self.buf_len > 0:
             self.buf[self.buf_len] = 1
             for j in range(self.buf_len + 1, 16):
@@ -355,9 +355,7 @@ struct Poly1305:
         (output.unsafe_offset(8)).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](0, o1)
         self.wipe()
 
-    def finalize_into(
-        mut self, output: Span[mut=True, UInt8, ...]
-    ) raises:
+    def finalize_into(mut self, output: Span[mut=True, UInt8, ...]) raises:
         if self.finalized:
             raise Error("Poly1305 context is already finalized or wiped")
         if len(output) < 16:
@@ -378,9 +376,7 @@ struct Poly1305:
         Pointer(to=self.h2).unsafe_store[volatile=True](0, UInt64(0))
         Pointer(to=self.pad0).unsafe_store[volatile=True](0, UInt64(0))
         Pointer(to=self.pad1).unsafe_store[volatile=True](0, UInt64(0))
-        var buf_ptr = self.buf.unsafe_ptr()
-        for i in range(16):
-            buf_ptr.unsafe_store[volatile=True](i, UInt8(0))
+        volatile_wipe(self.buf.unsafe_ptr(), 16)
         self.buf_len = 0
         self.powers4_ready = False
         self.powers8_ready = False
@@ -388,9 +384,7 @@ struct Poly1305:
 
 
 def poly1305_mac(
-    key: Span[UInt8, ...],
-    message: Span[UInt8, ...],
-    output: Span[mut=True, UInt8, ...]
+    key: Span[UInt8, ...], message: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
 ) raises:
     """Return a 16-byte Poly1305 tag; the 32-byte key must be unique to this message (RFC 8439,
     secs. 2.5 and 4).

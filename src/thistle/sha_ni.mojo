@@ -1,11 +1,12 @@
 """Provides hardware-accelerated SHA-2 transforms (FIPS 180-4)."""
 
+from std.bit import byte_swap
 from std.sys import (
     llvm_intrinsic,
     inlined_assembly,
     CompilationTarget, prefetch, PrefetchOptions
 )
-from std.memory import Pointer, bitcast
+from std.memory import Pointer, bitcast, unsafe_memset_zero
 from .utils import StackBuffer
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
@@ -128,7 +129,8 @@ def prefetch_next_block(ptr: Pointer[mut=False, UInt8, _, address_space=_]):
 
 
 def sha256ni_transform(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]) -> SIMD[DType.uint32, 8]:
-    # Use the scalar transform when the compilation target lacks SHA instructions.
+    # Fall back to the portable SHA-256 transform when the target lacks SHA
+    # instructions.
     comptime if CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]():
         return _sha256ni_transform_x86(state, block)
     elif CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86():
@@ -172,42 +174,54 @@ def _sha256ni_transform_arm(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...
     )
 
 
+@no_inline
+def _sha256ni_compress_x86(
+    initial_s0: SIMD128, initial_s1: SIMD128,
+    data: Pointer[mut=False, UInt8, _, address_space=_], nblocks: Int
+) -> Tuple[SIMD128, SIMD128]:
+    """Keep SHA rounds behind a call boundary with 128-bit state halves, so the compiler
+    can clear wider vector state before entering this kernel.
+    """
+    # Native round order: s0 = [F, E, B, A], s1 = [H, G, D, C].
+    var s0 = initial_s0
+    var s1 = initial_s1
+    for blk in range(nblocks):
+        var ptr = data.unsafe_offset(blk * 64)
+        var old_s0 = s0
+        var old_s1 = s1
+
+        # Expand the 64-word schedule into 16 SIMD vectors.
+        var w0 = Load(ptr)
+        var w1 = Load(ptr.unsafe_offset(16))
+        var w2 = Load(ptr.unsafe_offset(32))
+        var w3 = Load(ptr.unsafe_offset(48))
+
+        var w = InlineArray[SIMD128, 16](fill=SIMD128(0))
+        w[0] = w0
+        w[1] = w1
+        w[2] = w2
+        w[3] = w3
+
+        comptime for i in range(4, 16):
+            var p = w[i-2].shuffle[PAL_0, PAL_1, PAL_2, PAL_3](w[i-1])
+            w[i] = _msg2(_msg1(w[i-4], w[i-3]) + p, w[i-1])
+
+        comptime for i in range(16):
+            var wk = w[i] + SIMD128(SHA256_K[4*i], SHA256_K[4*i+1], SHA256_K[4*i+2], SHA256_K[4*i+3])
+            s1 = _rnds2(s1, s0, wk)
+            s0 = _rnds2(s0, s1, wk.shuffle[RND_0, RND_1, RND_2, RND_3]())
+
+        s0 += old_s0
+        s1 += old_s1
+    return s0, s1
+
+
 def _sha256ni_transform_x86(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]) -> SIMD[DType.uint32, 8]:
-    var ptr = block.unsafe_ptr()
-
-    # s1 = [H, G, D, C], s0 = [F, E, B, A]
-    var s1 = SIMD128(state[7], state[6], state[3], state[2])
-    var s0 = SIMD128(state[5], state[4], state[1], state[0])
-    
-    var old_s0 = s0
-    var old_s1 = s1
-    
-    # Expand the 64-word schedule into 16 SIMD vectors.
-    var w0 = Load(ptr)
-    var w1 = Load(ptr.unsafe_offset(16))
-    var w2 = Load(ptr.unsafe_offset(32))
-    var w3 = Load(ptr.unsafe_offset(48))
-    
-    var w = InlineArray[SIMD128, 16](fill=SIMD128(0))
-    w[0] = w0
-    w[1] = w1
-    w[2] = w2
-    w[3] = w3
-    
-    comptime for i in range(4, 16):
-        var p = w[i-2].shuffle[PAL_0, PAL_1, PAL_2, PAL_3](w[i-1])
-        w[i] = _msg2(_msg1(w[i-4], w[i-3]) + p, w[i-1])
-
-    comptime for i in range(16):
-        var wk = w[i] + SIMD128(SHA256_K[4*i], SHA256_K[4*i+1], SHA256_K[4*i+2], SHA256_K[4*i+3])
-        s1 = _rnds2(s1, s0, wk)
-        s0 = _rnds2(s0, s1, wk.shuffle[RND_0, RND_1, RND_2, RND_3]())
-        
-    # s0 is ABEF_64, s1 is CDGH_64
-    s0 += old_s0
-    s1 += old_s1
-    
-    # s0 = [F, E, B, A], s1 = [H, G, D, C]
+    var s0, s1 = _sha256ni_compress_x86(
+        SIMD128(state[5], state[4], state[1], state[0]),
+        SIMD128(state[7], state[6], state[3], state[2]),
+        block.unsafe_ptr(), 1
+    )
     return SIMD[DType.uint32, 8](
         s0[3], s0[2], s1[3], s1[2], s0[1], s0[0], s1[1], s1[0]
     )
@@ -232,12 +246,19 @@ def sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     var i = 0
     var total_len = len(data)
 
-    while i + 64 <= total_len:
-        if i + 64 < total_len:
-            prefetch_next_block(data.unsafe_ptr().unsafe_offset(i))
-        ctx.state = sha256ni_transform(ctx.state, data[i:i+64])
-        ctx.count += 512
-        i += 64
+    comptime if CompilationTarget.is_x86():
+        var nblocks = total_len // 64
+        if nblocks > 0:
+            sha256ni_transform_blocks(ctx.state, data.unsafe_ptr(), nblocks)
+            ctx.count = UInt64(nblocks) * 512
+            i = nblocks * 64
+    else:
+        while i + 64 <= total_len:
+            if i + 64 < total_len:
+                prefetch_next_block(data.unsafe_ptr().unsafe_offset(i))
+            ctx.state = sha256ni_transform(ctx.state, data[i:i+64])
+            ctx.count += 512
+            i += 64
 
     if i < total_len:
         var remaining = total_len - i
@@ -250,26 +271,30 @@ def sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     ctx.buffer[ctx.buffer_len] = 0x80
     ctx.buffer_len += 1
 
+    # The zero-initialized one-shot buffer covers first-block padding; a second
+    # block is cleared explicitly.
     if ctx.buffer_len > 56:
-        ctx.state = sha256ni_transform(ctx.state, Span[UInt8, ...](unsafe_ptr=ctx.buffer.ptr(), length=64))
-        ctx.buffer_len = 0
+        ctx.state = sha256ni_transform(
+            ctx.state, Span[UInt8, ...](unsafe_ptr=ctx.buffer.ptr(), length=64)
+        )
+        unsafe_memset_zero(ctx.buffer.ptr(), 56)
 
-    while ctx.buffer_len < 56:
-        ctx.buffer[ctx.buffer_len] = 0
-        ctx.buffer_len += 1
-
-    for k in range(8):
-        ctx.buffer[56 + k] = UInt8(UInt64(bit_count >> UInt64(56 - k * 8)) & 0xFF)
+    ctx.buffer.ptr().unsafe_offset(56).unsafe_bitcast[UInt64]().unsafe_store[
+        alignment=1
+    ](0, byte_swap(bit_count))
 
     ctx.state = sha256ni_transform(ctx.state, Span[UInt8, ...](unsafe_ptr=ctx.buffer.ptr(), length=64))
 
-    var output = List[UInt8](capacity=32)
-    for k in range(8):
-        output.append(UInt8(UInt32(ctx.state[k] >> 24) & 0xFF))
-        output.append(UInt8(UInt32(ctx.state[k] >> 16) & 0xFF))
-        output.append(UInt8(UInt32(ctx.state[k] >> 8) & 0xFF))
-        output.append(UInt8(UInt32(ctx.state[k]) & 0xFF))
-
+    var output = List[UInt8](unsafe_uninit_length=32)
+    var out = output.unsafe_ptr()
+    var hi = byte_swap32(SIMD128(
+        ctx.state[0], ctx.state[1], ctx.state[2], ctx.state[3]
+    ))
+    var lo = byte_swap32(SIMD128(
+        ctx.state[4], ctx.state[5], ctx.state[6], ctx.state[7]
+    ))
+    out.unsafe_store[width=16, alignment=1](0, bitcast[DType.uint8, 16](hi))
+    out.unsafe_store[width=16, alignment=1](16, bitcast[DType.uint8, 16](lo))
     return output^
 
 
@@ -319,6 +344,16 @@ def sha256ni_transform_blocks(
 
         state = SIMD[DType.uint32, 8](
             st0[0], st0[1], st0[2], st0[3], st1[0], st1[1], st1[2], st1[3]
+        )
+        return
+
+    comptime if CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]():
+        var s0, s1 = _sha256ni_compress_x86(
+            SIMD128(state[5], state[4], state[1], state[0]),
+            SIMD128(state[7], state[6], state[3], state[2]), data, nblocks
+        )
+        state = SIMD[DType.uint32, 8](
+            s0[3], s0[2], s1[3], s1[2], s0[1], s0[0], s1[1], s1[0]
         )
         return
 

@@ -7,7 +7,10 @@ from thistle.p256 import (
     p256_ecdsa_verify_der,
     p256_keygen,
     p256_public_key,
-    _n as p256_order
+    _n as p256_order,
+    _p as p256_prime,
+    _rr as p256_rr,
+    _from_be as p256_from_be
 )
 from thistle.p384 import (
     p384_ecdsa_sign,
@@ -18,7 +21,7 @@ from thistle.p384 import (
     p384_public_key,
     _n as p384_order
 )
-from thistle.weierstrass import Limbs, rfc6979, to_be
+from thistle.weierstrass import Limbs, rfc6979, to_be, inv_p
 from thistle.x25519 import x25519_keygen, x25519_public_key
 from thistle.pbkdf2 import hmac_sha384
 from thistle.rsa import (
@@ -103,7 +106,8 @@ def _check_rfc6979[N: Int](
 
 
 def test_rfc6979_retries() raises:
-    # RFC 6979 section 3.2 expectations computed independently with Python hmac.
+    # Expected RFC 6979 sec. 3.2 values were generated independently with Python's
+    # hmac module.
     # Skipping accepted candidates models a signing retry after r or s is zero.
     _check_rfc6979[4](p256_order(), 1, 0,
         "010497d369b3d525ca15ec29c104a694210bb59ff6cabfc10afe6df0283896df")
@@ -179,6 +183,39 @@ def test_p256() raises:
         Span[UInt8, ...](der)
     ):
         raise Error("P-256 DER signature failed")
+
+
+def test_p256_field_inverse() raises:
+    # Cross-check raw Montgomery residues against Python integer inversion, including
+    # zero, carry boundaries, and full-width inputs.
+    var builtins = Python.import_module("builtins")
+    var rng = Python.import_module("random").Random(57971)
+    var modulus = builtins.int(
+        "FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF", 16
+    )
+    var r2 = builtins.pow(builtins.int(2), 512, modulus)
+    var cases = builtins.list()
+    cases.append(0)
+    cases.append(modulus - 1)
+    cases.append(modulus - 2)
+    for bit in range(256):
+        var power = builtins.int(1) << bit
+        cases.append(power - 1)
+        cases.append(power)
+        cases.append(power + 1)
+        cases.append(rng.randrange(1, modulus))
+    for value in cases:
+        var encoded = hex_bytes(String(builtins.format(value, "064x")))
+        var input = p256_from_be(Span[UInt8, ...](encoded))
+        var expected_value = builtins.int(0)
+        if Bool(py=value != 0):
+            expected_value = (builtins.pow(value, -1, modulus) * r2) % modulus
+        var expected = hex_bytes(String(builtins.format(expected_value, "064x")))
+        var inverse = inv_p[4, UInt64(1)](input, p256_prime(), p256_rr())
+        var output = List[UInt8](length=32, fill=0)
+        to_be(inverse, output.unsafe_ptr())
+        if not equal(output, expected):
+            raise Error("P-256 Montgomery inverse mismatch")
 
 
 def test_p384() raises:
@@ -648,6 +685,7 @@ def main() raises:
     test_hmac_sha384()
     test_rfc6979_retries()
     test_p256()
+    test_p256_field_inverse()
     test_p384()
     test_keygen()
     test_rsa_inverse_widths()

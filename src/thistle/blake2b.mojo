@@ -1,7 +1,7 @@
 """BLAKE2b hashing and keyed authentication (RFC 7693)."""
 
 from std.collections import List
-from std.memory import Pointer, unsafe_memcpy, unsafe_memset_zero
+from std.memory import Pointer, unsafe_memset_zero
 from .utils import bytes_to_hex, string_to_bytes, volatile_wipe
 
 comptime BLAKE2B_IV = SIMD[DType.uint64, 8](
@@ -129,10 +129,8 @@ struct Blake2b(Movable):
 
         if self.key_len > 0:
             self.update(key)
-            var buf = self._buf_ptr()
-            while self.buffer_len < 128:
-                buf[unsafe_offset=self.buffer_len] = 0
-                self.buffer_len += 1
+            # The zero-initialized buffer supplies the remainder of the padded key block.
+            self.buffer_len = 128
 
     def __init__(out self, *, deinit move: Self):
         self.h = move.h
@@ -156,57 +154,72 @@ struct Blake2b(Movable):
             self.t_high += 1
 
     # fmt: off
+    # Compression holds the chaining state in locals across contiguous full blocks.
+    @no_inline
+    def _compress_blocks(
+        mut self, data: Pointer[mut=False, UInt8, _, address_space=_],
+        nblocks: Int, is_last: Bool
+    ):
+        var h = self.h
+        var t_low = self.t_low
+        var t_high = self.t_high
+
+        for blk in range(nblocks):
+            # t_low/t_high enter with block zero's byte count; later blocks advance by 128 bytes.
+            if blk > 0:
+                t_low += 128
+                if t_low < 128:
+                    t_high += 1
+            var m = data.unsafe_offset(blk * 128)
+            var v0 = h[0]
+            var v1 = h[1]
+            var v2 = h[2]
+            var v3 = h[3]
+            var v4 = h[4]
+            var v5 = h[5]
+            var v6 = h[6]
+            var v7 = h[7]
+            var v8 = BLAKE2B_IV[0]
+            var v9 = BLAKE2B_IV[1]
+            var v10 = BLAKE2B_IV[2]
+            var v11 = BLAKE2B_IV[3]
+            var v12 = BLAKE2B_IV[4] ^ t_low
+            var v13 = BLAKE2B_IV[5] ^ t_high
+            var v14 = BLAKE2B_IV[6]
+            var v15 = BLAKE2B_IV[7]
+
+            if is_last:
+                v14 ^= 0xFFFFFFFFFFFFFFFF
+
+            comptime for r in range(12):
+                (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[r](
+                    v0, v1, v2, v3, v4, v5, v6, v7,
+                    v8, v9, v10, v11, v12, v13, v14, v15, m
+                )
+
+            h[0] ^= v0 ^ v8
+            h[1] ^= v1 ^ v9
+            h[2] ^= v2 ^ v10
+            h[3] ^= v3 ^ v11
+            h[4] ^= v4 ^ v12
+            h[5] ^= v5 ^ v13
+            h[6] ^= v6 ^ v14
+            h[7] ^= v7 ^ v15
+
+        self.h = h
+        self.t_low = t_low
+        self.t_high = t_high
+
     def compress(mut self, m: Pointer[mut=False, UInt8, _, address_space=_], is_last: Bool):
-        var v0 = self.h[0]
-        var v1 = self.h[1]
-        var v2 = self.h[2]
-        var v3 = self.h[3]
-        var v4 = self.h[4]
-        var v5 = self.h[5]
-        var v6 = self.h[6]
-        var v7 = self.h[7]
-        var v8 = BLAKE2B_IV[0]
-        var v9 = BLAKE2B_IV[1]
-        var v10 = BLAKE2B_IV[2]
-        var v11 = BLAKE2B_IV[3]
-        var v12 = BLAKE2B_IV[4]
-        var v13 = BLAKE2B_IV[5]
-        var v14 = BLAKE2B_IV[6]
-        var v15 = BLAKE2B_IV[7]
-
-        v12 ^= self.t_low
-        v13 ^= self.t_high
-
-        if is_last:
-            v14 ^= 0xFFFFFFFFFFFFFFFF
-
-        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[0](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
-        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[1](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
-        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[2](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
-        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[3](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
-        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[4](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
-        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[5](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
-        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[6](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
-        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[7](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
-        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[8](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
-        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[9](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
-        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[10](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
-        (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) = round_fn[11](v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, m)
-
-        self.h[0] ^= v0 ^ v8
-        self.h[1] ^= v1 ^ v9
-        self.h[2] ^= v2 ^ v10
-        self.h[3] ^= v3 ^ v11
-        self.h[4] ^= v4 ^ v12
-        self.h[5] ^= v5 ^ v13
-        self.h[6] ^= v6 ^ v14
-        self.h[7] ^= v7 ^ v15
+        self._compress_blocks(m, 1, is_last)
 
     # fmt: on
     def update(mut self, data: Span[UInt8, ...]):
         var total = len(data)
         if total == 0:
             return
+        var data_ptr = data.unsafe_ptr()
+        var buf = self._buf_ptr()
         var i = 0
 
         if self.buffer_len > 0:
@@ -215,23 +228,25 @@ struct Blake2b(Movable):
                 if total < to_copy:
                     to_copy = total
                 for j in range(to_copy):
-                    self._buf_ptr()[unsafe_offset=self.buffer_len + j] = data[j]
+                    buf.unsafe_store(self.buffer_len + j, data_ptr.unsafe_load(j))
                 self.buffer_len += to_copy
                 i += to_copy
             if i == total:
                 return
             self._inc_counter()
-            self.compress(self._buf_ptr(), False)
+            self._compress_blocks(buf, 1, False)
             self.buffer_len = 0
 
-        while total - i > 128:
+        var nblocks = (total - i - 1) // 128 if total - i > 128 else 0
+        if nblocks > 0:
             self._inc_counter()
-            self.compress(data.unsafe_ptr().unsafe_offset(i), False)
-            i += 128
+            self._compress_blocks(data_ptr.unsafe_offset(i), nblocks, False)
+            i += nblocks * 128
 
-        for j in range(total - i):
-            self._buf_ptr()[unsafe_offset=j] = data[i + j]
-        self.buffer_len = total - i
+        var remaining = total - i
+        for j in range(remaining):
+            buf.unsafe_store(j, data_ptr.unsafe_load(i + j))
+        self.buffer_len = remaining
 
     def _finalize_into_unchecked(
         mut self, output: Pointer[mut=True, UInt8, _, address_space=_]
@@ -246,6 +261,15 @@ struct Blake2b(Movable):
             self.buffer_len = 128
 
         self.compress(self._buf_ptr(), True)
+
+        if self.out_len == 64:
+            output.unsafe_bitcast[UInt64]().unsafe_store[width=8, alignment=1](0, self.h)
+            return
+        if self.out_len == 32:
+            output.unsafe_bitcast[UInt64]().unsafe_store[width=4, alignment=1](
+                0, self.h.slice[4]()
+            )
+            return
 
         var h_copy = self.h
         var h_copy_ptr = Pointer(to=h_copy).unsafe_mut_cast[True]().unsafe_bitcast[UInt64]()
@@ -262,9 +286,7 @@ struct Blake2b(Movable):
         self._finalize_into_unchecked(output.unsafe_ptr())
 
     def finalize(mut self) -> List[UInt8]:
-        var output = List[UInt8](capacity=self.out_len)
-        for _ in range(self.out_len):
-            output.append(0)
+        var output = List[UInt8](unsafe_uninit_length=self.out_len)
         self._finalize_into_unchecked(output.unsafe_ptr())
         return output^
 

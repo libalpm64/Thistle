@@ -2,6 +2,7 @@
 
 from std.bit import byte_swap
 from std.os import abort
+from std.sys import simd_width_of
 from std.memory import Pointer
 
 
@@ -237,9 +238,15 @@ def u64_zero_choice(x: UInt64) -> UInt64:
 
 
 def zero_stack_u8(mut data: StackBuffer[UInt8, ...]):
+    comptime W = simd_width_of[DType.uint8]()
     var ptr = data.ptr()
-    for i in range(data.len()):
+    var i = 0
+    while i + W <= data.len():
+        ptr.unsafe_store[width=W, volatile=True](i, SIMD[DType.uint8, W](0))
+        i += W
+    while i < data.len():
         ptr.unsafe_store[volatile=True](i, UInt8(0))
+        i += 1
     data.clear()
 
 

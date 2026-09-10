@@ -1,4 +1,4 @@
-# Generate the radix-16 P-256 comb table; this does not generate the W7 table.
+# Generate a radix-16 P-256 comb table.
 from thistle.p256 import U256, P256Point, _scalar_mult, _to_mont
 
 

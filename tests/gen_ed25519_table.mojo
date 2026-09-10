@@ -1,4 +1,4 @@
-# Generate the Ed25519 base-point comb table for src/thistle/ed25519_table.mojo.
+# Generate the Ed25519 fixed-base tables for src/thistle/ed25519_table.mojo.
 from thistle.ed25519 import (
     EdwardsPoint,
     edwards_add,
@@ -31,7 +31,9 @@ def _affine_niels_limbs(p: EdwardsPoint) -> InlineArray[UInt64, 15]:
     return out^
 
 
-def _print_chunk(name: String, points: InlineArray[EdwardsPoint, 8]):
+def _print_chunk(
+    name: String, points: InlineArray[EdwardsPoint, 8], clean_line_end: Bool = False
+):
     var s = String("comptime ") + name + " = SIMD[DType.uint64, 128](\n"
     for k in range(8):
         var limbs = _affine_niels_limbs(points[k])
@@ -42,7 +44,9 @@ def _print_chunk(name: String, points: InlineArray[EdwardsPoint, 8]):
                 v = limbs[m]
             s += String(v)
             if not (k == 7 and m == 15):
-                s += ", "
+                s += ","
+                if m != 15 or not clean_line_end:
+                    s += " "
         s += "\n"
     s += ")"
     print(s)
@@ -68,12 +72,15 @@ def main() raises:
             P = edwards_double(P)
 
     var B2 = edwards_double(B)
-    var odd = InlineArray[EdwardsPoint, 8](fill=EdwardsPoint())
-    odd[0] = B
-    for k in range(1, 8):
-        odd[k] = edwards_add(odd[k - 1], B2)
-    _print_chunk(String("_ED25519_B_ODD"), odd)
-    print()
+    var odd_start = B
+    for j in range(8):
+        var odd = InlineArray[EdwardsPoint, 8](fill=EdwardsPoint())
+        odd[0] = odd_start
+        for k in range(1, 8):
+            odd[k] = edwards_add(odd[k - 1], B2)
+        _print_chunk(String("_ED25519_B_ODD") + String(j), odd, True)
+        print()
+        odd_start = edwards_add(odd[7], B2)
 
     print("@no_inline")
     print("def ed25519_base_table() -> InlineArray[UInt64, 4096]:")
@@ -84,7 +91,9 @@ def main() raises:
     print("    return t^")
     print()
     print("@no_inline")
-    print("def ed25519_b_odd_table() -> InlineArray[UInt64, 128]:")
-    print("    var t = InlineArray[UInt64, 128](fill=0)")
-    print("    t.unsafe_ptr().unsafe_store[alignment=8](0, _ED25519_B_ODD)")
+    print("def ed25519_b_odd_table() -> InlineArray[UInt64, 1024]:")
+    print("    var t = InlineArray[UInt64, 1024](fill=0)")
+    print("    var p = t.unsafe_ptr()")
+    for j in range(8):
+        print("    p.unsafe_store[alignment=8](" + String(j * 128) + ", _ED25519_B_ODD" + String(j) + ")")
     print("    return t^")

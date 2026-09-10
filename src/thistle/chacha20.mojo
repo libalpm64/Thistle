@@ -458,18 +458,6 @@ def chacha20_quad_core_rows(
 
 
 @always_inline
-def _qr_scalar(mut a: UInt32, mut b: UInt32, mut c: UInt32, mut d: UInt32):
-    a += b
-    d = rotate_bits_left[16](d ^ a)
-    c += d
-    b = rotate_bits_left[12](b ^ c)
-    a += b
-    d = rotate_bits_left[8](d ^ a)
-    c += d
-    b = rotate_bits_left[7](b ^ c)
-
-
-@always_inline
 def chacha20_block_core(
     key: SIMD[DType.uint32, 8],
     counter: UInt32,
@@ -508,46 +496,12 @@ def chacha20_block_core(
     return result
 
 
-@always_inline
-def _chacha20_block_scalar(
-    key: SIMD[DType.uint32, 8],
-    counter: UInt32,
-    nonce: SIMD[DType.uint32, 4]
+@no_inline
+def _chacha20_tail_block(
+    key: SIMD[DType.uint32, 8], counter: UInt32, nonce: SIMD[DType.uint32, 4]
 ) -> SIMD[DType.uint32, 16]:
-    var x0: UInt32 = 0x61707865
-    var x1: UInt32 = 0x3320646E
-    var x2: UInt32 = 0x79622D32
-    var x3: UInt32 = 0x6B206574
-    var x4 = key[0]
-    var x5 = key[1]
-    var x6 = key[2]
-    var x7 = key[3]
-    var x8 = key[4]
-    var x9 = key[5]
-    var x10 = key[6]
-    var x11 = key[7]
-    var x12 = counter
-    var x13 = nonce[0]
-    var x14 = nonce[1]
-    var x15 = nonce[2]
-
-    comptime for _ in range(10):
-        _qr_scalar(x0, x4, x8, x12)
-        _qr_scalar(x1, x5, x9, x13)
-        _qr_scalar(x2, x6, x10, x14)
-        _qr_scalar(x3, x7, x11, x15)
-        _qr_scalar(x0, x5, x10, x15)
-        _qr_scalar(x1, x6, x11, x12)
-        _qr_scalar(x2, x7, x8, x13)
-        _qr_scalar(x3, x4, x9, x14)
-
-    var result = SIMD[DType.uint32, 16](
-        x0 + 0x61707865, x1 + 0x3320646E, x2 + 0x79622D32, x3 + 0x6B206574,
-        x4 + key[0], x5 + key[1], x6 + key[2], x7 + key[3],
-        x8 + key[4], x9 + key[5], x10 + key[6], x11 + key[7],
-        x12 + counter, x13 + nonce[0], x14 + nonce[1], x15 + nonce[2]
-    )
-    return result
+    # Partial-block callers use the same SIMD block core as full blocks.
+    return chacha20_block_core(key, counter, nonce)
 
 
 @always_inline
@@ -654,16 +608,7 @@ struct ChaCha20:
         if 256 <= length - offset:
             var rows = _quad_rows_init(self.key, self.counter, self.nonce)
             var i3 = rows[3]
-            while offset + 768 <= length:
-                var o = chacha20_x12_core_rows(
-                    rows[0], rows[1], rows[2], i3,
-                    i3 + _CTR_INC4, i3 + _CTR_INC4 + _CTR_INC4
-                )
-                comptime for j in range(12):
-                    _xor_block64(src, dst, o[j], offset + j * 64)
-                i3 = i3 + _CTR_INC4 + _CTR_INC4 + _CTR_INC4
-                offset += 768
-                block_idx += 12
+            # The eight-block core limits live rows and register pressure in the bulk loop.
             while offset + 512 <= length:
                 var o = chacha20_octo_core_rows(
                     rows[0], rows[1], rows[2], i3, i3 + _CTR_INC4
@@ -690,7 +635,7 @@ struct ChaCha20:
             block_idx += 1
 
         if offset < length:
-            var keystream = _chacha20_block_scalar(
+            var keystream = _chacha20_tail_block(
                 self.key, self.counter + UInt32(block_idx), self.nonce
             )
             self._pending = bitcast[DType.uint8, 64](keystream)

@@ -747,6 +747,29 @@ def _ct_store_le32(p: Pointer[mut=True, UInt8, _, address_space=_], off: Int, w:
 
 
 @always_inline
+def _ct_encrypt_state[W: Int](
+    mut q: InlineArray[SIMD[DType.uint64, W], 8],
+    skp: Pointer[mut=False, UInt64, _, address_space=_],
+    rounds: Int
+) -> None:
+    """Encrypt an interleaved bitslice state; the final round omits MixColumns."""
+    _ct_ortho(q)
+    comptime for i in range(8):
+        q[i] ^= SIMD[DType.uint64, W](skp[unsafe_offset=i])
+    for r in range(1, rounds):
+        _ct_sbox(q)
+        _ct_shift_rows(q)
+        _ct_mix_columns(q)
+        comptime for i in range(8):
+            q[i] ^= SIMD[DType.uint64, W](skp[unsafe_offset=r * 8 + i])
+    _ct_sbox(q)
+    _ct_shift_rows(q)
+    comptime for i in range(8):
+        q[i] ^= SIMD[DType.uint64, W](skp[unsafe_offset=rounds * 8 + i])
+    _ct_ortho(q)
+
+
+@always_inline
 def _ct_encrypt_blocks[W: Int](
     blocks: Pointer[mut=True, UInt8, _, address_space=_],
     skp: Pointer[mut=False, UInt64, _, address_space=_],
@@ -768,22 +791,7 @@ def _ct_encrypt_blocks[W: Int](
         var pair = _ct_interleave_in(w0, w1, w2, w3)
         q[i] = pair[0]
         q[i + 4] = pair[1]
-    _ct_ortho(q)
-
-    comptime for i in range(8):
-        q[i] ^= SIMD[DType.uint64, W](skp[unsafe_offset=i])
-    for r in range(1, rounds):
-        _ct_sbox(q)
-        _ct_shift_rows(q)
-        _ct_mix_columns(q)
-        comptime for i in range(8):
-            q[i] ^= SIMD[DType.uint64, W](skp[unsafe_offset=r * 8 + i])
-    _ct_sbox(q)
-    _ct_shift_rows(q)
-    comptime for i in range(8):
-        q[i] ^= SIMD[DType.uint64, W](skp[unsafe_offset=rounds * 8 + i])
-
-    _ct_ortho(q)
+    _ct_encrypt_state(q, skp, rounds)
     for i in range(4):
         var ws = _ct_interleave_out(q[i], q[i + 4])
         comptime for l in range(W):

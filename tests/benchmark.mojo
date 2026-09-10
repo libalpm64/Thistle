@@ -21,9 +21,19 @@ from thistle.aes import (
     AESKey, cpu_aes_ct_encrypt16, cpu_aes_ct_skey, ROUNDS_128, expand_key_128
 )
 from thistle.aes_ni import has_aes_ni, x86_aes_ecb_kernel
-from thistle.x25519 import x25519
+from thistle.x25519 import x25519, x25519_public_key
+from thistle.pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
+from thistle.ml_kem import (
+    K_512, K_768, K_1024, SYMBYTES,
+    INDCPA_PUBLICKEYBYTES_MAX, DECAPSKEYBYTES_MAX, CIPHERTEXTBYTES_MAX,
+    mlkem_keygen_seed_into_k, mlkem_encaps_seed_into_k, mlkem_decaps_into_k
+)
+from thistle.ml_dsa import (
+    MLDSAParams, params44, params65, params87,
+    mldsa_private_key_from_seed, mldsa_sign_deterministic, mldsa_verify
+)
 from thistle.ed25519 import (
-    ed25519_sign, ed25519_verify, ed25519_generate_public_key
+    Ed25519SigningKey, ed25519_verify, ed25519_generate_public_key
 )
 from thistle.p256 import (
     p256_public_key, p256_ecdsa_sign, p256_ecdsa_verify
@@ -31,7 +41,7 @@ from thistle.p256 import (
 from thistle.p384 import (
     p384_public_key, p384_ecdsa_sign, p384_ecdsa_verify
 )
-from thistle.utils import StackInlineArray
+from thistle.utils import StackBuffer, StackInlineArray
 from std.utils import StaticTuple
 
 comptime TEST_KEY: StaticTuple[UInt8, 16] = StaticTuple[UInt8, 16](
@@ -62,17 +72,194 @@ def benchmark_x25519(duration_secs: Float64) raises -> String:
     var scalar_span = Span[UInt8, ...](unsafe_ptr=scalar.unsafe_ptr(), length=32)
     var point_span = Span[UInt8, ...](unsafe_ptr=point.unsafe_ptr(), length=32)
     x25519(scalar_span, point_span, Span[mut=True, UInt8, ...](out))
+    var sink = UInt8(0)
     var count = 0
     var start = perf_counter()
     while perf_counter() - start < duration_secs:
         x25519(scalar_span, point_span, Span[mut=True, UInt8, ...](out))
-        scalar.unsafe_ptr().unsafe_store[volatile=True](0, out[0] | 8)
+        sink ^= out[0]
         count += 1
     var duration = perf_counter() - start
-    var ops = Float64(count) / duration
+    var generic_ops = Float64(count) / duration
+
+    count = 0
+    start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        x25519_public_key(scalar_span, Span[mut=True, UInt8, ...](out))
+        sink ^= out[0]
+        count += 1
+    var public_duration = perf_counter() - start
+    var public_ops = Float64(count) / public_duration
+    _ = sink
     return (
-        "x25519 | throughput: " + String(ops) + " ops/s, ops: " + String(count) + ", time: " + String(duration) + "s"
+        "x25519-generic | throughput: " + String(generic_ops) + " ops/s, time: "
+        + String(duration) + "s\n"
+        + "x25519-public-key | throughput: " + String(public_ops) + " ops/s, time: "
+        + String(public_duration) + "s"
     )
+
+
+def benchmark_pbkdf2(duration_secs: Float64) raises -> String:
+    var password = String("correct horse battery staple").as_bytes()
+    var salt = String("0123456789abcdef").as_bytes()
+
+    var count256 = 0
+    var sink = UInt8(0)
+    var start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        var out = pbkdf2_hmac_sha256(password, salt, 10000, 32)
+        sink ^= out[0]
+        count256 += 1
+    var duration256 = perf_counter() - start
+
+    var count512 = 0
+    start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        var out = pbkdf2_hmac_sha512(password, salt, 10000, 64)
+        sink ^= out[0]
+        count512 += 1
+    var duration512 = perf_counter() - start
+    _ = sink
+    return (
+        "pbkdf2-sha256-10k | throughput: " + String(Float64(count256) / duration256)
+        + " derivations/s\n"
+        + "pbkdf2-sha512-10k | throughput: " + String(Float64(count512) / duration512)
+        + " derivations/s"
+    )
+
+
+def benchmark_mlkem_set[k: Int](label: String, duration_secs: Float64) raises -> String:
+    var seed = StackBuffer[UInt8, 2 * SYMBYTES]()
+    var message = StackBuffer[UInt8, SYMBYTES]()
+    for i in range(2 * SYMBYTES):
+        seed.push_unchecked(UInt8(i * 5 + 1))
+    for i in range(SYMBYTES):
+        message.push_unchecked(UInt8(i * 11 + 1))
+
+    var ek = StackBuffer[UInt8, INDCPA_PUBLICKEYBYTES_MAX]()
+    var dk = StackBuffer[UInt8, DECAPSKEYBYTES_MAX]()
+    var ciphertext = StackBuffer[UInt8, CIPHERTEXTBYTES_MAX]()
+    var shared = StackBuffer[UInt8, SYMBYTES]()
+    var decapsulated = StackBuffer[UInt8, SYMBYTES]()
+    var seed_span = Span[UInt8, ...](unsafe_ptr=seed.ptr(), length=seed.len())
+    var message_span = Span[UInt8, ...](unsafe_ptr=message.ptr(), length=message.len())
+    _ = mlkem_keygen_seed_into_k[k](ek, dk, seed_span)
+    _ = mlkem_encaps_seed_into_k[k](
+        ciphertext,
+        shared,
+        Span[UInt8, ...](unsafe_ptr=ek.ptr(), length=ek.len()),
+        message_span,
+    )
+
+    var sink = UInt8(0)
+    var count = 0
+    var start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        _ = mlkem_keygen_seed_into_k[k](ek, dk, seed_span)
+        sink ^= ek[0]
+        count += 1
+    var keygen_count = count
+    var keygen_duration = perf_counter() - start
+
+    count = 0
+    start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        _ = mlkem_encaps_seed_into_k[k](
+            ciphertext,
+            shared,
+            Span[UInt8, ...](unsafe_ptr=ek.ptr(), length=ek.len()),
+            message_span,
+        )
+        sink ^= ciphertext[0]
+        count += 1
+    var encaps_count = count
+    var encaps_duration = perf_counter() - start
+
+    count = 0
+    start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        _ = mlkem_decaps_into_k[k](
+            decapsulated,
+            Span[UInt8, ...](unsafe_ptr=dk.ptr(), length=dk.len()),
+            Span[UInt8, ...](unsafe_ptr=ciphertext.ptr(), length=ciphertext.len()),
+        )
+        sink ^= decapsulated[0]
+        count += 1
+    var decaps_count = count
+    var decaps_duration = perf_counter() - start
+    _ = sink
+    return (
+        label + " keygen | throughput: "
+        + String(Float64(keygen_count) / keygen_duration) + " ops/s\n"
+        + label + " encaps | throughput: "
+        + String(Float64(encaps_count) / encaps_duration) + " ops/s\n"
+        + label + " decaps | throughput: "
+        + String(Float64(decaps_count) / decaps_duration) + " ops/s"
+    )
+
+
+def benchmark_mldsa_set(
+    label: String, params: MLDSAParams, duration_secs: Float64
+) raises -> String:
+    var seed = List[UInt8](unsafe_uninit_length=32)
+    var message = List[UInt8](unsafe_uninit_length=64)
+    var context = List[UInt8]()
+    for i in range(32):
+        seed[i] = UInt8(i * 13 + 1)
+    for i in range(64):
+        message[i] = UInt8(i * 17 + 1)
+
+    var private_key = mldsa_private_key_from_seed(Span[UInt8, ...](seed), params)
+    var signature = mldsa_sign_deterministic(
+        private_key, Span[UInt8, ...](message), Span[UInt8, ...](context)
+    )
+
+    var sink = UInt8(0)
+    var count = 0
+    var start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        var key = mldsa_private_key_from_seed(Span[UInt8, ...](seed), params)
+        sink ^= key.pub.raw[0]
+        count += 1
+    var keygen_count = count
+    var keygen_duration = perf_counter() - start
+
+    count = 0
+    start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        var sig = mldsa_sign_deterministic(
+            private_key, Span[UInt8, ...](message), Span[UInt8, ...](context)
+        )
+        sink ^= sig[0]
+        count += 1
+    var sign_count = count
+    var sign_duration = perf_counter() - start
+
+    count = 0
+    var verify_ok = True
+    start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        verify_ok = verify_ok and mldsa_verify(
+            private_key.pub,
+            Span[UInt8, ...](message),
+            Span[UInt8, ...](signature),
+            Span[UInt8, ...](context),
+        )
+        count += 1
+    var verify_count = count
+    var verify_duration = perf_counter() - start
+    _ = sink
+    var result = (
+        label + " keygen | throughput: "
+        + String(Float64(keygen_count) / keygen_duration) + " ops/s\n"
+        + label + " sign-deterministic | throughput: "
+        + String(Float64(sign_count) / sign_duration) + " ops/s\n"
+        + label + " verify | throughput: "
+        + String(Float64(verify_count) / verify_duration) + " ops/s"
+    )
+    if not verify_ok:
+        result += " [FAILED VERIFICATION]"
+    return result
 
 
 def benchmark_p384(duration_secs: Float64) -> String:
@@ -207,17 +394,18 @@ def benchmark_ed25519(duration_secs: Float64) raises -> String:
         unsafe_ptr=pk.unsafe_ptr(), length=32
     )
     ed25519_generate_public_key(sk_span, pk_out)
-    ed25519_sign(sk_span, msg_span, sig_out)
+    var signing_key = Ed25519SigningKey(sk_span)
+    signing_key.sign(msg_span, sig_out)
 
     var sign_count = 0
     var start = perf_counter()
     while perf_counter() - start < duration_secs:
-        ed25519_sign(sk_span, msg_span, sig_out)
+        signing_key.sign(msg_span, sig_out)
         sign_count += 1
     var sign_duration = perf_counter() - start
     var sign_ops = Float64(sign_count) / sign_duration
 
-    ed25519_sign(sk_span, msg_span, sig_out)
+    signing_key.sign(msg_span, sig_out)
     var verify_count = 0
     var verify_failures = 0
     start = perf_counter()
@@ -573,8 +761,8 @@ def benchmark_aes_gpu_ecb() raises -> String:
         ctx.enqueue_copy(input_buffer, input_host)
         ctx.synchronize()
 
-        var block_dim = 256
-        var grid_dim = ceildiv(num_blocks, block_dim)
+        var block_dim = 64
+        var grid_dim = ceildiv(ceildiv(num_blocks, 4), block_dim)
         
         ctx.enqueue_function[aes_gpu_kernel_ecb](
             input_buffer,
@@ -653,8 +841,8 @@ def benchmark_aes_gpu_ctr() raises -> String:
         ctx.enqueue_copy(nonce_buffer, nonce_host)
         ctx.synchronize()
 
-        var block_dim = 256
-        var grid_dim = ceildiv(num_blocks, block_dim)
+        var block_dim = 64
+        var grid_dim = ceildiv(ceildiv(num_blocks, 4), block_dim)
         
         ctx.enqueue_function[aes_gpu_kernel_ctr](
             input_buffer,
@@ -737,8 +925,8 @@ def benchmark_aes_gpu_gcm() raises -> String:
         ctx.enqueue_copy(nonce_buffer, nonce_host)
         ctx.synchronize()
 
-        var block_dim = 256
-        var grid_dim = ceildiv(num_blocks, block_dim)
+        var block_dim = 64
+        var grid_dim = ceildiv(ceildiv(num_blocks, 4), block_dim)
         
         ctx.enqueue_function[aes_gpu_kernel_gcm_ctr](
             input_buffer,
@@ -815,6 +1003,13 @@ def main() raises:
         print("aes-128-gpu-gcm | (GPU not available)")
     print(benchmark_argon2(duration))
     print(benchmark_x25519(duration))
+    print(benchmark_pbkdf2(duration))
+    print(benchmark_mlkem_set[K_512]("ml-kem-512", duration))
+    print(benchmark_mlkem_set[K_768]("ml-kem-768", duration))
+    print(benchmark_mlkem_set[K_1024]("ml-kem-1024", duration))
+    print(benchmark_mldsa_set("ml-dsa-44", params44(), duration))
+    print(benchmark_mldsa_set("ml-dsa-65", params65(), duration))
+    print(benchmark_mldsa_set("ml-dsa-87", params87(), duration))
     print(benchmark_p384(duration))
     print(benchmark_ecdsa(duration))
     print(benchmark_ed25519(duration))
