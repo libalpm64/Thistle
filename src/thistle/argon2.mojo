@@ -51,73 +51,58 @@ def zero_and_free_u64(ptr: Pointer[mut=True, UInt64, _, address_space=_], len: I
 
 
 @always_inline
-def f_bla_mka(x: UInt64, y: UInt64) -> UInt64:
-    """BlaMka addition: x + y + 2 * low32(x) * low32(y), modulo 2^64 (RFC 9106, sec. 3.6)."""
-    return x + y + (((x & MASK32) * (y & MASK32)) << UInt64(1))
-
-
-@always_inline
-def gb(a: UInt64, b: UInt64, c: UInt64, d: UInt64) -> Tuple[UInt64, UInt64, UInt64, UInt64]:
-    """Apply the BlaMka G function with BLAKE2b rotation constants (RFC 9106, sec. 3.6)."""
-    var a_new = f_bla_mka(a, b)
+def gb(
+    a: SIMD[DType.uint64, 4],
+    b: SIMD[DType.uint64, 4],
+    c: SIMD[DType.uint64, 4],
+    d: SIMD[DType.uint64, 4],
+) -> Tuple[SIMD[DType.uint64, 4], SIMD[DType.uint64, 4], SIMD[DType.uint64, 4], SIMD[DType.uint64, 4]]:
+    """Apply four independent BlaMka G functions in parallel."""
+    var mask = SIMD[DType.uint64, 4](MASK32)
+    var a_new = a + b + (((a & mask) * (b & mask)) << UInt64(1))
     var d_new = rotate_bits_left[shift=32](d ^ a_new)
-    var c_new = f_bla_mka(c, d_new)
+    var c_new = c + d_new + (((c & mask) * (d_new & mask)) << UInt64(1))
     var b_new = rotate_bits_left[shift=40](b ^ c_new)
-    a_new = f_bla_mka(a_new, b_new)
+    a_new = a_new + b_new + (((a_new & mask) * (b_new & mask)) << UInt64(1))
     d_new = rotate_bits_left[shift=48](d_new ^ a_new)
-    c_new = f_bla_mka(c_new, d_new)
+    c_new = c_new + d_new + (((c_new & mask) * (d_new & mask)) << UInt64(1))
     b_new = rotate_bits_left[shift=1](b_new ^ c_new)
     return (a_new, b_new, c_new, d_new)
 
 
 @always_inline
-def _p_column(base: Int, v: Pointer[mut=True, UInt64, _, address_space=_]):
-    # Mix the four columns of a 16-word row.
-    var v0, v4, v8, v12 = gb(v[unsafe_offset=base + 0], v[unsafe_offset=base + 4], v[unsafe_offset=base + 8], v[unsafe_offset=base + 12])
-    var v1, v5, v9, v13 = gb(v[unsafe_offset=base + 1], v[unsafe_offset=base + 5], v[unsafe_offset=base + 9], v[unsafe_offset=base + 13])
-    var v2, v6, v10, v14 = gb(v[unsafe_offset=base + 2], v[unsafe_offset=base + 6], v[unsafe_offset=base + 10], v[unsafe_offset=base + 14])
-    var v3, v7, v11, v15 = gb(v[unsafe_offset=base + 3], v[unsafe_offset=base + 7], v[unsafe_offset=base + 11], v[unsafe_offset=base + 15])
-    v[unsafe_offset=base + 0] = v0
-    v[unsafe_offset=base + 4] = v4
-    v[unsafe_offset=base + 8] = v8
-    v[unsafe_offset=base + 12] = v12
-    v[unsafe_offset=base + 1] = v1
-    v[unsafe_offset=base + 5] = v5
-    v[unsafe_offset=base + 9] = v9
-    v[unsafe_offset=base + 13] = v13
-    v[unsafe_offset=base + 2] = v2
-    v[unsafe_offset=base + 6] = v6
-    v[unsafe_offset=base + 10] = v10
-    v[unsafe_offset=base + 14] = v14
-    v[unsafe_offset=base + 3] = v3
-    v[unsafe_offset=base + 7] = v7
-    v[unsafe_offset=base + 11] = v11
-    v[unsafe_offset=base + 15] = v15
+def _p_round(
+    a: SIMD[DType.uint64, 4],
+    b: SIMD[DType.uint64, 4],
+    c: SIMD[DType.uint64, 4],
+    d: SIMD[DType.uint64, 4],
+) -> Tuple[SIMD[DType.uint64, 4], SIMD[DType.uint64, 4], SIMD[DType.uint64, 4], SIMD[DType.uint64, 4]]:
+    # First mix four columns in parallel, then rotate lanes to line up the four diagonals.
+    var aa, bb, cc, dd = gb(a, b, c, d)
+    var db = SIMD[DType.uint64, 4](bb[1], bb[2], bb[3], bb[0])
+    var dc = SIMD[DType.uint64, 4](cc[2], cc[3], cc[0], cc[1])
+    var dg = SIMD[DType.uint64, 4](dd[3], dd[0], dd[1], dd[2])
+    aa, db, dc, dg = gb(aa, db, dc, dg)
+    return (
+        aa,
+        SIMD[DType.uint64, 4](db[3], db[0], db[1], db[2]),
+        SIMD[DType.uint64, 4](dc[2], dc[3], dc[0], dc[1]),
+        SIMD[DType.uint64, 4](dg[1], dg[2], dg[3], dg[0]),
+    )
 
 
 @always_inline
-def _p_diagonal(base: Int, v: Pointer[mut=True, UInt64, _, address_space=_]):
-    # Mix the diagonals of the same row.
-    var v0, v5, v10, v15 = gb(v[unsafe_offset=base + 0], v[unsafe_offset=base + 5], v[unsafe_offset=base + 10], v[unsafe_offset=base + 15])
-    var v1, v6, v11, v12 = gb(v[unsafe_offset=base + 1], v[unsafe_offset=base + 6], v[unsafe_offset=base + 11], v[unsafe_offset=base + 12])
-    var v2, v7, v8, v13 = gb(v[unsafe_offset=base + 2], v[unsafe_offset=base + 7], v[unsafe_offset=base + 8], v[unsafe_offset=base + 13])
-    var v3, v4, v9, v14 = gb(v[unsafe_offset=base + 3], v[unsafe_offset=base + 4], v[unsafe_offset=base + 9], v[unsafe_offset=base + 14])
-    v[unsafe_offset=base + 0] = v0
-    v[unsafe_offset=base + 5] = v5
-    v[unsafe_offset=base + 10] = v10
-    v[unsafe_offset=base + 15] = v15
-    v[unsafe_offset=base + 1] = v1
-    v[unsafe_offset=base + 6] = v6
-    v[unsafe_offset=base + 11] = v11
-    v[unsafe_offset=base + 12] = v12
-    v[unsafe_offset=base + 2] = v2
-    v[unsafe_offset=base + 7] = v7
-    v[unsafe_offset=base + 8] = v8
-    v[unsafe_offset=base + 13] = v13
-    v[unsafe_offset=base + 3] = v3
-    v[unsafe_offset=base + 4] = v4
-    v[unsafe_offset=base + 9] = v9
-    v[unsafe_offset=base + 14] = v14
+def _p_row(base: Int, v: Pointer[mut=True, UInt64, _, address_space=_]):
+    var a = v.unsafe_load[width=4](base + 0)
+    var b = v.unsafe_load[width=4](base + 4)
+    var c = v.unsafe_load[width=4](base + 8)
+    var d = v.unsafe_load[width=4](base + 12)
+    a, b, c, d = _p_round(a, b, c, d)
+    v.unsafe_store[width=4](base + 0, a)
+    v.unsafe_store[width=4](base + 4, b)
+    v.unsafe_store[width=4](base + 8, c)
+    v.unsafe_store[width=4](base + 12, d)
+
 
 
 struct MemoryPool:
@@ -169,19 +154,23 @@ def compression_g_with_pool(
     var block = pool.get_block()
     var block_xy = pool.get_temp()
 
-    for i in range(128):
-        var val = x_ptr[unsafe_offset=i] ^ y_ptr[unsafe_offset=i]
-        block[unsafe_offset=i] = val
-        if with_xor:
-            block_xy[unsafe_offset=i] = val ^ out_ptr[unsafe_offset=i]
-        else:
-            block_xy[unsafe_offset=i] = val
+    if with_xor:
+        for i in range(0, 128, 4):
+            var val = x_ptr.unsafe_load[width=4](i) ^ y_ptr.unsafe_load[width=4](i)
+            block.unsafe_store[width=4](i, val)
+            block_xy.unsafe_store[width=4](
+                i, val ^ out_ptr.unsafe_load[width=4](i)
+            )
+    else:
+        for i in range(0, 128, 4):
+            var val = x_ptr.unsafe_load[width=4](i) ^ y_ptr.unsafe_load[width=4](i)
+            block.unsafe_store[width=4](i, val)
+            block_xy.unsafe_store[width=4](i, val)
 
     for i in range(8):
         # Apply the permutation to eight contiguous 16-word rows.
         var base = i * 16
-        _p_column(base, block)
-        _p_diagonal(base, block)
+        _p_row(base, block)
 
     # Gather paired columns into 16-word rows for the second permutation pass.
     for col in range(8):
@@ -202,15 +191,15 @@ def compression_g_with_pool(
         var v14 = block[unsafe_offset=col * 2 + 112]
         var v15 = block[unsafe_offset=col * 2 + 113]
 
-        v0, v4, v8, v12 = gb(v0, v4, v8, v12)
-        v1, v5, v9, v13 = gb(v1, v5, v9, v13)
-        v2, v6, v10, v14 = gb(v2, v6, v10, v14)
-        v3, v7, v11, v15 = gb(v3, v7, v11, v15)
-
-        v0, v5, v10, v15 = gb(v0, v5, v10, v15)
-        v1, v6, v11, v12 = gb(v1, v6, v11, v12)
-        v2, v7, v8, v13 = gb(v2, v7, v8, v13)
-        v3, v4, v9, v14 = gb(v3, v4, v9, v14)
+        var a = SIMD[DType.uint64, 4](v0, v1, v2, v3)
+        var b = SIMD[DType.uint64, 4](v4, v5, v6, v7)
+        var c = SIMD[DType.uint64, 4](v8, v9, v10, v11)
+        var d = SIMD[DType.uint64, 4](v12, v13, v14, v15)
+        a, b, c, d = _p_round(a, b, c, d)
+        v0, v1, v2, v3 = a[0], a[1], a[2], a[3]
+        v4, v5, v6, v7 = b[0], b[1], b[2], b[3]
+        v8, v9, v10, v11 = c[0], c[1], c[2], c[3]
+        v12, v13, v14, v15 = d[0], d[1], d[2], d[3]
 
         block[unsafe_offset=col * 2 + 0] = v0
         block[unsafe_offset=col * 2 + 1] = v1
@@ -229,8 +218,10 @@ def compression_g_with_pool(
         block[unsafe_offset=col * 2 + 112] = v14
         block[unsafe_offset=col * 2 + 113] = v15
 
-    for i in range(128):
-        out_ptr[unsafe_offset=i] = block[unsafe_offset=i] ^ block_xy[unsafe_offset=i]
+    for i in range(0, 128, 4):
+        out_ptr.unsafe_store[width=4](
+            i, block.unsafe_load[width=4](i) ^ block_xy.unsafe_load[width=4](i)
+        )
 
 
 @always_inline
@@ -366,7 +357,7 @@ def _argon2_process_lane(
     """Fill one lane segment. Argon2id uses independent addresses in the first two slices of pass
     zero; later segments derive addresses from the previous block (RFC 9106, sec. 3.4.1.3).
     """
-    # Each lane borrows its own scratch region for the duration of the hash.
+    # Each lane uses a private slice of the hash-owned scratch region.
     var lane_scratch = scratch.unsafe_offset(lane * 768).unsafe_origin_cast[MutUntrackedOrigin]()
     var addressing_block = lane_scratch
     var z_u64 = lane_scratch.unsafe_offset(128)
@@ -468,7 +459,7 @@ def _argon2_process_lane(
             pool
         )
 
-    # The hash owner wipes and frees this borrowed scratch, including on exceptions.
+    # The hash owner wipes and frees the scratch region on every exit path.
 
 
 def _validate_params(parallelism: Int, tag_length: Int, memory_size_kb: Int, iterations: Int, version: Int
@@ -565,8 +556,8 @@ struct Argon2id:
         ):
             raise Error("Argon2 input lengths must fit in 32 bits")
 
-        # Stack buffers hold password-derived state without per-block allocations.
-        # The outer finally wipes them on success and on exceptions.
+        # Stack buffers hold password-derived state for the full hash operation.
+        # The enclosing finally wipes them on every exit path.
         var word_bytes = StackBuffer[UInt8, 4](fill=0)
         var h0_buf = StackBuffer[UInt8, 64](fill=0)
         var initial_block_input = StackBuffer[UInt8, 72](fill=0)
@@ -778,7 +769,7 @@ def argon2id_verify_password(
     max_parallelism: Int = 16,
 ) raises -> Bool:
     """Verify an Argon2id PHC hash within the supplied memory, iteration, and lane limits."""
-    # Bound parsing before accepting attacker-supplied hashing costs.
+    # Validate parameter bounds before using attacker-controlled hashing costs.
     if (
         encoded.byte_length() > 512
         or max_memory_size_kb < 8

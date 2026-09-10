@@ -1,11 +1,12 @@
 """Provides hardware-accelerated SHA-2 transforms (FIPS 180-4)."""
 
+from std.bit import byte_swap
 from std.sys import (
     llvm_intrinsic,
     inlined_assembly,
     CompilationTarget, prefetch, PrefetchOptions
 )
-from std.memory import Pointer, bitcast
+from std.memory import Pointer, bitcast, unsafe_memset_zero
 from .utils import StackBuffer
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
@@ -128,7 +129,8 @@ def prefetch_next_block(ptr: Pointer[mut=False, UInt8, _, address_space=_]):
 
 
 def sha256ni_transform(state: SIMD[DType.uint32, 8], block: Span[UInt8, ...]) -> SIMD[DType.uint32, 8]:
-    # Use the scalar transform when the compilation target lacks SHA instructions.
+    # Fall back to the portable SHA-256 transform when the target lacks SHA
+    # instructions.
     comptime if CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]():
         return _sha256ni_transform_x86(state, block)
     elif CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86():
@@ -269,26 +271,30 @@ def sha256ni_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     ctx.buffer[ctx.buffer_len] = 0x80
     ctx.buffer_len += 1
 
+    # The zero-initialized one-shot buffer covers first-block padding; a second
+    # block is cleared explicitly.
     if ctx.buffer_len > 56:
-        ctx.state = sha256ni_transform(ctx.state, Span[UInt8, ...](unsafe_ptr=ctx.buffer.ptr(), length=64))
-        ctx.buffer_len = 0
+        ctx.state = sha256ni_transform(
+            ctx.state, Span[UInt8, ...](unsafe_ptr=ctx.buffer.ptr(), length=64)
+        )
+        unsafe_memset_zero(ctx.buffer.ptr(), 56)
 
-    while ctx.buffer_len < 56:
-        ctx.buffer[ctx.buffer_len] = 0
-        ctx.buffer_len += 1
-
-    for k in range(8):
-        ctx.buffer[56 + k] = UInt8(UInt64(bit_count >> UInt64(56 - k * 8)) & 0xFF)
+    ctx.buffer.ptr().unsafe_offset(56).unsafe_bitcast[UInt64]().unsafe_store[
+        alignment=1
+    ](0, byte_swap(bit_count))
 
     ctx.state = sha256ni_transform(ctx.state, Span[UInt8, ...](unsafe_ptr=ctx.buffer.ptr(), length=64))
 
-    var output = List[UInt8](capacity=32)
-    for k in range(8):
-        output.append(UInt8(UInt32(ctx.state[k] >> 24) & 0xFF))
-        output.append(UInt8(UInt32(ctx.state[k] >> 16) & 0xFF))
-        output.append(UInt8(UInt32(ctx.state[k] >> 8) & 0xFF))
-        output.append(UInt8(UInt32(ctx.state[k]) & 0xFF))
-
+    var output = List[UInt8](unsafe_uninit_length=32)
+    var out = output.unsafe_ptr()
+    var hi = byte_swap32(SIMD128(
+        ctx.state[0], ctx.state[1], ctx.state[2], ctx.state[3]
+    ))
+    var lo = byte_swap32(SIMD128(
+        ctx.state[4], ctx.state[5], ctx.state[6], ctx.state[7]
+    ))
+    out.unsafe_store[width=16, alignment=1](0, bitcast[DType.uint8, 16](hi))
+    out.unsafe_store[width=16, alignment=1](16, bitcast[DType.uint8, 16](lo))
     return output^
 
 

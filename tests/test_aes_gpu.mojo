@@ -189,7 +189,7 @@ def test_mode_gpu(json_data: PythonObject, mode: String) raises -> TestResult:
         ctx.enqueue_copy(input_buffer, pt_ptr)
         ctx.synchronize()
         
-        var grid_dim = n_blocks
+        var grid_dim = (n_blocks + 3) // 4
         var block_dim = 1
         
         var rounds: Int

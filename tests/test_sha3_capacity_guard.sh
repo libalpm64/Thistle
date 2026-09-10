@@ -17,8 +17,8 @@ check_guard() {
         "$source_file" -o "$guard_binary" \
         >/dev/null 2>&1
 
-    # Bash reports signal termination separately from the child's redirected
-    # stderr. Silence that shell diagnostic; the abort text remains in the log.
+    # Bash reports signal termination separately from redirected child stderr.
+    # Suppress the shell diagnostic while preserving the abort text in the log.
     if { "$guard_binary" >"$guard_log" 2>&1; } 2>/dev/null; then
         echo "$guard_name failed with ASSERT=$assert_mode" >&2
         exit 1

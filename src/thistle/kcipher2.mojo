@@ -53,7 +53,7 @@ def _amul4(b: SIMD[DType.uint32, 4]) -> SIMD[DType.uint32, 4]:
 
 @always_inline
 def _rho(x: UInt32) -> UInt32:
-    # Rotate byte positions: output byte k takes input byte (k + 1) mod 4.
+    # Rotate the four packed byte-position lanes: lane k receives lane (k + 1) mod 4.
     return ((x >> 1) & 0x7777) | ((x << 3) & 0x8888)
 
 
@@ -65,7 +65,7 @@ def _rho2(x: UInt32) -> UInt32:
 @always_inline
 def _sbox_planes(mut p: InlineArray[UInt32, 8]):
     # Boyar-Peralta AES S-box circuit.
-	# https://tches.iacr.org/index.php/TCHES/article/view/11940/11800
+    # https://tches.iacr.org/index.php/TCHES/article/view/11940/11800
     var x0 = p[7]
     var x1 = p[6]
     var x2 = p[5]

@@ -3,6 +3,7 @@ from std.collections import List
 from std.memory import unsafe_memcpy, Pointer
 from std.builtin.simd import SIMD
 from std.builtin.dtype import DType
+from std.bit import byte_swap
 from .utils import StackBuffer, volatile_wipe
 from .sha2 import (
     SHA384_IV,
@@ -12,8 +13,10 @@ from .sha2 import (
     sha256_hash,
     sha256_update,
     sha256_final_to_buffer,
+    sha256_transform_blocks,
     sha512_update,
     sha512_final_to_buffer,
+    sha512_transform_blocks,
 )
 
 comptime PBKDF2_SHA256_MAX_DKLEN: Int = 0xFFFFFFFF * 32
@@ -92,6 +95,7 @@ struct PBKDF2SHA256(HMACer):
     var inner_hash: StackBuffer[UInt8, 32]
     var u_block: StackBuffer[UInt8, 32]
     var counter_bytes: StackBuffer[UInt8, 4]
+    var fixed_block: StackBuffer[UInt8, 64]
     var inner_ctx: SHA256Context
     var outer_ctx: SHA256Context
     var inner_state: SIMD[DType.uint32, 8]
@@ -106,6 +110,10 @@ struct PBKDF2SHA256(HMACer):
         self.inner_hash = StackBuffer[UInt8, 32](fill=0)
         self.u_block = StackBuffer[UInt8, 32](fill=0)
         self.counter_bytes = StackBuffer[UInt8, 4](fill=0)
+        self.fixed_block = StackBuffer[UInt8, 64](fill=0)
+        self.fixed_block[32] = 0x80
+        self.fixed_block[62] = 0x03
+        self.fixed_block[63] = 0x00
         self.inner_ctx = SHA256Context()
         self.outer_ctx = SHA256Context()
 
@@ -136,6 +144,7 @@ struct PBKDF2SHA256(HMACer):
         volatile_wipe(self.inner_hash.ptr(), 32)
         volatile_wipe(self.u_block.ptr(), 32)
         volatile_wipe(self.counter_bytes.ptr(), 4)
+        volatile_wipe(self.fixed_block.ptr(), 64)
 
     @always_inline
     def hmac(mut self, data: Span[UInt8, ...]):
@@ -154,20 +163,27 @@ struct PBKDF2SHA256(HMACer):
 
     @always_inline
     def _hmac_fixed_unchecked(mut self, data: Span[UInt8, ...]):
-        # Unchecked PBKDF2 round: data must contain exactly 32 bytes.
-        self.inner_ctx.state = self.inner_state
-        self.inner_ctx.count = 512
-        for i in range(32):
-            self.inner_ctx.buffer[i] = data[i]
-        self.inner_ctx.buffer_len = 32
-        sha256_final_to_buffer(self.inner_ctx, self.inner_hash.ptr())
+        # PBKDF2 rounds after U1 always HMAC exactly 32 bytes. Both the
+        # inner and outer hashes therefore compress one fixed-shape block
+        # after their cached 64-byte pad state: 32 data bytes, 0x80, zeros,
+        # and the 96-byte (768-bit) total length.
+        var block = self.fixed_block.ptr()
+        var src = data.unsafe_ptr()
+        block.unsafe_store[width=32](0, src.unsafe_load[width=32](0))
 
-        self.outer_ctx.state = self.outer_state
-        self.outer_ctx.count = 512
-        for i in range(32):
-            self.outer_ctx.buffer[i] = self.inner_hash[i]
-        self.outer_ctx.buffer_len = 32
-        sha256_final_to_buffer(self.outer_ctx, self.u_block.ptr())
+        var inner = self.inner_state
+        sha256_transform_blocks(inner, block, 1)
+        for i in range(8):
+            block.unsafe_offset(i * 4).unsafe_bitcast[UInt32]().unsafe_store[
+                alignment=1
+            ](0, byte_swap(inner[i]))
+
+        var outer = self.outer_state
+        sha256_transform_blocks(outer, block, 1)
+        for i in range(8):
+            self.u_block.ptr().unsafe_offset(i * 4).unsafe_bitcast[UInt32]().unsafe_store[
+                alignment=1
+            ](0, byte_swap(outer[i]))
 
     @always_inline
     def hmac_with_counter(mut self, data: Span[UInt8, ...], counter: UInt32):
@@ -224,6 +240,7 @@ struct PBKDF2SHA512(HMACer):
     var inner_hash: StackBuffer[UInt8, 64]
     var u_block: StackBuffer[UInt8, 64]
     var counter_bytes: StackBuffer[UInt8, 4]
+    var fixed_block: StackBuffer[UInt8, 128]
     var inner_ctx: SHA512Context
     var outer_ctx: SHA512Context
     var inner_state: SIMD[DType.uint64, 8]
@@ -238,6 +255,10 @@ struct PBKDF2SHA512(HMACer):
         self.inner_hash = StackBuffer[UInt8, 64](fill=0)
         self.u_block = StackBuffer[UInt8, 64](fill=0)
         self.counter_bytes = StackBuffer[UInt8, 4](fill=0)
+        self.fixed_block = StackBuffer[UInt8, 128](fill=0)
+        self.fixed_block[64] = 0x80
+        self.fixed_block[126] = 0x06
+        self.fixed_block[127] = 0x00
         self.inner_ctx = SHA512Context()
         self.outer_ctx = SHA512Context()
 
@@ -268,6 +289,7 @@ struct PBKDF2SHA512(HMACer):
         volatile_wipe(self.inner_hash.ptr(), 64)
         volatile_wipe(self.u_block.ptr(), 64)
         volatile_wipe(self.counter_bytes.ptr(), 4)
+        volatile_wipe(self.fixed_block.ptr(), 128)
 
     @always_inline
     def hmac(mut self, data: Span[UInt8, ...]):
@@ -286,22 +308,28 @@ struct PBKDF2SHA512(HMACer):
 
     @always_inline
     def _hmac_fixed_unchecked(mut self, data: Span[UInt8, ...]):
-        # Unchecked PBKDF2 round: data must contain exactly 64 bytes.
-        self.inner_ctx.state = self.inner_state
-        self.inner_ctx.count_high = 0
-        self.inner_ctx.count_low = 1024
-        for i in range(64):
-            self.inner_ctx.buffer[i] = data[i]
-        self.inner_ctx.buffer_len = 64
-        sha512_final_to_buffer(self.inner_ctx, self.inner_hash.ptr())
+        # PBKDF2 rounds after U1 always HMAC exactly 64 bytes. Both the
+        # inner and outer hashes therefore compress one fixed-shape block
+        # after their cached 128-byte pad state: 64 data bytes, 0x80, zeros,
+        # and the 192-byte (1536-bit) total length.
+        var block = self.fixed_block.ptr()
+        block.unsafe_store[width=64](
+            0, data.unsafe_ptr().unsafe_load[width=64](0)
+        )
 
-        self.outer_ctx.state = self.outer_state
-        self.outer_ctx.count_high = 0
-        self.outer_ctx.count_low = 1024
-        for i in range(64):
-            self.outer_ctx.buffer[i] = self.inner_hash[i]
-        self.outer_ctx.buffer_len = 64
-        sha512_final_to_buffer(self.outer_ctx, self.u_block.ptr())
+        var inner = self.inner_state
+        sha512_transform_blocks(inner, block, 1)
+        for i in range(8):
+            block.unsafe_offset(i * 8).unsafe_bitcast[UInt64]().unsafe_store[
+                alignment=1
+            ](0, byte_swap(inner[i]))
+
+        var outer = self.outer_state
+        sha512_transform_blocks(outer, block, 1)
+        for i in range(8):
+            self.u_block.ptr().unsafe_offset(i * 8).unsafe_bitcast[UInt64]().unsafe_store[
+                alignment=1
+            ](0, byte_swap(outer[i]))
 
     @always_inline
     def hmac_with_counter(mut self, data: Span[UInt8, ...], counter: UInt32):

@@ -78,7 +78,8 @@ def _s_lt_l(s: Span[UInt8, ...]) -> Bool:
 
 @always_inline
 def _encoded_y_lt_p(y: Span[UInt8, ...]) -> Bool:
-    # Require y < p; the caller has already cleared the encoded x-sign bit (RFC 8032, sec. 5.1.3).
+    # The x-sign bit is cleared before this check; require the remaining y encoding
+    # to be < p (RFC 8032, sec. 5.1.3).
     var lt: UInt8 = 0
     var gt: UInt8 = 0
     for i in range(31, -1, -1):
@@ -177,7 +178,7 @@ struct Scalar(Copyable, ImplicitlyCopyable, Movable):
 
     @staticmethod
     def from_bytes(bytes: Span[UInt8, ...]) -> Scalar:
-        # This decoder reduces modulo L; callers requiring canonical input must check the range first.
+        # Decoding reduces modulo L; canonical-input paths must perform the range check first.
         var raw = _unpack_limbs(bytes)
         return Scalar(raw)._montgomery_mul(Scalar(RR_LIMBS))
 
@@ -269,7 +270,7 @@ struct Scalar(Copyable, ImplicitlyCopyable, Movable):
         var borrow: UInt64 = 0
         for i in range(5):
             var x = other.limbs[i] + borrow
-            # Keep the mask opaque so the add-back does not become a secret-dependent branch.
+            # The opaque mask keeps the conditional add-back branch-free for secret data.
             var underflow = inlined_assembly[
                 "", UInt64, constraints="=r,0", has_side_effect=True
             ](UInt64((self.limbs[i] < x).__bool__()))
@@ -353,7 +354,7 @@ def edwards_negate(p: EdwardsPoint) -> EdwardsPoint:
 
 @always_inline
 def _ct_select_fe(a: FieldElement51, b: FieldElement51, choice: UInt8) -> FieldElement51:
-    # Keep masks opaque so LLVM cannot branch on a secret digit to skip negation.
+    # Opaque masks preserve branch-free secret-digit negation through optimization.
     var mask = inlined_assembly[
         "", UInt64, constraints="=r,0", has_side_effect=True
     ](UInt64(0) - UInt64(choice))
@@ -392,11 +393,25 @@ def _edwards_double_standalone(p: EdwardsPoint) -> EdwardsPoint:
     return EdwardsPoint(E * F, G * H, F * G, E * H)
 
 
+@always_inline
+def _edwards_double_no_t(p: EdwardsPoint) -> EdwardsPoint:
+    var A = p.X.square()
+    var B = p.Y.square()
+    var ZZ = p.Z.square()
+    var C = ZZ + ZZ
+    var D = FieldElement51.ZERO() - A
+    var E = (p.X + p.Y).square() - A - B
+    var G = D + B
+    var F = G - C
+    var H = D - B
+    return EdwardsPoint(E * F, G * H, F * G, FieldElement51.ZERO())
+
+
 @no_inline
 def fe_from_bytes(bytes: Span[UInt8, ...]) -> FieldElement51:
     if len(bytes) != 32:
         abort("Ed25519 field input must be exactly 32 bytes")
-    # Decode y after the caller clears the encoded x-sign bit.
+    # Decode the y coordinate after clearing the encoded x-sign bit.
     def load8(ptr: Pointer[mut=False, UInt8, _, address_space=_]) -> UInt64:
         var v: UInt64 = 0
         for j in range(8):
@@ -611,9 +626,11 @@ def _to_projective_niels(p: EdwardsPoint, d2: FieldElement51) -> ProjectiveNiels
 
 @always_inline
 def _add_affine_niels(p: EdwardsPoint, q: AffineNielsPoint) -> EdwardsPoint:
-    var PP = (p.Y + p.X) * q.y_plus_x
-    var MM = (p.Y - p.X) * q.y_minus_x
-    var Txy = p.T * q.xy2d
+    # Fixed-base affine-Niels operands, including masked negation, remain below
+    # 2^53 and satisfy the right-operand pre-scaling bound.
+    var PP = (p.Y + p.X)._mul[True](q.y_plus_x)
+    var MM = (p.Y - p.X)._mul[True](q.y_minus_x)
+    var Txy = p.T._mul[True](q.xy2d)
     var Z2 = p.Z + p.Z
     var X3 = PP - MM
     var Y3 = PP + MM
@@ -624,9 +641,11 @@ def _add_affine_niels(p: EdwardsPoint, q: AffineNielsPoint) -> EdwardsPoint:
 
 @always_inline
 def _sub_affine_niels(p: EdwardsPoint, q: AffineNielsPoint) -> EdwardsPoint:
-    var PM = (p.Y + p.X) * q.y_minus_x
-    var MP = (p.Y - p.X) * q.y_plus_x
-    var Txy = p.T * q.xy2d
+    # Fixed-base affine-Niels operands, including masked negation, remain below
+    # 2^53 and satisfy the right-operand pre-scaling bound.
+    var PM = (p.Y + p.X)._mul[True](q.y_minus_x)
+    var MP = (p.Y - p.X)._mul[True](q.y_plus_x)
+    var Txy = p.T._mul[True](q.xy2d)
     var Z2 = p.Z + p.Z
     var X3 = PM - MP
     var Y3 = PM + MP
@@ -756,6 +775,37 @@ def _naf5(scalar: Span[UInt8, ...]) -> InlineArray[Int, 256]:
     return naf^
 
 
+def _naf8(scalar: Span[UInt8, ...]) -> InlineArray[Int, 256]:
+    var naf = InlineArray[Int, 256](fill=0)
+    var words = InlineArray[UInt64, 5](fill=0)
+    words[4] = 0
+    var ptr = scalar.unsafe_ptr()
+    for w in range(4):
+        words[w] = (
+            (ptr.unsafe_offset(8 * w)).unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]()
+        )
+    var pos = 0
+    var carry: UInt64 = 0
+    while pos < 256:
+        var idx = pos >> 6
+        var bit = UInt64(pos & 63)
+        var bit_buf: UInt64 = words[idx] >> bit
+        if bit > 56:
+            bit_buf |= words[idx + 1] << (UInt64(64) - bit)
+        var window = carry + (bit_buf & 255)
+        if (window & 1) == 0:
+            pos += 1
+            continue
+        if window < 128:
+            carry = 0
+            naf[pos] = Int(window)
+        else:
+            carry = 1
+            naf[pos] = Int(window) - 256
+        pos += 8
+    return naf^
+
+
 @always_inline
 def _b_odd_entry(ptr: Pointer[mut=False, UInt64, _], k: Int) -> AffineNielsPoint:
     var base = ptr.unsafe_offset(k * 16)
@@ -774,7 +824,7 @@ def _double_scalar_mult_vartime(a: Span[UInt8, ...], A: EdwardsPoint, b: Span[UI
     public.
     """
     var naf_a = _naf5(a)
-    var naf_b = _naf5(b)
+    var naf_b = _naf8(b)
     var d2 = ed25519_d2()
     var A2n = _to_projective_niels(_edwards_double_standalone(A), d2)
     var Ai = InlineArray[ProjectiveNielsPoint, 8](fill=ProjectiveNielsPoint())
@@ -790,13 +840,16 @@ def _double_scalar_mult_vartime(a: Span[UInt8, ...], A: EdwardsPoint, b: Span[UI
         start -= 1
     var Q = EdwardsPoint()
     for i in range(start, -1, -1):
-        Q = _edwards_double_standalone(Q)
         var da = naf_a[i]
+        var db = naf_b[i]
+        if i != 0 and da == 0 and db == 0:
+            Q = _edwards_double_no_t(Q)
+            continue
+        Q = _edwards_double_standalone(Q)
         if da > 0:
             Q = _add_projective_niels(Q, Ai[(da - 1) >> 1])
         elif da < 0:
             Q = _sub_projective_niels(Q, Ai[(-da - 1) >> 1])
-        var db = naf_b[i]
         if db > 0:
             Q = _add_affine_niels(Q, _b_odd_entry(bptr, (db - 1) >> 1))
         elif db < 0:

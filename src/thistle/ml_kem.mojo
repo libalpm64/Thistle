@@ -6,6 +6,7 @@ from std.builtin.globals import global_constant
 from std.sys import inlined_assembly
 from std.sys import simd_width_of
 from std.os import abort
+from std.memory import unsafe_memcpy
 from thistle.sha3 import (
     SHA3Context,
     sha3_256_into,
@@ -159,14 +160,20 @@ struct Polyvec(Copyable, Movable):
 
 @always_inline
 def _wipe_poly(mut p: Poly):
+    comptime W = simd_width_of[DType.int16]()
     var ptr = p.coeffs.unsafe_ptr()
-    for i in range(N):
+    var i = 0
+    while i + W <= N:
+        ptr.unsafe_store[width=W, volatile=True](i, SIMD[DType.int16, W](0))
+        i += W
+    while i < N:
         ptr.unsafe_store[volatile=True](i, Int16(0))
+        i += 1
 
 
 @always_inline
 def _wipe_polyvec(mut v: Polyvec, k: Int):
-    # Local scratch uses only the validated active k; remaining slots stay zero.
+    # Scratch callers pass the active k; long-lived secret-key storage passes K_MAX.
     for i in range(k):
         _wipe_poly(v.vec[i])
 
@@ -211,13 +218,6 @@ def barrett_reduce_simd[w: Int](a: SIMD[DType.int16, w]) -> SIMD[DType.int16, w]
     var qv = SIMD[DType.int16, w](Int16(Q))
     var t = ((a.cast[DType.int32]() * v.cast[DType.int32]() + (1 << 25)) >> 26).cast[DType.int16]()
     return a - t * qv
-
-
-@always_inline
-def _u24_le(buf: Span[UInt8, ...], offset: Int) -> UInt32:
-    if offset + 4 <= len(buf):
-        return buf.unsafe_ptr().unsafe_offset(offset).unsafe_bitcast[UInt32]().unsafe_load[alignment=1]().cast[DType.uint32]() & 0x00FFFFFF
-    return UInt32(buf[offset]) | (UInt32(buf[offset + 1]) << 8) | (UInt32(buf[offset + 2]) << 16)
 
 
 def cbd3(mut r: Poly, buf: Span[UInt8, ...]) raises:
@@ -464,23 +464,35 @@ def poly_tobytes(mut out: List[UInt8], a: Poly):
 def poly_tobytes_stack(mut out: StackBuffer[UInt8, ...], a: Poly):
     if out.remaining() < POLYBYTES:
         abort("ML-KEM serialization destination is too small")
+    var base = out.len()
+    out.set_len(base + POLYBYTES)
+    var op = out.ptr().unsafe_offset(base)
     for i in range(N // 2):
         var t0 = _positive_coeff(a.coeffs[2 * i])
         var t1 = _positive_coeff(a.coeffs[2 * i + 1])
-        out.push_unchecked(UInt8(t0))
-        out.push_unchecked(UInt8((t0 >> 8) | (t1 << 4)))
-        out.push_unchecked(UInt8(t1 >> 4))
+        var off = 3 * i
+        op.unsafe_store(off, UInt8(t0))
+        op.unsafe_store(off + 1, UInt8((t0 >> 8) | (t1 << 4)))
+        op.unsafe_store(off + 2, UInt8(t1 >> 4))
 
 
 def poly_frombytes(mut r: Poly, a: Span[UInt8, ...]) raises -> Bool:
     if len(a) != POLYBYTES:
         raise Error("ML-KEM poly_frombytes invalid buffer length")
     var ok = True
-    for i in range(N // 2):
-        var t = _u24_le(a, 3 * i)
+    var ap = a.unsafe_ptr()
+    for i in range(N // 2 - 1):
+        var off = 3 * i
+        var t = ap.unsafe_offset(off).unsafe_bitcast[UInt32]().unsafe_load[alignment=1]().cast[DType.uint32]() & 0x00FFFFFF
         r.coeffs[2 * i] = Int16(t & 0xFFF)
         r.coeffs[2 * i + 1] = Int16((t >> 12) & 0xFFF)
         ok = ok & (r.coeffs[2 * i] < Int16(Q)) & (r.coeffs[2 * i + 1] < Int16(Q))
+    comptime i = N // 2 - 1
+    comptime off = 3 * i
+    var t = UInt32(ap[unsafe_offset=off]) | (UInt32(ap[unsafe_offset=off + 1]) << 8) | (UInt32(ap[unsafe_offset=off + 2]) << 16)
+    r.coeffs[2 * i] = Int16(t & 0xFFF)
+    r.coeffs[2 * i + 1] = Int16((t >> 12) & 0xFFF)
+    ok = ok & (r.coeffs[2 * i] < Int16(Q)) & (r.coeffs[2 * i + 1] < Int16(Q))
     return ok
 
 
@@ -922,15 +934,12 @@ def rkprf_into(mut out: StackBuffer[UInt8, SYMBYTES], key: Span[UInt8, ...], inp
         raise Error("ML-KEM rkprf key must be 32 bytes")
     if len(input) > CIPHERTEXTBYTES_MAX:
         raise Error("ML-KEM rkprf input too long")
-    var buf = StackBuffer[UInt8, SYMBYTES + CIPHERTEXTBYTES_MAX]()
-    for i in range(SYMBYTES):
-        buf.push_unchecked(key[i])
-    for i in range(len(input)):
-        buf.push_unchecked(input[i])
-    try:
-        shake256_into(out, Span[UInt8, ...](unsafe_ptr=buf.ptr(), length=buf.len()), SYMBYTES)
-    finally:
-        zero_stack_u8(buf)
+    # SHAKE256 absorbs the rejection key followed by the ciphertext as consecutive inputs.
+    var ctx = SHA3Context(1088)
+    sha3_update(ctx, key)
+    sha3_update(ctx, input)
+    shake_finalize(ctx)
+    shake_squeeze_prefix_into(ctx, out, SYMBYTES)
 
 
 def hash_h_into(mut out: StackBuffer[UInt8, SYMBYTES], input: Span[UInt8, ...]):
@@ -974,14 +983,14 @@ def sample_ntt_into(mut out: Poly, seed: Span[UInt8, ...], x: UInt8, y: UInt8) r
     if len(seed) != SYMBYTES:
         raise Error("ML-KEM xof seed must be 32 bytes")
 
-    var extseed = StackBuffer[UInt8, SYMBYTES + 2]()
-    for i in range(SYMBYTES):
-        extseed.push_unchecked(seed[i])
-    extseed.push_unchecked(x)
-    extseed.push_unchecked(y)
-
+    # The 34-byte matrix XOF input fits in one SHAKE128 rate block and is placed
+    # directly in the pending block before finalization.
     var ctx = SHA3Context(1344)
-    sha3_update(ctx, Span[UInt8, ...](unsafe_ptr=extseed.ptr(), length=extseed.len()))
+    for i in range(SYMBYTES):
+        ctx.buffer[i] = seed[i]
+    ctx.buffer[SYMBYTES] = x
+    ctx.buffer[SYMBYTES + 1] = y
+    ctx.buffer_len = SYMBYTES + 2
     shake_finalize(ctx)
 
     var block = StackBuffer[UInt8, 504]()
@@ -1084,10 +1093,7 @@ struct DecapsulationKey(Copyable, Movable):
         self.z = InlineArray[UInt8, SYMBYTES](fill=0)
 
     def __deinit__(deinit self):
-        for row in range(K_MAX):
-            var ptr = self.pke_dk.pv.vec[row].coeffs.unsafe_ptr()
-            for i in range(N):
-                ptr.unsafe_store[volatile=True](i, Int16(0))
+        _wipe_polyvec(self.pke_dk.pv, K_MAX)
         var z_ptr = self.z.unsafe_ptr()
         for i in range(SYMBYTES):
             z_ptr.unsafe_store[volatile=True](i, UInt8(0))
@@ -1099,8 +1105,11 @@ def pack_pk_stack(mut out: StackBuffer[UInt8, ...], ref pk: Polyvec, seed: Inlin
     if pk_len == 0 or out.remaining() < pk_len + SYMBYTES:
         return False
     polyvec_tobytes_stack(out, pk, k)
-    for i in range(SYMBYTES):
-        out.push_unchecked(seed[i])
+    var off = out.len()
+    out.set_len(off + SYMBYTES)
+    unsafe_memcpy(
+        dest=out.ptr().unsafe_offset(off), src=seed.unsafe_ptr(), count=SYMBYTES
+    )
     return True
 
 
@@ -1420,8 +1429,9 @@ def kem_keygen_internal(seed: Span[UInt8, ...], k: Int) raises -> DecapsulationK
     var ek_bytes = StackBuffer[UInt8, INDCPA_PUBLICKEYBYTES_MAX]()
     if not pack_pk_stack(ek_bytes, dk.ek.pke_ek.pv, dk.ek.pke_ek.p, k):
         raise Error("ML-KEM failed to pack public key")
-    for i in range(ek_bytes.len()):
-        dk.ek.raw_bytes[i] = ek_bytes[i]
+    unsafe_memcpy(
+        dest=dk.ek.raw_bytes.unsafe_ptr(), src=ek_bytes.ptr(), count=ek_bytes.len()
+    )
     var h = StackBuffer[UInt8, SYMBYTES]()
     hash_h_into(h, Span[UInt8, ...](unsafe_ptr=ek_bytes.ptr(), length=ek_bytes.len()))
     for i in range(SYMBYTES):
@@ -1442,8 +1452,9 @@ def kem_keygen_internal_k[k: Int](seed: Span[UInt8, ...]) raises -> Decapsulatio
     var ek_bytes = StackBuffer[UInt8, INDCPA_PUBLICKEYBYTES_MAX]()
     if not pack_pk_stack(ek_bytes, dk.ek.pke_ek.pv, dk.ek.pke_ek.p, k):
         raise Error("ML-KEM failed to pack public key")
-    for i in range(ek_bytes.len()):
-        dk.ek.raw_bytes[i] = ek_bytes[i]
+    unsafe_memcpy(
+        dest=dk.ek.raw_bytes.unsafe_ptr(), src=ek_bytes.ptr(), count=ek_bytes.len()
+    )
     var h = StackBuffer[UInt8, SYMBYTES]()
     hash_h_into(h, Span[UInt8, ...](unsafe_ptr=ek_bytes.ptr(), length=ek_bytes.len()))
     for i in range(SYMBYTES):
@@ -1459,8 +1470,8 @@ def encapsulation_key_bytes_into(mut out: StackBuffer[UInt8, INDCPA_PUBLICKEYBYT
     if pv_len == 0 or dk.ek.pke_ek.k != dk.pke_dk.k:
         return False
     var ek_len = pv_len + SYMBYTES
-    for i in range(ek_len):
-        out.push_unchecked(dk.ek.raw_bytes[i])
+    out.set_len(ek_len)
+    unsafe_memcpy(dest=out.ptr(), src=dk.ek.raw_bytes.unsafe_ptr(), count=ek_len)
     return True
 
 
@@ -1472,12 +1483,23 @@ def decapsulation_key_expanded_bytes_into(mut out: StackBuffer[UInt8, DECAPSKEYB
         return False
     polyvec_tobytes_stack(out, dk.pke_dk.pv, k)
     var ek_len = polyvec_byte_size(k) + SYMBYTES
-    for i in range(ek_len):
-        out.push_unchecked(dk.ek.raw_bytes[i])
-    for i in range(SYMBYTES):
-        out.push_unchecked(dk.ek.h[i])
-    for i in range(SYMBYTES):
-        out.push_unchecked(dk.z[i])
+    var off = out.len()
+    out.set_len(off + ek_len + 2 * SYMBYTES)
+    unsafe_memcpy(
+        dest=out.ptr().unsafe_offset(off),
+        src=dk.ek.raw_bytes.unsafe_ptr(),
+        count=ek_len,
+    )
+    unsafe_memcpy(
+        dest=out.ptr().unsafe_offset(off + ek_len),
+        src=dk.ek.h.unsafe_ptr(),
+        count=SYMBYTES,
+    )
+    unsafe_memcpy(
+        dest=out.ptr().unsafe_offset(off + ek_len + SYMBYTES),
+        src=dk.z.unsafe_ptr(),
+        count=SYMBYTES,
+    )
     return True
 
 
@@ -1512,14 +1534,22 @@ def _decapsulation_key_size(k: Int) -> Int:
 
 
 def _bytes_diff(a: Span[UInt8, ...], b: Span[UInt8, ...]) -> UInt8:
-    var diff = UInt8(0)
-    if len(a) != len(b):
-        diff = 1
+    comptime W = simd_width_of[DType.uint8]()
+    var diff = UInt8(1) if len(a) != len(b) else UInt8(0)
     var n = len(a)
     if len(b) < n:
         n = len(b)
-    for i in range(n):
-        diff |= a[i] ^ b[i]
+    var ap = a.unsafe_ptr()
+    var bp = b.unsafe_ptr()
+    var acc = SIMD[DType.uint8, W](0)
+    var i = 0
+    while i + W <= n:
+        acc |= ap.unsafe_load[width=W](i) ^ bp.unsafe_load[width=W](i)
+        i += W
+    diff |= acc.reduce_or()
+    while i < n:
+        diff |= ap[unsafe_offset=i] ^ bp[unsafe_offset=i]
+        i += 1
     return diff
 
 
@@ -1531,8 +1561,8 @@ def _ct_is_zero_u8(x: UInt8) -> UInt8:
 
 @always_inline
 def _ct_select_u8(a: UInt8, b: UInt8, choice: UInt8) -> UInt8:
-    # Keep the selection mask opaque to prevent a branch on ciphertext validity.
-    # Load both candidate secrets; selecting a pointer before the load would expose the choice.
+    # An opaque selection mask keeps ciphertext validity out of control flow.
+    # Both candidate secrets are loaded before the constant-time byte selection.
     var mask = UInt8(inlined_assembly[
         "", UInt32, constraints="=r,0", has_side_effect=True
     ](UInt32(0) - UInt32(choice & 1)))
@@ -1817,7 +1847,7 @@ def _mlkem_encaps_seed_order(
 
 
 def mlkem_encaps_seed_vector_order(ek_bytes: Span[UInt8, ...], m: Span[UInt8, ...], parameter_set: String) raises -> Tuple[List[UInt8], List[UInt8], Bool]:
-    # Vector-facing order: (shared_secret, ciphertext, valid).
+    # ACVP vector helpers return (shared_secret, ciphertext, valid).
     return _mlkem_encaps_seed_order(ek_bytes, m, parameter_set, True)
 
 
@@ -1826,7 +1856,7 @@ def mlkem_encaps_seed_vector(ek_bytes: Span[UInt8, ...], m: Span[UInt8, ...], pa
 
 
 def mlkem_encaps_seed(ek_bytes: Span[UInt8, ...], m: Span[UInt8, ...], parameter_set: String) raises -> Tuple[List[UInt8], List[UInt8], Bool]:
-    # Public API order: (ciphertext, shared_secret, valid).
+    # The public API returns (ciphertext, shared_secret, valid).
     return _mlkem_encaps_seed_order(ek_bytes, m, parameter_set, False)
 
 

@@ -3,6 +3,7 @@
 from .curve25519 import FieldElement51
 from .utils import StackInlineArray
 from .random import random_bytes
+from .ed25519 import _mul_base_ct
 from std.collections import List
 
 
@@ -43,7 +44,7 @@ def _ladder_sub(a: FieldElement51, b: FieldElement51) -> FieldElement51:
 
 @no_inline
 def _invert_ladder(x: FieldElement51) -> FieldElement51:
-    # Share the unrolled inversion chain between the two ladder specializations.
+    # Both ladder specializations use the same unrolled inversion chain.
     return x.invert()
 
 
@@ -87,7 +88,8 @@ def _x25519[basepoint: Bool](
 
         # Every ladder product has input limbs below 2^53. Its carry reduction
         # returns 51-bit limbs, except limb 1 may exceed that by less than 2^16.
-        # Keep A and B until after the differential addition to shorten live ranges.
+        # A and B feed the differential-addition products before AA and BB are reused
+        # for the doubling update.
         var A = x_2 + z_2
         var B = _ladder_sub(x_2, z_2)
         var DA = _ladder_sub(x_3, z_3)._mul[True](A)
@@ -145,13 +147,28 @@ def x25519_public_key(
 ) raises:
     if len(private_key) != 32:
         raise Error("X25519 private key must be 32 bytes")
-    var base = StackInlineArray[UInt8, 32](fill=0)
-    base[0] = 9
-    _x25519[True](
-        private_key,
-        Span[UInt8, ...](unsafe_ptr=base.unsafe_ptr(), length=32),
-        output
+    if len(output) < 32:
+        raise Error("X25519 output needs at least 32 writable bytes")
+
+    # The Montgomery base point u=9 maps to the standard Ed25519 base point.
+    # Constant-time fixed-base Edwards multiplication produces projective y=Y/Z,
+    # which maps back with u=(1+y)/(1-y)=(Z+Y)/(Z-Y).
+    var scalar = StackInlineArray[UInt8, 32](fill=0)
+    for i in range(32):
+        scalar[i] = private_key[i]
+    scalar[0] &= 248
+    scalar[31] &= 127
+    scalar[31] |= 64
+    var p = _mul_base_ct(
+        Span[UInt8, ...](unsafe_ptr=scalar.unsafe_ptr(), length=32)
     )
+    var num = p.Z + p.Y
+    var den = p.Z - p.Y
+    var u = num * den.invert()
+    u.to_bytes_into(output.unsafe_ptr())
+    var scalar_ptr = scalar.unsafe_ptr()
+    for i in range(32):
+        scalar_ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
 def x25519_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:

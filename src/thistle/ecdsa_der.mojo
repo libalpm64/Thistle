@@ -5,8 +5,8 @@ from std.collections import List
 
 def ecdsa_der_encode(signature: Span[UInt8, ...], size: Int) raises -> List[UInt8]:
     """Encode r and s in DER (RFC 3279, sec. 2.2.3); this codec limits the body to 127 bytes."""
-    # This codec intentionally supports only DER's one-byte length form.  A
-    # 60-byte scalar is the largest one whose two padded INTEGERs can fit.
+    # This codec uses DER's one-byte length form. A 60-byte scalar is the largest
+    # value whose two padded INTEGERs fit within that encoding.
     if size <= 0 or size > 60 or len(signature) != 2 * size:
         raise Error("invalid ECDSA signature size")
     var r_start = 0

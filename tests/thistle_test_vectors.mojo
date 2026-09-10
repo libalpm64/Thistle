@@ -62,7 +62,7 @@ def hex_to_bytes(hex_str: String) -> List[UInt8]:
     return res^
 
 
-# Independently computed with RFC 9106 H' using Python's hashlib.blake2b.
+# RFC 9106 H' expected value was cross-checked with Python's hashlib.blake2b.
 def argon2_variable_expected(output_len: Int) raises -> List[UInt8]:
     if output_len == 1:
         return hex_to_bytes("c6")

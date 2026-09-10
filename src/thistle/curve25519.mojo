@@ -28,7 +28,7 @@ def _u128_shr[shift: Int](x: UInt128) -> UInt128:
 
 @always_inline
 def _scale19[small_limbs: Bool](x: UInt64) -> UInt128:
-    # The X25519 ladder bounds its limbs below 2^53, so 19*x fits in UInt64.
+    # The small-limb specialization requires x < 2^53, so 19*x fits in UInt64.
     # General field arithmetic retains the full-width intermediate.
     comptime if small_limbs:
         return UInt128(x * UInt64(19))

@@ -22,9 +22,8 @@ def extract_p256_public_key(public_der: List[UInt8]) -> List[UInt8]:
     # Require the secp256r1 OID (SEC 2 appendix A; RFC 5480 namedCurve):
     # 1.2.840.10045.3.1.7, encoded as 06 08 2A 86 48 CE 3D 03 01 07.
     #
-    # RFC 5480 places the SEC 1 point in a BIT STRING. This harness extracts that
-    # point even from malformed ASN.1 wrappers accepted by some Wycheproof cases.
-    # Production p256_ecdh receives raw SEC 1 bytes and does not parse ASN.1.
+    # RFC 5480 places the SEC 1 point in a BIT STRING. This harness extracts raw
+    # SEC 1 bytes for p256_ecdh and tolerates malformed wrappers used by Wycheproof.
     var has_p256_oid = False
     for i in range(len(public_der) - 9):
         if (
@@ -118,8 +117,8 @@ def run_case(
     var public_der = hex_to_bytes(public_hex)
     var public_key = extract_p256_public_key(public_der)
     if (is_valid or is_acceptable) and len(public_key) == 0:
-        # Test-only fallback for Wycheproof cases with damaged ASN.1 and a recoverable point.
-        # Production p256_ecdh accepts raw SEC 1 points.
+        # Some acceptable Wycheproof cases have malformed ASN.1 but a recoverable
+        # trailing SEC 1 point.
         public_key = extract_trailing_sec1_p256_public_key(public_der)
     var expected = hex_to_bytes(shared_hex)
     var actual = StackInlineArray[UInt8, 32](fill=0)

@@ -240,13 +240,19 @@ def _p256_mont_mul(a: Limbs[4], b: Limbs[4], p: Limbs[4]) -> Limbs[4]:
     var acc5 = UInt64(0)
 
     comptime for i in range(1, 4):
+        # Compute the next limb-product row before applying the reduction terms
+        # derived from acc0.
+        bi = b.limbs[i]
+        p0 = UInt128(a0) * UInt128(bi)
+        p1 = UInt128(a1) * UInt128(bi)
+        p2 = UInt128(a2) * UInt128(bi)
+        p3 = UInt128(a3) * UInt128(bi)
+
         var t0 = acc0 << 32
         var t1 = acc0 >> 32
-        var brw = UInt64(
-            (UInt128(acc0) - UInt128(t0)) >> UInt128(64)
-        ) & UInt64(1)
         var t2 = acc0 - t0
-        var t3 = acc0 - t1 - brw
+        # Wrapped subtraction borrows exactly when its result exceeds acc0.
+        var t3 = acc0 - t1 - UInt64(t2 > acc0)
         s = UInt128(acc1) + UInt128(t0)
         acc0 = UInt64(s & _MASK64)
         s = UInt128(acc2) + UInt128(t1) + (s >> UInt128(64))
@@ -257,11 +263,6 @@ def _p256_mont_mul(a: Limbs[4], b: Limbs[4], p: Limbs[4]) -> Limbs[4]:
         acc3 = UInt64(s & _MASK64)
         acc4 = acc5 + UInt64(s >> UInt128(64))
 
-        bi = b.limbs[i]
-        p0 = UInt128(a0) * UInt128(bi)
-        p1 = UInt128(a1) * UInt128(bi)
-        p2 = UInt128(a2) * UInt128(bi)
-        p3 = UInt128(a3) * UInt128(bi)
         s = UInt128(acc0) + (p0 & _MASK64)
         acc0 = UInt64(s & _MASK64)
         s = UInt128(acc1) + (p1 & _MASK64) + (s >> UInt128(64))
@@ -283,11 +284,8 @@ def _p256_mont_mul(a: Limbs[4], b: Limbs[4], p: Limbs[4]) -> Limbs[4]:
 
     var t0 = acc0 << 32
     var t1 = acc0 >> 32
-    var brw = UInt64(
-        (UInt128(acc0) - UInt128(t0)) >> UInt128(64)
-    ) & UInt64(1)
     var t2 = acc0 - t0
-    var t3 = acc0 - t1 - brw
+    var t3 = acc0 - t1 - UInt64(t2 > acc0)
     s = UInt128(acc1) + UInt128(t0)
     acc0 = UInt64(s & _MASK64)
     s = UInt128(acc2) + UInt128(t1) + (s >> UInt128(64))
@@ -363,11 +361,8 @@ def _p256_mont_sqr(a: Limbs[4], p: Limbs[4]) -> Limbs[4]:
     comptime for _ in range(4):
         var t0 = acc0 << 32
         var t1 = acc0 >> 32
-        var brw = UInt64(
-            (UInt128(acc0) - UInt128(t0)) >> UInt128(64)
-        ) & UInt64(1)
         var t2 = acc0 - t0
-        var t3 = acc0 - t1 - brw
+        var t3 = acc0 - t1 - UInt64(t2 > acc0)
         s = UInt128(acc1) + UInt128(t0)
         acc0 = UInt64(s & _MASK64)
         s = UInt128(acc2) + UInt128(t1) + (s >> UInt128(64))
@@ -582,15 +577,145 @@ def pow_mod[N: Int, N0: UInt64](base_in: Limbs[N], exponent: Limbs[N], rr: Limbs
 
 @no_inline
 def sqn[N: Int, N0: UInt64](x: Limbs[N], n: Int, p: Limbs[N]) -> Limbs[N]:
-    # Keep one squaring loop instead of expanding it at every addition-chain step.
+    # A single loop handles each run of repeated squarings in the addition chain.
     var r = x
     for _ in range(n):
         r = mont_sqr[N, N0](r, p)
     return r
 
 
+# Bernstein–Yang inversion using 62-bit signed limbs and fixed divstep batches.
+comptime _P256Signed62 = StaticTuple[Int64, 5]
+comptime _P256M62 = Int64(0x3FFFFFFFFFFFFFFF)
+
+
+@always_inline
+def _p256_to_signed62(x: Limbs[4]) -> _P256Signed62:
+    var out = _P256Signed62()
+    out[0] = Int64(x.limbs[0] & UInt64(_P256M62))
+    out[1] = Int64(((x.limbs[0] >> 62) | (x.limbs[1] << 2)) & UInt64(_P256M62))
+    out[2] = Int64(((x.limbs[1] >> 60) | (x.limbs[2] << 4)) & UInt64(_P256M62))
+    out[3] = Int64(((x.limbs[2] >> 58) | (x.limbs[3] << 6)) & UInt64(_P256M62))
+    out[4] = Int64(x.limbs[3] >> 56)
+    return out
+
+
+@always_inline
+def _p256_divstep_row[modular: Bool](
+    a: _P256Signed62, b: _P256Signed62, u: Int64, v: Int64, p: _P256Signed62
+) -> _P256Signed62:
+    # Apply one transition row and divide by 2^62. Modular rows add a
+    # correction multiple of p so the division is exact.
+    var carry = Int128(u) * Int128(a[0]) + Int128(v) * Int128(b[0])
+    var correction = Int64(0)
+    comptime if modular:
+        correction = (u & (a[4] >> 63)) + (v & (b[4] >> 63))
+        # p == -1 modulo 2^62, so p^-1 == -1 as well.
+        correction -= Int64((UInt64(correction) - UInt64(carry)) & UInt64(_P256M62))
+        carry += Int128(correction) * Int128(p[0])
+    carry >>= 62
+    var out = _P256Signed62()
+    comptime for i in range(1, 5):
+        carry += Int128(u) * Int128(a[i]) + Int128(v) * Int128(b[i])
+        comptime if modular:
+            carry += Int128(correction) * Int128(p[i])
+        out[i - 1] = Int64(carry) & _P256M62
+        carry >>= 62
+    out[4] = Int64(carry)
+    return out
+
+
+# Build the 59-divstep transition matrix. Starting at 8I keeps the
+# coefficients scaled to match the 62-bit row updates above.
+@no_inline
+def _p256_divsteps59(
+    zeta_in: Int64, f_in: Int64, g_in: Int64
+) -> Tuple[Int64, Int64, Int64, Int64, Int64]:
+    var zeta = zeta_in
+    var f = UInt64(f_in)
+    var g = UInt64(g_in)
+    var u = UInt64(8)
+    var v = UInt64(0)
+    var q = UInt64(0)
+    var r = UInt64(8)
+    for _ in range(59):
+        var c1 = UInt64(zeta >> 63)
+        var mask1 = c1
+        var c2 = g & UInt64(1)
+        var mask2 = UInt64(0) - c2
+        var x = (f ^ mask1) - mask1
+        var y = (u ^ mask1) - mask1
+        var z = (v ^ mask1) - mask1
+        g += x & mask2
+        q += y & mask2
+        r += z & mask2
+        mask1 &= mask2
+        zeta = (zeta ^ Int64(mask1)) - Int64(1)
+        f += g & mask1
+        u += q & mask1
+        v += r & mask1
+        g >>= 1
+        u <<= 1
+        v <<= 1
+    return zeta, Int64(u), Int64(v), Int64(q), Int64(r)
+
+
+@no_inline
+def _p256_inv_divsteps(x: Limbs[4], p: Limbs[4], rr: Limbs[4]) -> Limbs[4]:
+    var modulus = _p256_to_signed62(p)
+    var f = modulus
+    var g = _p256_to_signed62(x)
+    var d = _P256Signed62()
+    comptime for i in range(5):
+        d[i] = 0
+    # Input and output are Montgomery residues: seed e with R^2.
+    var e = _p256_to_signed62(rr)
+    var zeta = Int64(-1)
+    for _ in range(10):
+        var step = _p256_divsteps59(zeta, f[0], g[0])
+        zeta = step[0]
+        var next_f = _p256_divstep_row[False](f, g, step[1], step[2], modulus)
+        var next_g = _p256_divstep_row[False](f, g, step[3], step[4], modulus)
+        var next_d = _p256_divstep_row[True](d, e, step[1], step[2], modulus)
+        var next_e = _p256_divstep_row[True](d, e, step[3], step[4], modulus)
+        f = next_f
+        g = next_g
+        d = next_d
+        e = next_e
+    # Normalize d from (-2p, p), accounting for the final gcd f = +/-1.
+    var negative = d[4] >> 63
+    var sign = f[4] >> 63
+    comptime for i in range(5):
+        d[i] += modulus[i] & negative
+        d[i] = (d[i] ^ sign) - sign
+    comptime for i in range(4):
+        d[i + 1] += d[i] >> 62
+        d[i] &= _P256M62
+    negative = d[4] >> 63
+    comptime for i in range(5):
+        d[i] += modulus[i] & negative
+    comptime for i in range(4):
+        d[i + 1] += d[i] >> 62
+        d[i] &= _P256M62
+    return Limbs[4](
+        UInt64(d[0]) | (UInt64(d[1]) << 62),
+        (UInt64(d[1]) >> 2) | (UInt64(d[2]) << 60),
+        (UInt64(d[2]) >> 4) | (UInt64(d[3]) << 58),
+        (UInt64(d[3]) >> 6) | (UInt64(d[4]) << 56)
+    )
+
+
 @no_inline
 def inv_p[N: Int, N0: UInt64](x: Limbs[N], p: Limbs[N], rr: Limbs[N]) -> Limbs[N]:
+    comptime if N == 4 and N0 == UInt64(1):
+        var x4 = Limbs[4](x.limbs[0], x.limbs[1], x.limbs[2], x.limbs[3])
+        var p4 = Limbs[4](p.limbs[0], p.limbs[1], p.limbs[2], p.limbs[3])
+        var rr4 = Limbs[4](rr.limbs[0], rr.limbs[1], rr.limbs[2], rr.limbs[3])
+        var fast = _p256_inv_divsteps(x4, p4, rr4)
+        var out = Limbs[N].zero()
+        comptime for i in range(4):
+            out.limbs[i] = fast.limbs[i]
+        return out
     # Invert with the fixed Fermat addition chain for P-256 (four limbs) or P-384 (six).
     var x2 = mont_mul[N, N0](mont_sqr[N, N0](x, p), x, p)
     var x3 = mont_mul[N, N0](mont_sqr[N, N0](x2, p), x, p)
@@ -994,7 +1119,7 @@ def jacobian_add_affine_non_equal_ct[N: Int, N0: UInt64](p: JacobianPoint[N], q:
     var s2 = mont_mul[N, N0](q.y, mont_mul[N, N0](p.z, z1z1, mod), mod)
     var h = sub_mod(u2, p.x, mod)
     # (X3, Y3, Z3) and (4*X3, 8*Y3, 2*Z3) encode the same affine point.
-    # Keep H and R undoubled and compute Z3 directly to reduce field operations.
+    # Using undoubled H and R with a direct Z3 formula reduces field operations.
     var r = sub_mod(s2, p.y, mod)
     var z3 = mont_mul[N, N0](p.z, h, mod)
     var i = mont_sqr[N, N0](h, mod)

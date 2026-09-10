@@ -291,6 +291,7 @@ def sha256_transform(
 
 def sha256_update(mut ctx: SHA256Context, data: Span[UInt8, ...]):
     var buf_ptr = ctx.buffer.unsafe_ptr()
+    var data_ptr = data.unsafe_ptr()
     var i = 0
     var total_len = len(data)
 
@@ -298,7 +299,7 @@ def sha256_update(mut ctx: SHA256Context, data: Span[UInt8, ...]):
         var available = 64 - ctx.buffer_len
         if total_len >= available:
             for j in range(available):
-                buf_ptr[unsafe_offset=ctx.buffer_len + j] = data[j]
+                buf_ptr.unsafe_store(ctx.buffer_len + j, data_ptr.unsafe_load(j))
             ctx.state = sha256_transform(
                 ctx.state, Span[UInt8, ...](unsafe_ptr=buf_ptr, length=64)
             )
@@ -307,27 +308,27 @@ def sha256_update(mut ctx: SHA256Context, data: Span[UInt8, ...]):
             ctx.buffer_len = 0
         else:
             for j in range(total_len):
-                buf_ptr[unsafe_offset=ctx.buffer_len + j] = data[j]
+                buf_ptr.unsafe_store(ctx.buffer_len + j, data_ptr.unsafe_load(j))
             ctx.buffer_len += total_len
             return
 
     var nblocks = (total_len - i) // 64
     if nblocks > 0:
-        sha256_transform_blocks(ctx.state, data.unsafe_ptr().unsafe_offset(i), nblocks)
+        sha256_transform_blocks(ctx.state, data_ptr.unsafe_offset(i), nblocks)
         ctx.count += UInt64(nblocks) * 512
         i += nblocks * 64
 
     if i < total_len:
         var remaining = total_len - i
         for j in range(remaining):
-            buf_ptr[unsafe_offset=ctx.buffer_len + j] = data[i + j]
+            buf_ptr.unsafe_store(
+                ctx.buffer_len + j, data_ptr.unsafe_load(i + j)
+            )
         ctx.buffer_len += remaining
 
 
 def sha256_final(mut ctx: SHA256Context) -> List[UInt8]:
-    var output = List[UInt8](capacity=32)
-    for _ in range(32):
-        output.append(0)
+    var output = List[UInt8](unsafe_uninit_length=32)
     sha256_final_to_buffer(ctx, output.unsafe_ptr())
     return output^
 
@@ -336,7 +337,8 @@ def sha256_hash(data: Span[UInt8, ...]) -> List[UInt8]:
     """Return a 32-byte SHA-256 digest, selecting the backend from compile-time features (FIPS
     180-4, sec. 6.2).
     """
-    # Use the dedicated hardware path to avoid the generic context codegen overhead.
+    # One-shot SHA-256 dispatches directly to the hardware transform when SHA
+    # extensions are available.
     comptime if (CompilationTarget.has_neon() and CompilationTarget._has_feature["sha2"]() and not CompilationTarget.is_x86()) or (CompilationTarget.is_x86() and CompilationTarget._has_feature["sse"]() and CompilationTarget._has_feature["sha"]()):
         return sha256ni_hash(data)
 

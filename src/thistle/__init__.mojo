@@ -15,7 +15,7 @@ from .aes import (
     AESKey, AESExpandedKey, expand_key_128, expand_key_192, expand_key_256
 )
 
-# Compatibility exports for low-level kernels; callers must uphold pointer sizes.
+# Low-level kernel exports require callers to provide correctly sized pointers and buffers.
 from .aes_ni import (
     has_aes_ni, aes_gcm_ctr_kernel, aes_gcm_encrypt, aes_gcm_decrypt, AESGCMContext
 )

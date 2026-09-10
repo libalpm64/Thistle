@@ -500,8 +500,7 @@ def chacha20_block_core(
 def _chacha20_tail_block(
     key: SIMD[DType.uint32, 8], counter: UInt32, nonce: SIMD[DType.uint32, 4]
 ) -> SIMD[DType.uint32, 16]:
-    # Share the SIMD block code across partial-block callers without expanding
-    # their streaming loops with another complete set of rounds.
+    # Partial-block callers use the same SIMD block core as full blocks.
     return chacha20_block_core(key, counter, nonce)
 
 
@@ -609,8 +608,7 @@ struct ChaCha20:
         if 256 <= length - offset:
             var rows = _quad_rows_init(self.key, self.counter, self.nonce)
             var i3 = rows[3]
-            # Eight blocks keep fewer rows live than the twelve-block core,
-            # reducing register spills in the bulk loop.
+            # The eight-block core limits live rows and register pressure in the bulk loop.
             while offset + 512 <= length:
                 var o = chacha20_octo_core_rows(
                     rows[0], rows[1], rows[2], i3, i3 + _CTR_INC4

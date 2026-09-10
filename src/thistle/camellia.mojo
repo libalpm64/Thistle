@@ -107,7 +107,7 @@ def _tbl16(table: _U8x16, idx: _U8x16) -> _U8x16:
 @always_inline
 def _aes_sub16(t: _U8x16) -> _U8x16:
     # AESENCLAST/AESE apply both SubBytes and ShiftRows to each 16-byte lane.
-	# InvShiftRows cancels the permutation so the S-box preserves byte positions.
+    # InvShiftRows cancels the permutation so the S-box preserves byte positions.
     var s = t.shuffle[0, 13, 10, 7, 4, 1, 14, 11, 8, 5, 2, 15, 12, 9, 6, 3]()
     comptime if has_arm_crypto():
         return _aese(s, _U8x16(0))
@@ -854,7 +854,8 @@ def _f_bs(
     mut r: InlineArray[_U8x16, 8],
     k: UInt64
 ):
-    # Apply F to 16 blocks; k has already been byte-swapped for _splat_byte (RFC 3713, sec. 2.4.1).
+    # Apply F to 16 blocks; k uses the byte-swapped layout expected by _splat_byte
+    # (RFC 3713, sec. 2.4.1).
     # Factor the P transform into shared XOR terms.
     var y = InlineArray[_U8x16, 8](fill=_U8x16(0))
     comptime for j in range(8):
