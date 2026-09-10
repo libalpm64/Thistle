@@ -7,6 +7,7 @@ from std.memory import Pointer
 from std.bit import rotate_bits_left, count_leading_zeros
 from std.utils import StaticTuple
 from std.sys import inlined_assembly
+from std.sys.intrinsics import llvm_intrinsic
 from .random import random_bytes
 from .sha2 import (
     sha224_hash, sha256_hash, sha384_hash, sha512_hash,
@@ -20,6 +21,11 @@ comptime SHA224: Int = 224
 comptime SHA256: Int = 256
 comptime SHA384: Int = 384
 comptime SHA512: Int = 512
+
+
+@always_inline
+def _bswap64(x: UInt64) -> UInt64:
+    return llvm_intrinsic["llvm.bswap.i64", UInt64](x)
 
 
 @always_inline
@@ -636,9 +642,19 @@ struct RsaPublicKey:
         if len(sig) != nb:
             return False
         var s = _bn_zero()
-        for i in range(nb):
-            var byte = UInt64(sig[nb - 1 - i])
-            s[i >> 3] |= byte << UInt64(8 * (i & 7))
+        var full_limbs = nb // 8
+        var sig_ptr = sig.unsafe_ptr()
+        for i in range(full_limbs):
+            var off = nb - 8 * (i + 1)
+            s[i] = _bswap64(
+                sig_ptr.unsafe_offset(off).unsafe_bitcast[UInt64]().unsafe_load[alignment=1]()
+            )
+        var rem = nb - full_limbs * 8
+        if rem != 0:
+            var top = UInt64(0)
+            for i in range(rem):
+                top = (top << 8) | UInt64(sig[i])
+            s[full_limbs] = top
         if _bn_ge(s, self.n, k):
             return False
 
@@ -662,9 +678,17 @@ struct RsaPublicKey:
         var one = _bn_zero()
         one[0] = 1
         var m = _mont_mul(acc, one, self.n, self.n0, k)
-        for i in range(nb):
-            var limb = m[(nb - 1 - i) >> 3]
-            output[unsafe_offset=i] = UInt8((limb >> UInt64(8 * ((nb - 1 - i) & 7))) & 0xFF)
+        for i in range(full_limbs):
+            var off = nb - 8 * (i + 1)
+            output.unsafe_offset(off).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](
+                _bswap64(m[i])
+            )
+        if rem != 0:
+            var top = m[full_limbs]
+            for i in range(rem):
+                output[unsafe_offset=i] = UInt8(
+                    top >> UInt64(8 * (rem - 1 - i))
+                )
         return True
 
     def pss_verify(
