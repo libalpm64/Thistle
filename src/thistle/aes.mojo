@@ -401,9 +401,9 @@ struct AESKey:
         var data_ptr = self._data.ptr()
         for i in range(16):
             data_ptr.unsafe_store[volatile=True](i, UInt8(0))
-        var rk_ptr2 = self._round_keys.ptr()
+        var round_keys_ptr = self._round_keys.ptr()
         for i in range(44):
-            rk_ptr2.unsafe_store[volatile=True](i, UInt32(0))
+            round_keys_ptr.unsafe_store[volatile=True](i, UInt32(0))
 
     def round_keys[
         origin: Origin, address_space: AddressSpace, //

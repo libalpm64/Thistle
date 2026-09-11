@@ -606,23 +606,26 @@ struct ChaCha20:
             return
 
         if 256 <= length - offset:
-            var rows = _quad_rows_init(self.key, self.counter, self.nonce)
-            var i3 = rows[3]
+            var state_rows = _quad_rows_init(self.key, self.counter, self.nonce)
+            var counter_nonce_row = state_rows[3]
             # The eight-block core limits live rows and register pressure in the bulk loop.
             while offset + 512 <= length:
-                var o = chacha20_octo_core_rows(
-                    rows[0], rows[1], rows[2], i3, i3 + _CTR_INC4
+                var octo_keystream = chacha20_octo_core_rows(
+                    state_rows[0], state_rows[1], state_rows[2],
+                    counter_nonce_row, counter_nonce_row + _CTR_INC4
                 )
                 comptime for j in range(8):
-                    _xor_block64(src, dst, o[j], offset + j * 64)
-                i3 = i3 + _CTR_INC4 + _CTR_INC4
+                    _xor_block64(src, dst, octo_keystream[j], offset + j * 64)
+                counter_nonce_row = counter_nonce_row + _CTR_INC4 + _CTR_INC4
                 offset += 512
                 block_idx += 8
             while offset + 256 <= length:
-                var q = chacha20_quad_core_rows(rows[0], rows[1], rows[2], i3)
+                var quad_keystream = chacha20_quad_core_rows(
+                    state_rows[0], state_rows[1], state_rows[2], counter_nonce_row
+                )
                 comptime for j in range(4):
-                    _xor_block64(src, dst, q[j], offset + j * 64)
-                i3 = i3 + _CTR_INC4
+                    _xor_block64(src, dst, quad_keystream[j], offset + j * 64)
+                counter_nonce_row = counter_nonce_row + _CTR_INC4
                 offset += 256
                 block_idx += 4
 

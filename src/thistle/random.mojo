@@ -20,7 +20,7 @@ def _getrandom_linux_x86(buf: Pointer[mut=True, UInt8, _, address_space=_], leng
 
 
 @always_inline
-def _getrandom_linux_arm(buf: Pointer[mut=True, UInt8, _, address_space=_], length: Int) -> Int:
+def _getrandom_linux_aarch64(buf: Pointer[mut=True, UInt8, _, address_space=_], length: Int) -> Int:
     # Linux AArch64 getrandom: syscall 278, flags = 0.
     # Stage buffer and length in x9/x10 before moving them into syscall argument
     # registers x0/x1.
@@ -41,7 +41,7 @@ def _getrandom_linux_arm(buf: Pointer[mut=True, UInt8, _, address_space=_], leng
 
 
 @always_inline
-def _getentropy_macos_arm(buf: Pointer[mut=True, UInt8, _, address_space=_], length: Int) -> Int:
+def _getentropy_macos_aarch64(buf: Pointer[mut=True, UInt8, _, address_space=_], length: Int) -> Int:
     # Darwin AArch64 getentropy: syscall 500.
     # x16 supplies the syscall number; x0/x1 supply the buffer and length.
     # Errors set carry and return errno in x0; convert that to -errno.
@@ -67,43 +67,43 @@ def _getentropy_macos_arm(buf: Pointer[mut=True, UInt8, _, address_space=_], len
 def _fill_linux_x86(buf: Pointer[mut=True, UInt8, _, address_space=_], length: Int) raises:
     var offset = 0
     while offset < length:
-        var ret = _getrandom_linux_x86(buf.unsafe_offset(offset), length - offset)
-        if ret < 0:
-            if ret == -4:  # EINTR
+        var result = _getrandom_linux_x86(buf.unsafe_offset(offset), length - offset)
+        if result < 0:
+            if result == -4:  # EINTR
                 continue
             raise Error("getrandom syscall failed")
-        if ret == 0:
+        if result == 0:
             raise Error("getrandom returned zero bytes")
-        if ret > length - offset:
+        if result > length - offset:
             raise Error("getrandom returned too many bytes")
-        offset += ret
+        offset += result
 
 
-def _fill_linux_arm(buf: Pointer[mut=True, UInt8, _, address_space=_], length: Int) raises:
+def _fill_linux_aarch64(buf: Pointer[mut=True, UInt8, _, address_space=_], length: Int) raises:
     var offset = 0
     while offset < length:
-        var ret = _getrandom_linux_arm(buf.unsafe_offset(offset), length - offset)
-        if ret < 0:
-            if ret == -4:  # EINTR
+        var result = _getrandom_linux_aarch64(buf.unsafe_offset(offset), length - offset)
+        if result < 0:
+            if result == -4:  # EINTR
                 continue
             raise Error("getrandom syscall failed")
-        if ret == 0:
+        if result == 0:
             raise Error("getrandom returned zero bytes")
-        if ret > length - offset:
+        if result > length - offset:
             raise Error("getrandom returned too many bytes")
-        offset += ret
+        offset += result
 
 
-def _fill_macos_arm(buf: Pointer[mut=True, UInt8, _, address_space=_], length: Int) raises:
+def _fill_macos_aarch64(buf: Pointer[mut=True, UInt8, _, address_space=_], length: Int) raises:
     var offset = 0
     while offset < length:
         var chunk = min(256, length - offset)
-        var ret = _getentropy_macos_arm(buf.unsafe_offset(offset), chunk)
-        if ret < 0:
-            if ret == -4:  # EINTR
+        var result = _getentropy_macos_aarch64(buf.unsafe_offset(offset), chunk)
+        if result < 0:
+            if result == -4:  # EINTR
                 continue
             raise Error("getentropy syscall failed")
-        if ret != 0:
+        if result != 0:
             raise Error("getentropy returned unexpected value")
         offset += chunk
 
@@ -119,10 +119,10 @@ def random_fill(buf: Span[mut=True, UInt8, ...]) raises:
         _fill_linux_x86(ptr, length)
 
     elif CompilationTarget.is_linux() and CompilationTarget.has_neon():
-        _fill_linux_arm(ptr, length)
+        _fill_linux_aarch64(ptr, length)
 
     elif CompilationTarget.is_macos() and CompilationTarget.is_apple_silicon():
-        _fill_macos_arm(ptr, length)
+        _fill_macos_aarch64(ptr, length)
 
     else:
         CompilationTarget.unsupported_target_error[operation="random_fill"]()

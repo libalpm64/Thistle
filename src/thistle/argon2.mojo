@@ -79,15 +79,15 @@ def _p_round(
 ) -> Tuple[SIMD[DType.uint64, 4], SIMD[DType.uint64, 4], SIMD[DType.uint64, 4], SIMD[DType.uint64, 4]]:
     # First mix four columns in parallel, then rotate lanes to line up the four diagonals.
     var aa, bb, cc, dd = gb(a, b, c, d)
-    var db = SIMD[DType.uint64, 4](bb[1], bb[2], bb[3], bb[0])
-    var dc = SIMD[DType.uint64, 4](cc[2], cc[3], cc[0], cc[1])
-    var dg = SIMD[DType.uint64, 4](dd[3], dd[0], dd[1], dd[2])
-    aa, db, dc, dg = gb(aa, db, dc, dg)
+    var b_diag = SIMD[DType.uint64, 4](bb[1], bb[2], bb[3], bb[0])
+    var c_diag = SIMD[DType.uint64, 4](cc[2], cc[3], cc[0], cc[1])
+    var d_diag = SIMD[DType.uint64, 4](dd[3], dd[0], dd[1], dd[2])
+    aa, b_diag, c_diag, d_diag = gb(aa, b_diag, c_diag, d_diag)
     return (
         aa,
-        SIMD[DType.uint64, 4](db[3], db[0], db[1], db[2]),
-        SIMD[DType.uint64, 4](dc[2], dc[3], dc[0], dc[1]),
-        SIMD[DType.uint64, 4](dg[1], dg[2], dg[3], dg[0]),
+        SIMD[DType.uint64, 4](b_diag[3], b_diag[0], b_diag[1], b_diag[2]),
+        SIMD[DType.uint64, 4](c_diag[2], c_diag[3], c_diag[0], c_diag[1]),
+        SIMD[DType.uint64, 4](d_diag[1], d_diag[2], d_diag[3], d_diag[0]),
     )
 
 
@@ -343,12 +343,12 @@ def _argon2_process_lane(
     scratch: Pointer[mut=True, UInt64, _],
     memory: Pointer[mut=True, UInt64, _],
     lane: Int,
-    t: Int,
+    pass_index: Int,
     slice_idx: Int,
     seg_start: Int,
     seg_end: Int,
     segment_length: Int,
-    q: Int,
+    lane_length: Int,
     m_prime_blocks: Int,
     iterations: Int,
     type_code: Int,
@@ -360,58 +360,60 @@ def _argon2_process_lane(
     # Each lane uses a private slice of the hash-owned scratch region.
     var lane_scratch = scratch.unsafe_offset(lane * 768).unsafe_origin_cast[MutUntrackedOrigin]()
     var addressing_block = lane_scratch
-    var z_u64 = lane_scratch.unsafe_offset(128)
-    var zero_u64 = lane_scratch.unsafe_offset(256)
-    var tmp_addr = lane_scratch.unsafe_offset(384)
+    var address_input = lane_scratch.unsafe_offset(128)
+    var zero_block = lane_scratch.unsafe_offset(256)
+    var address_tmp = lane_scratch.unsafe_offset(384)
     var pool = MemoryPool(
         lane_scratch.unsafe_offset(512).unsafe_origin_cast[MutUntrackedOrigin](),
         lane_scratch.unsafe_offset(640).unsafe_origin_cast[MutUntrackedOrigin]()
     )
     var has_addressing_block = False
-    if t == 0 and slice_idx < 2:
-        zero_buffer_u64(zero_u64, 128)
+    if pass_index == 0 and slice_idx < 2:
+        zero_buffer_u64(zero_block, 128)
 
     for index in range(seg_start, seg_end):
-        if t == 0 and index < 2:
+        if pass_index == 0 and index < 2:
             continue
-        var prev_index = index - 1 if index > 0 else q - 1
-        var is_argon2i = t == 0 and slice_idx < 2
+        var prev_index = index - 1 if index > 0 else lane_length - 1
+        var data_independent = pass_index == 0 and slice_idx < 2
 
         var j1: UInt32
         var j2: UInt32
 
-        if is_argon2i:
+        if data_independent:
             var seg_offset = index % segment_length
             if not has_addressing_block or (
                 seg_offset % 128 == 0
             ):
-                zero_buffer_u64(z_u64, 128)
-                z_u64[unsafe_offset=0] = UInt64(t)
-                z_u64[unsafe_offset=1] = UInt64(lane)
-                z_u64[unsafe_offset=2] = UInt64(slice_idx)
-                z_u64[unsafe_offset=3] = UInt64(m_prime_blocks)
-                z_u64[unsafe_offset=4] = UInt64(iterations)
-                z_u64[unsafe_offset=5] = UInt64(type_code)
-                z_u64[unsafe_offset=6] = UInt64((seg_offset // 128) + 1)
+                zero_buffer_u64(address_input, 128)
+                address_input[unsafe_offset=0] = UInt64(pass_index)
+                address_input[unsafe_offset=1] = UInt64(lane)
+                address_input[unsafe_offset=2] = UInt64(slice_idx)
+                address_input[unsafe_offset=3] = UInt64(m_prime_blocks)
+                address_input[unsafe_offset=4] = UInt64(iterations)
+                address_input[unsafe_offset=5] = UInt64(type_code)
+                address_input[unsafe_offset=6] = UInt64((seg_offset // 128) + 1)
 
-                compression_g_with_pool(tmp_addr, zero_u64, z_u64, False, pool)
-                compression_g_with_pool(addressing_block, zero_u64, tmp_addr, False, pool)
+                compression_g_with_pool(address_tmp, zero_block, address_input, False, pool)
+                compression_g_with_pool(addressing_block, zero_block, address_tmp, False, pool)
                 has_addressing_block = True
 
-            var val = addressing_block[unsafe_offset=seg_offset % 128]
-            j1 = UInt32(val & 0xFFFFFFFF)
-            j2 = UInt32(val >> 32)
+            var pseudo_random = addressing_block[unsafe_offset=seg_offset % 128]
+            j1 = UInt32(pseudo_random & 0xFFFFFFFF)
+            j2 = UInt32(pseudo_random >> 32)
         else:
-            var v0 = memory[unsafe_offset=lane * q * 128 + prev_index * 128]
-            j1 = UInt32(v0 & 0xFFFFFFFF)
-            j2 = UInt32(v0 >> 32)
+            var previous_word = memory[
+                unsafe_offset=lane * lane_length * 128 + prev_index * 128
+            ]
+            j1 = UInt32(previous_word & 0xFFFFFFFF)
+            j2 = UInt32(previous_word >> 32)
 
         var ref_lane = Int(j2) % parallelism
-        if t == 0 and slice_idx == 0:
+        if pass_index == 0 and slice_idx == 0:
             ref_lane = lane
 
         var window_size: Int
-        if t == 0:
+        if pass_index == 0:
             if slice_idx == 0:
                 window_size = index
             elif ref_lane == lane:
@@ -422,11 +424,11 @@ def _argon2_process_lane(
                 window_size = slice_idx * segment_length
         else:
             if ref_lane == lane:
-                window_size = q
+                window_size = lane_length
                     - segment_length
                     + (index % segment_length)
             else:
-                window_size = q - segment_length
+                window_size = lane_length - segment_length
 
         if ref_lane == lane:
             window_size -= 1
@@ -441,21 +443,27 @@ def _argon2_process_lane(
             var y = (UInt64(window_size) * x) >> 32
             var zz = UInt64(window_size) - 1 - y
             var start_pos = 0
-            if t > 0:
+            if pass_index > 0:
                 start_pos = (
                     (slice_idx + 1) % 4
                 ) * segment_length
-            ref_index = (start_pos + Int(zz)) % q
+            ref_index = (start_pos + Int(zz)) % lane_length
 
-        var p_ptr = memory.unsafe_offset((lane * q * 128 + prev_index * 128))
-        var r_ptr = memory.unsafe_offset((ref_lane * q * 128 + ref_index * 128))
-        var c_ptr = memory.unsafe_offset((lane * q * 128 + index * 128))
+        var previous_block = memory.unsafe_offset(
+            lane * lane_length * 128 + prev_index * 128
+        )
+        var reference_block = memory.unsafe_offset(
+            ref_lane * lane_length * 128 + ref_index * 128
+        )
+        var current_block = memory.unsafe_offset(
+            lane * lane_length * 128 + index * 128
+        )
 
         compression_g_with_pool(
-            c_ptr,
-            p_ptr.unsafe_origin_cast[MutAnyOrigin](),
-            r_ptr.unsafe_origin_cast[MutAnyOrigin](),
-            t > 0,
+            current_block,
+            previous_block.unsafe_origin_cast[MutAnyOrigin](),
+            reference_block.unsafe_origin_cast[MutAnyOrigin](),
+            pass_index > 0,
             pool
         )
 
@@ -779,9 +787,9 @@ def argon2id_verify_password(
         return False
     var salt = List[UInt8]()
     var expected = List[UInt8]()
-    var memory: Int
+    var memory_size_kb: Int
     var iterations: Int
-    var lanes: Int
+    var parallelism: Int
     try:
         var fields = encoded.split("$")
         if (
@@ -794,9 +802,11 @@ def argon2id_verify_password(
         var costs = String(fields[3]).split(",")
         if len(costs) != 3:
             return False
-        memory = _phc_cost(String(costs[0]), "m=", max_memory_size_kb)
+        memory_size_kb = _phc_cost(String(costs[0]), "m=", max_memory_size_kb)
         iterations = _phc_cost(String(costs[1]), "t=", max_iterations)
-        lanes = _phc_cost(String(costs[2]), "p=", min(max_parallelism, memory // 8))
+        parallelism = _phc_cost(
+            String(costs[2]), "p=", min(max_parallelism, memory_size_kb // 8)
+        )
         salt = _phc_decode(String(fields[4]))
         expected = _phc_decode(String(fields[5]))
         if len(salt) < 8 or len(salt) > 64 or len(expected) < 16 or len(expected) > 64:
@@ -805,9 +815,9 @@ def argon2id_verify_password(
         return False
     var ctx = Argon2id(
         Span[UInt8](salt),
-        parallelism=lanes,
+        parallelism=parallelism,
         tag_length=len(expected),
-        memory_size_kb=memory,
+        memory_size_kb=memory_size_kb,
         iterations=iterations,
     )
     var actual = ctx.hash(password.as_bytes())

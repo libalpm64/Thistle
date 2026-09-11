@@ -148,8 +148,6 @@ def _hash_into(alg: Int, data: Span[UInt8, ...], output: Pointer[mut=True, UInt8
     var d: List[UInt8]
     if alg == SHA224:
         d = sha224_hash(data)
-    elif alg == SHA256:
-        d = sha256_hash(data)
     elif alg == SHA384:
         d = sha384_hash(data)
     elif alg == SHA512:
@@ -634,60 +632,64 @@ struct RsaPublicKey:
 
     def _public_op(
         self,
-        sig: Span[UInt8, ...],
+        signature: Span[UInt8, ...],
         output: Pointer[mut=True, UInt8, _, address_space=_]
     ) raises -> Bool:
         var nb = self.nb
         var k = self.k
-        if len(sig) != nb:
+        if len(signature) != nb:
             return False
-        var s = _bn_zero()
-        var full_limbs = nb // 8
-        var sig_ptr = sig.unsafe_ptr()
-        for i in range(full_limbs):
-            var off = nb - 8 * (i + 1)
-            s[i] = _bswap64(
-                sig_ptr.unsafe_offset(off).unsafe_bitcast[UInt64]().unsafe_load[alignment=1]()
+        var signature_value = _bn_zero()
+        var full_limb_count = nb // 8
+        var signature_ptr = signature.unsafe_ptr()
+        for i in range(full_limb_count):
+            var byte_offset = nb - 8 * (i + 1)
+            signature_value[i] = _bswap64(
+                signature_ptr.unsafe_offset(byte_offset).unsafe_bitcast[UInt64]().unsafe_load[alignment=1]()
             )
-        var rem = nb - full_limbs * 8
-        if rem != 0:
-            var top = UInt64(0)
-            for i in range(rem):
-                top = (top << 8) | UInt64(sig[i])
-            s[full_limbs] = top
-        if _bn_ge(s, self.n, k):
+        var leading_bytes = nb - full_limb_count * 8
+        if leading_bytes != 0:
+            var leading_limb = UInt64(0)
+            for i in range(leading_bytes):
+                leading_limb = (leading_limb << 8) | UInt64(signature[i])
+            signature_value[full_limb_count] = leading_limb
+        if _bn_ge(signature_value, self.n, k):
             return False
 
-        var sm = _mont_mul(s, self.r2, self.n, self.n0, k)
-        var acc = self.rmod
+        var signature_montgomery = _mont_mul(
+            signature_value, self.r2, self.n, self.n0, k
+        )
+        var accumulator = self.rmod
         var started = False
-        for bi in range(len(self.e)):
-            var eb = self.e[bi]
+        for byte_index in range(len(self.e)):
+            var exponent_byte = self.e[byte_index]
             for j in range(7, -1, -1):
                 if started:
-                    acc = _mont_sqr(acc, self.n, self.n0, k)
-                if (eb >> UInt8(j)) & 1 == 1:
+                    accumulator = _mont_sqr(accumulator, self.n, self.n0, k)
+                if (exponent_byte >> UInt8(j)) & 1 == 1:
                     if started:
-                        acc = _mont_mul(acc, sm, self.n, self.n0, k)
+                        accumulator = _mont_mul(
+                            accumulator, signature_montgomery, self.n, self.n0, k
+                        )
                     else:
-                        acc = sm
+                        accumulator = signature_montgomery
                         started = True
         if not started:
             return False
 
         var one = _bn_zero()
         one[0] = 1
-        var m = _mont_mul(acc, one, self.n, self.n0, k)
-        for i in range(full_limbs):
-            var off = nb - 8 * (i + 1)
-            output.unsafe_offset(off).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](
-                _bswap64(m[i])
+        var message_value = _mont_mul(accumulator, one, self.n, self.n0, k)
+        for i in range(full_limb_count):
+            var byte_offset = nb - 8 * (i + 1)
+            output.unsafe_offset(byte_offset).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](
+                _bswap64(message_value[i])
             )
-        if rem != 0:
-            var top = m[full_limbs]
-            for i in range(rem):
+        if leading_bytes != 0:
+            var leading_limb = message_value[full_limb_count]
+            for i in range(leading_bytes):
                 output[unsafe_offset=i] = UInt8(
-                    top >> UInt64(8 * (rem - 1 - i))
+                    leading_limb >> UInt64(8 * (leading_bytes - 1 - i))
                 )
         return True
 

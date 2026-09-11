@@ -669,14 +669,14 @@ def _n_inv(x: U256) -> U256:
     table[13] = _n_mont_mul(_n_sqn(table[12], 16), table[12])
 
     var out = _n_mont_mul(_n_sqn(table[13], 64), table[13])
-    var chain_p = StaticTuple[Int, 27](
+    var square_counts = StaticTuple[Int, 27](
         32, 6, 5, 4, 5, 5, 4, 3, 3, 5, 9, 6, 2, 5, 6, 5, 4, 5, 5, 3, 10, 2, 5, 5, 3, 7, 6
     )
-    var chain_i = StaticTuple[Int, 27](
+    var table_indices = StaticTuple[Int, 27](
         13, 9, 4, 2, 6, 7, 3, 3, 3, 4, 9, 6, 0, 0, 6, 4, 4, 4, 3, 2, 9, 2, 2, 2, 0, 7, 6
     )
     for i in range(27):
-        out = _n_mont_mul(_n_sqn(out, chain_p[i]), table[chain_i[i]])
+        out = _n_mont_mul(_n_sqn(out, square_counts[i]), table[table_indices[i]])
     return _n_from_mont(out)
 
 

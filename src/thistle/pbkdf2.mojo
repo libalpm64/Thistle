@@ -29,9 +29,9 @@ def _xor_block[WIDTH: Int](
     src: Pointer[mut=True, UInt8, _, address_space=_],
 ):
     # XOR each U value into the PBKDF2 block accumulator without early exits.
-    var d = dst.unsafe_bitcast[UInt64]().unsafe_load[width=WIDTH, alignment=1]()
-    var s = src.unsafe_bitcast[UInt64]().unsafe_load[width=WIDTH, alignment=1]()
-    dst.unsafe_bitcast[UInt64]().unsafe_store[width=WIDTH, alignment=1](0, d ^ s)
+    var dst_words = dst.unsafe_bitcast[UInt64]().unsafe_load[width=WIDTH, alignment=1]()
+    var src_words = src.unsafe_bitcast[UInt64]().unsafe_load[width=WIDTH, alignment=1]()
+    dst.unsafe_bitcast[UInt64]().unsafe_store[width=WIDTH, alignment=1](0, dst_words ^ src_words)
 
 
 trait HMACer(Movable):
@@ -48,36 +48,36 @@ trait HMACer(Movable):
 
 @always_inline
 def _pbkdf2_derive[H: HMACer](
-    mut h: H, salt: Span[UInt8, ...], iterations: Int, dklen: Int
+    mut hmac: H, salt: Span[UInt8, ...], iterations: Int, dklen: Int
 ) raises -> List[UInt8]:
     """Derive blocks T_i = U_1 XOR ... XOR U_c, where U_1 = PRF(P, S || INT32_BE(i)) and U_j =
     PRF(P, U_{j-1}) (RFC 8018, sec. 5.2).
     """
     if iterations < 1:
         raise Error("PBKDF2 iterations must be positive")
-    comptime hLen = H.HASH
-    if dklen < 1 or dklen > 0xFFFFFFFF * hLen:
+    comptime hash_len = H.HASH
+    if dklen < 1 or dklen > 0xFFFFFFFF * hash_len:
         raise Error("PBKDF2 dkLen exceeds the RFC 8018 limit")
-    var num_blocks = dklen // hLen
-    if dklen % hLen != 0:
+    var num_blocks = dklen // hash_len
+    if dklen % hash_len != 0:
         num_blocks += 1
     var derived_key = List[UInt8](capacity=dklen)
     var t_block = InlineArray[UInt8, 64](fill=0)
     var input_block = InlineArray[UInt8, 64](fill=0)
     for block_idx in range(1, num_blocks + 1):
-        h.hmac_with_counter(salt, UInt32(block_idx))
-        unsafe_memcpy(dest=t_block.unsafe_ptr(), src=h.u_block_ptr(), count=hLen)
+        hmac.hmac_with_counter(salt, UInt32(block_idx))
+        unsafe_memcpy(dest=t_block.unsafe_ptr(), src=hmac.u_block_ptr(), count=hash_len)
         for _ in range(1, iterations):
-            unsafe_memcpy(dest=input_block.unsafe_ptr(), src=h.u_block_ptr(), count=hLen)
-            h._hmac_fixed_unchecked(
-                Span[UInt8, ...](unsafe_ptr=input_block.unsafe_ptr(), length=hLen)
+            unsafe_memcpy(dest=input_block.unsafe_ptr(), src=hmac.u_block_ptr(), count=hash_len)
+            hmac._hmac_fixed_unchecked(
+                Span[UInt8, ...](unsafe_ptr=input_block.unsafe_ptr(), length=hash_len)
             )
-            comptime if hLen == 32:
-                _xor_block[4](t_block.unsafe_ptr(), h.u_block_ptr())
+            comptime if hash_len == 32:
+                _xor_block[4](t_block.unsafe_ptr(), hmac.u_block_ptr())
             else:
-                _xor_block[8](t_block.unsafe_ptr(), h.u_block_ptr())
+                _xor_block[8](t_block.unsafe_ptr(), hmac.u_block_ptr())
         var remaining = dklen - len(derived_key)
-        var to_copy = hLen if remaining > hLen else remaining
+        var to_copy = hash_len if remaining > hash_len else remaining
         for b in range(to_copy):
             derived_key.append(t_block[b])
     volatile_wipe(t_block.unsafe_ptr(), 64)
@@ -117,20 +117,20 @@ struct PBKDF2SHA256(HMACer):
         self.inner_ctx = SHA256Context()
         self.outer_ctx = SHA256Context()
 
-        var k = StackBuffer[UInt8, 64](fill=0)
+        var key_block = StackBuffer[UInt8, 64](fill=0)
 
         if len(password) > 64:
-            var ctx = SHA256Context()
-            sha256_update(ctx, password)
-            sha256_final_to_buffer(ctx, k.ptr())
+            var hash_ctx = SHA256Context()
+            sha256_update(hash_ctx, password)
+            sha256_final_to_buffer(hash_ctx, key_block.ptr())
         else:
             for i in range(len(password)):
-                k[i] = password[i]
+                key_block[i] = password[i]
 
         for i in range(64):
-            self.ipad[i] = k[i] ^ 0x36
-            self.opad[i] = k[i] ^ 0x5C
-        volatile_wipe(k.ptr(), 64)
+            self.ipad[i] = key_block[i] ^ 0x36
+            self.opad[i] = key_block[i] ^ 0x5C
+        volatile_wipe(key_block.ptr(), 64)
         sha256_update(self.inner_ctx, Span[UInt8, ...](unsafe_ptr=self.ipad.ptr(), length=64))
         sha256_update(self.outer_ctx, Span[UInt8, ...](unsafe_ptr=self.opad.ptr(), length=64))
         self.inner_state = self.inner_ctx.state
@@ -262,20 +262,20 @@ struct PBKDF2SHA512(HMACer):
         self.inner_ctx = SHA512Context()
         self.outer_ctx = SHA512Context()
 
-        var k = StackBuffer[UInt8, 128](fill=0)
+        var key_block = StackBuffer[UInt8, 128](fill=0)
 
         if len(password) > 128:
-            var ctx = SHA512Context()
-            sha512_update(ctx, password)
-            sha512_final_to_buffer(ctx, k.ptr())
+            var hash_ctx = SHA512Context()
+            sha512_update(hash_ctx, password)
+            sha512_final_to_buffer(hash_ctx, key_block.ptr())
         else:
             for i in range(len(password)):
-                k[i] = password[i]
+                key_block[i] = password[i]
 
         for i in range(128):
-            self.ipad[i] = k[i] ^ 0x36
-            self.opad[i] = k[i] ^ 0x5C
-        volatile_wipe(k.ptr(), 128)
+            self.ipad[i] = key_block[i] ^ 0x36
+            self.opad[i] = key_block[i] ^ 0x5C
+        volatile_wipe(key_block.ptr(), 128)
         sha512_update(self.inner_ctx, Span[UInt8, ...](unsafe_ptr=self.ipad.ptr(), length=128))
         sha512_update(self.outer_ctx, Span[UInt8, ...](unsafe_ptr=self.opad.ptr(), length=128))
         self.inner_state = self.inner_ctx.state
@@ -395,37 +395,37 @@ struct HMACSHA256State(RFC6979HMAC):
     var outer_state: SIMD[DType.uint32, 8]
 
     def __init__(out self, key: Span[UInt8, ...]):
-        var k = StackBuffer[UInt8, 64](fill=0)
+        var key_block = StackBuffer[UInt8, 64](fill=0)
         if len(key) > 64:
-            var kh = sha256_hash(key)
-            unsafe_memcpy(dest=k.ptr(), src=kh.unsafe_ptr(), count=32)
-            var khp = kh.unsafe_ptr()
+            var key_hash = sha256_hash(key)
+            unsafe_memcpy(dest=key_block.ptr(), src=key_hash.unsafe_ptr(), count=32)
+            var key_hash_ptr = key_hash.unsafe_ptr()
             for i in range(32):
-                khp.unsafe_store[volatile=True](i, UInt8(0))
+                key_hash_ptr.unsafe_store[volatile=True](i, UInt8(0))
         else:
             for i in range(len(key)):
-                k[i] = key[i]
+                key_block[i] = key[i]
         var ipad = StackBuffer[UInt8, 64](fill=0)
         var opad = StackBuffer[UInt8, 64](fill=0)
         for i in range(64):
-            ipad[i] = k[i] ^ 0x36
-            opad[i] = k[i] ^ 0x5C
+            ipad[i] = key_block[i] ^ 0x36
+            opad[i] = key_block[i] ^ 0x5C
         var inner = SHA256Context()
         sha256_update(inner, Span[UInt8, ...](unsafe_ptr=ipad.ptr(), length=64))
         self.inner_state = inner.state
         var outer = SHA256Context()
         sha256_update(outer, Span[UInt8, ...](unsafe_ptr=opad.ptr(), length=64))
         self.outer_state = outer.state
-        volatile_wipe(k.ptr(), 64)
+        volatile_wipe(key_block.ptr(), 64)
         volatile_wipe(ipad.ptr(), 64)
         volatile_wipe(opad.ptr(), 64)
 
     def __deinit__(deinit self):
-        var ip = Pointer(to=self.inner_state).unsafe_bitcast[UInt32]()
-        var op = Pointer(to=self.outer_state).unsafe_bitcast[UInt32]()
+        var inner_ptr = Pointer(to=self.inner_state).unsafe_bitcast[UInt32]()
+        var outer_ptr = Pointer(to=self.outer_state).unsafe_bitcast[UInt32]()
         for i in range(8):
-            ip.unsafe_store[volatile=True](i, UInt32(0))
-            op.unsafe_store[volatile=True](i, UInt32(0))
+            inner_ptr.unsafe_store[volatile=True](i, UInt32(0))
+            outer_ptr.unsafe_store[volatile=True](i, UInt32(0))
 
     @always_inline
     def hmac_into(
@@ -453,37 +453,37 @@ struct HMACSHA384State(RFC6979HMAC):
     var outer_state: SIMD[DType.uint64, 8]
 
     def __init__(out self, key: Span[UInt8, ...]):
-        var k = StackBuffer[UInt8, 128](fill=0)
+        var key_block = StackBuffer[UInt8, 128](fill=0)
         if len(key) > 128:
-            var kh = sha384_hash(key)
-            unsafe_memcpy(dest=k.ptr(), src=kh.unsafe_ptr(), count=48)
-            var khp = kh.unsafe_ptr()
+            var key_hash = sha384_hash(key)
+            unsafe_memcpy(dest=key_block.ptr(), src=key_hash.unsafe_ptr(), count=48)
+            var key_hash_ptr = key_hash.unsafe_ptr()
             for i in range(48):
-                khp.unsafe_store[volatile=True](i, UInt8(0))
+                key_hash_ptr.unsafe_store[volatile=True](i, UInt8(0))
         else:
             for i in range(len(key)):
-                k[i] = key[i]
+                key_block[i] = key[i]
         var ipad = StackBuffer[UInt8, 128](fill=0)
         var opad = StackBuffer[UInt8, 128](fill=0)
         for i in range(128):
-            ipad[i] = k[i] ^ 0x36
-            opad[i] = k[i] ^ 0x5C
+            ipad[i] = key_block[i] ^ 0x36
+            opad[i] = key_block[i] ^ 0x5C
         var inner = SHA512Context(SHA384_IV)
         sha512_update(inner, Span[UInt8, ...](unsafe_ptr=ipad.ptr(), length=128))
         self.inner_state = inner.state
         var outer = SHA512Context(SHA384_IV)
         sha512_update(outer, Span[UInt8, ...](unsafe_ptr=opad.ptr(), length=128))
         self.outer_state = outer.state
-        volatile_wipe(k.ptr(), 128)
+        volatile_wipe(key_block.ptr(), 128)
         volatile_wipe(ipad.ptr(), 128)
         volatile_wipe(opad.ptr(), 128)
 
     def __deinit__(deinit self):
-        var ip = Pointer(to=self.inner_state).unsafe_bitcast[UInt64]()
-        var op = Pointer(to=self.outer_state).unsafe_bitcast[UInt64]()
+        var inner_ptr = Pointer(to=self.inner_state).unsafe_bitcast[UInt64]()
+        var outer_ptr = Pointer(to=self.outer_state).unsafe_bitcast[UInt64]()
         for i in range(8):
-            ip.unsafe_store[volatile=True](i, UInt64(0))
-            op.unsafe_store[volatile=True](i, UInt64(0))
+            inner_ptr.unsafe_store[volatile=True](i, UInt64(0))
+            outer_ptr.unsafe_store[volatile=True](i, UInt64(0))
 
     @always_inline
     def hmac_into(

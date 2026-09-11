@@ -282,15 +282,15 @@ struct Hasher:
         Pointer(to=self.blocks_compressed).unsafe_mut_cast[True]().unsafe_store[volatile=True](0, 0)
 
     def update(mut self, input: Span[UInt8, ...]):
-        var d = input
-        while len(d) > 0:
+        var remaining_input = input
+        while len(remaining_input) > 0:
             if self.buf_len == 64:
                 var blk = (
                     self.buf.unsafe_ptr().unsafe_bitcast[UInt32]().unsafe_load[width=16, alignment=1]()
                 )
 
                 if self.blocks_compressed == 15:
-                    if len(d) > 0:
+                    if len(remaining_input) > 0:
                         var res = compress_core(
                             self.key,
                             blk,
@@ -320,11 +320,11 @@ struct Hasher:
                     self.blocks_compressed += 1
                     self.buf_len = 0
 
-            var take = min(len(d), 64 - self.buf_len)
+            var take = min(len(remaining_input), 64 - self.buf_len)
             for i in range(take):
-                self.buf.unsafe_set(self.buf_len + i, d[i])
+                self.buf.unsafe_set(self.buf_len + i, remaining_input[i])
             self.buf_len += take
-            d = d[take:]
+            remaining_input = remaining_input[take:]
 
     @always_inline
     def add_chunk_cv(
@@ -438,14 +438,14 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
     """
     if out_len < 0:
         raise Error("BLAKE3 output length must be non-negative")
-    var d = input
-    var total_chunks = len(d) // CHUNK_LEN
-    if len(d) % CHUNK_LEN != 0:
+    var input_data = input
+    var total_chunks = len(input_data) // CHUNK_LEN
+    if len(input_data) % CHUNK_LEN != 0:
         total_chunks += 1
 
-    if len(d) <= 65536:
+    if len(input_data) <= 65536:
         var h = Hasher()
-        h.update(d)
+        h.update(input_data)
         return h.finalize(out_len)
 
     comptime BSIZE = 64
@@ -460,7 +460,7 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
     @parameter
     def process_batch(tid: Int):
         var task_base = tid * BSIZE
-        var base_ptr = d.unsafe_ptr().unsafe_bitcast[UInt32]()
+        var base_ptr = input_data.unsafe_ptr().unsafe_bitcast[UInt32]()
         var local_cvs = StackInlineArray[SIMD[DType.uint32, 8], 64](
             fill=SIMD[DType.uint32, 8](0)
         )
@@ -599,7 +599,7 @@ def blake3_parallel_hash(input: Span[UInt8, ...], out_len: Int = 32) raises -> L
     for i in range(num_full_batches):
         h.add_subtree_cv(batch_roots[i], height=6)
 
-    h.update(d[num_full_batches * 64 * 1024 :])
+    h.update(input_data[num_full_batches * 64 * 1024 :])
     return h.finalize(out_len)
 
 

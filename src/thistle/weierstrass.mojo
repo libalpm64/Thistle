@@ -963,15 +963,15 @@ def base_table_entry[N: Int](tptr: Pointer[UInt64, _], j: Int, d: UInt64) -> Poi
     var qx = Limbs[N].zero()
     var qy = Limbs[N].zero()
     for t in range(1, 16):
-        var h = u64_zero_choice(UInt64(t) ^ d)
+        var match_choice = u64_zero_choice(UInt64(t) ^ d)
         var base = (j * 15 + (t - 1)) * N * 2
         var ex = Limbs[N].zero()
         var ey = Limbs[N].zero()
         for i in range(N):
             ex.limbs[i] = tptr[unsafe_offset=base + i]
             ey.limbs[i] = tptr[unsafe_offset=base + N + i]
-        qx = select(qx, ex, h)
-        qy = select(qy, ey, h)
+        qx = select(qx, ex, match_choice)
+        qy = select(qy, ey, match_choice)
     return Point[N](qx, qy, False)
 
 

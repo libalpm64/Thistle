@@ -1258,7 +1258,7 @@ def k_pke_encrypt_into(mut ciphertext: StackBuffer[UInt8, CIPHERTEXTBYTES_MAX], 
     if k != K_512 and k != K_768 and k != K_1024:
         return False
 
-    var kay = Poly()
+    var message_poly = Poly()
     var epp = Poly()
     var v = Poly()
     var at = InlineArray[Polyvec, K_MAX](fill=Polyvec())
@@ -1267,7 +1267,7 @@ def k_pke_encrypt_into(mut ciphertext: StackBuffer[UInt8, CIPHERTEXTBYTES_MAX], 
     var b = Polyvec()
 
     try:
-        poly_frommsg(kay, m)
+        poly_frommsg(message_poly, m)
         gen_matrix(at, ek.p, True, k)
 
         var nonce = UInt8(0)
@@ -1295,13 +1295,13 @@ def k_pke_encrypt_into(mut ciphertext: StackBuffer[UInt8, CIPHERTEXTBYTES_MAX], 
         for i in range(k):
             poly_add_inplace(b.vec[i], ep.vec[i])
         poly_add_inplace(v, epp)
-        poly_add_inplace(v, kay)
+        poly_add_inplace(v, message_poly)
         polyvec_reduce(b, k)
         poly_reduce(v)
 
         return pack_ciphertext_stack(ciphertext, b, v, k)
     finally:
-        _wipe_poly(kay)
+        _wipe_poly(message_poly)
         _wipe_poly(epp)
         _wipe_poly(v)
         _wipe_polyvec(sp, k)
@@ -1316,7 +1316,7 @@ def k_pke_encrypt_into_k[k: Int](mut ciphertext: StackBuffer[UInt8, CIPHERTEXTBY
     if ek.k != k:
         return False
 
-    var kay = Poly()
+    var message_poly = Poly()
     var epp = Poly()
     var v = Poly()
     var at = InlineArray[Polyvec, K_MAX](fill=Polyvec())
@@ -1325,7 +1325,7 @@ def k_pke_encrypt_into_k[k: Int](mut ciphertext: StackBuffer[UInt8, CIPHERTEXTBY
     var b = Polyvec()
 
     try:
-        poly_frommsg(kay, m)
+        poly_frommsg(message_poly, m)
         gen_matrix_k_static[k, True](at, ek.p)
 
         var nonce = UInt8(0)
@@ -1353,13 +1353,13 @@ def k_pke_encrypt_into_k[k: Int](mut ciphertext: StackBuffer[UInt8, CIPHERTEXTBY
         comptime for i in range(k):
             poly_add_inplace(b.vec[i], ep.vec[i])
         poly_add_inplace(v, epp)
-        poly_add_inplace(v, kay)
+        poly_add_inplace(v, message_poly)
         polyvec_reduce_k[k](b)
         poly_reduce(v)
 
         return pack_ciphertext_stack(ciphertext, b, v, k)
     finally:
-        _wipe_poly(kay)
+        _wipe_poly(message_poly)
         _wipe_poly(epp)
         _wipe_poly(v)
         _wipe_polyvec(sp, k)

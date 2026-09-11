@@ -539,16 +539,16 @@ def sqrt_ratio_checked(u: FieldElement51, v: FieldElement51) -> Optional[FieldEl
     var diff2_bytes = InlineArray[UInt8, 32](fill=0)
     diff.to_bytes_into(diff_bytes.unsafe_ptr())
     diff2.to_bytes_into(diff2_bytes.unsafe_ptr())
-    var is_zero = True
-    var is_zero2 = True
+    var diff_is_zero = True
+    var diff2_is_zero = True
     for i in range(32):
         if diff_bytes[i] != 0:
-            is_zero = False
+            diff_is_zero = False
         if diff2_bytes[i] != 0:
-            is_zero2 = False
-    if is_zero:
+            diff2_is_zero = False
+    if diff_is_zero:
         return Optional[FieldElement51](x)
-    if is_zero2:
+    if diff2_is_zero:
         # Correct the candidate root when its square is -u/v.
         var sqrtm1 = FieldElement51(
             1718705420411056, 234908883556509,
@@ -707,17 +707,17 @@ def _base_table_lookup(ptr: Pointer[mut=False, UInt64, _], j: Int, digit: Int) -
     for k in range(1, 9):
         var cand = (base.unsafe_offset((k - 1) * 16)).unsafe_load[width=16, alignment=8]()
         var diff = absv ^ UInt64(k)
-        var m = UInt64(0) - ((diff - 1) >> 63)
-        acc = acc ^ ((acc ^ cand) & SIMD[DType.uint64, 16](m))
-    var sm = sign.cast[DType.uint64]()
+        var match_mask = UInt64(0) - ((diff - 1) >> 63)
+        acc = acc ^ ((acc ^ cand) & SIMD[DType.uint64, 16](match_mask))
+    var sign_mask = sign.cast[DType.uint64]()
     var yp = SIMD[DType.uint64, 8](acc[0], acc[1], acc[2], acc[3], acc[4], 0, 0, 0)
     var ym = SIMD[DType.uint64, 8](acc[5], acc[6], acc[7], acc[8], acc[9], 0, 0, 0)
-    var swap = (yp ^ ym) & SIMD[DType.uint64, 8](sm)
+    var swap = (yp ^ ym) & SIMD[DType.uint64, 8](sign_mask)
     yp ^= swap
     ym ^= swap
     var xy = FieldElement51(acc[10], acc[11], acc[12], acc[13], acc[14])
     var xy_neg = FieldElement51.ZERO() - xy
-    var xy_sel = _ct_select_fe(xy, xy_neg, UInt8(sm & 1))
+    var xy_sel = _ct_select_fe(xy, xy_neg, UInt8(sign_mask & 1))
     return AffineNielsPoint(FieldElement51(yp), FieldElement51(ym), xy_sel)
 
 

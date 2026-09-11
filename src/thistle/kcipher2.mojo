@@ -426,10 +426,10 @@ struct KCipher2:
         var fsm = sub_k2_x4(
             self.r2 + self.b4, self.l2 + self.b9, self.l1, self.r1
         )
-        var nL1 = fsm[0]
-        var nR1 = fsm[1]
-        var nL2 = fsm[2]
-        var nR2 = fsm[3]
+        var next_l1 = fsm[0]
+        var next_r1 = fsm[1]
+        var next_l2 = fsm[2]
+        var next_r2 = fsm[3]
 
         var old_a0 = self.a0
         var old_a2 = self.a2
@@ -475,20 +475,20 @@ struct KCipher2:
         self.b9 = self.b10
         self.b10 = new_b10
 
-        self.l1 = nL1
-        self.r1 = nR1
-        self.l2 = nL2
-        self.r2 = nR2
+        self.l1 = next_l1
+        self.r1 = next_r1
+        self.l2 = next_l2
+        self.r2 = next_r2
 
     @always_inline
     def _next_normal(mut self):
         var fsm = sub_k2_x4(
             self.r2 + self.b4, self.l2 + self.b9, self.l1, self.r1
         )
-        var nL1 = fsm[0]
-        var nR1 = fsm[1]
-        var nL2 = fsm[2]
-        var nR2 = fsm[3]
+        var next_l1 = fsm[0]
+        var next_r1 = fsm[1]
+        var next_l2 = fsm[2]
+        var next_r2 = fsm[3]
 
         var old_a2 = self.a2
 
@@ -529,10 +529,10 @@ struct KCipher2:
         self.b9 = self.b10
         self.b10 = new_b10
 
-        self.l1 = nL1
-        self.r1 = nR1
-        self.l2 = nL2
-        self.r2 = nR2
+        self.l1 = next_l1
+        self.r1 = next_r1
+        self.l2 = next_l2
+        self.r2 = next_r2
 
     @always_inline
     def stream(mut self) -> UInt64:

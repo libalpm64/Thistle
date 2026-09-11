@@ -12,9 +12,9 @@ def _cswap_fe(swap: UInt64, mut a: FieldElement51, mut b: FieldElement51):
     """Swap field elements by XOR-masking each limb."""
     var mask = UInt64(0) - swap
     comptime for i in range(5):
-        var dummy = mask & (a.limbs[i] ^ b.limbs[i])
-        a.limbs[i] = a.limbs[i] ^ dummy
-        b.limbs[i] = b.limbs[i] ^ dummy
+        var masked_diff = mask & (a.limbs[i] ^ b.limbs[i])
+        a.limbs[i] = a.limbs[i] ^ masked_diff
+        b.limbs[i] = b.limbs[i] ^ masked_diff
 
 
 @always_inline
@@ -110,8 +110,8 @@ def _x25519[basepoint: Bool](
 
     _cswap_pair(swap, x_2, x_3, z_2, z_3)
 
-    var res = x_2 * _invert_ladder(z_2)
-    res.to_bytes_into(output.unsafe_ptr())
+    var result = x_2 * _invert_ladder(z_2)
+    result.to_bytes_into(output.unsafe_ptr())
     var scalar_ptr = scalar.unsafe_ptr()
     for i in range(32):
         scalar_ptr.unsafe_store[volatile=True](i, UInt8(0))
@@ -135,10 +135,10 @@ def x25519_checked(
     """Compute X25519 and reject an all-zero shared secret (RFC 7748, sec. 6.1)."""
     x25519(scalar_in, point, output)
     var out_ptr = output.unsafe_ptr()
-    var zero_diff: UInt8 = 0
+    var nonzero_acc: UInt8 = 0
     for i in range(32):
-        zero_diff |= out_ptr[unsafe_offset=i]
-    if zero_diff == 0:
+        nonzero_acc |= out_ptr[unsafe_offset=i]
+    if nonzero_acc == 0:
         raise Error("X25519 shared secret is all-zero (low-order point)")
 
 
@@ -159,13 +159,13 @@ def x25519_public_key(
     scalar[0] &= 248
     scalar[31] &= 127
     scalar[31] |= 64
-    var p = _mul_base_ct(
+    var edwards_point = _mul_base_ct(
         Span[UInt8, ...](unsafe_ptr=scalar.unsafe_ptr(), length=32)
     )
-    var num = p.Z + p.Y
-    var den = p.Z - p.Y
-    var u = num * den.invert()
-    u.to_bytes_into(output.unsafe_ptr())
+    var numerator = edwards_point.Z + edwards_point.Y
+    var denominator = edwards_point.Z - edwards_point.Y
+    var u_coordinate = numerator * denominator.invert()
+    u_coordinate.to_bytes_into(output.unsafe_ptr())
     var scalar_ptr = scalar.unsafe_ptr()
     for i in range(32):
         scalar_ptr.unsafe_store[volatile=True](i, UInt8(0))

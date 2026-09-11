@@ -1526,10 +1526,10 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
             _zero_dsa_poly(c)
             continue
 
-        var count1s = 0
+        var hint_count = 0
         for i in range(p.k):
-            count1s += _dsa_make_hint_into(h[i], ct0[i], w[i], cs2[i], p)
-        if count1s > p.omega:
+            hint_count += _dsa_make_hint_into(h[i], ct0[i], w[i], cs2[i], p)
+        if hint_count > p.omega:
             _zero_dsa_poly_vec(y)
             _zero_dsa_poly_vec(y_hat)
             _zero_dsa_poly_vec(w)

@@ -210,19 +210,19 @@ def xchacha20_poly1305_encrypt(
         raise Error("XChaCha20-Poly1305 ciphertext output is too small")
     if len(tag) < 16:
         raise Error("XChaCha20-Poly1305 tag output is too small")
-    var sub = _xchacha_subkey_nonce(key, nonce)
-    var sp = sub.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
+    var subkey_nonce = _xchacha_subkey_nonce(key, nonce)
+    var subkey_nonce_ptr = subkey_nonce.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
     try:
         chacha20_poly1305_encrypt(
-            Span[UInt8, ...](unsafe_ptr=sp, length=32),
-            Span[UInt8, ...](unsafe_ptr=sp.unsafe_offset(32), length=12),
+            Span[UInt8, ...](unsafe_ptr=subkey_nonce_ptr, length=32),
+            Span[UInt8, ...](unsafe_ptr=subkey_nonce_ptr.unsafe_offset(32), length=12),
             aad,
             plaintext,
             ciphertext,
             tag,
         )
     finally:
-        volatile_wipe(sp, 44)
+        volatile_wipe(subkey_nonce_ptr, 44)
 
 
 def xchacha20_poly1305_decrypt(
@@ -242,19 +242,19 @@ def xchacha20_poly1305_decrypt(
         raise Error("XChaCha20-Poly1305 nonce must be 24 bytes")
     if len(plaintext) < len(ciphertext):
         raise Error("XChaCha20-Poly1305 plaintext output is too small")
-    var sub = _xchacha_subkey_nonce(key, nonce)
-    var sp = sub.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
+    var subkey_nonce = _xchacha_subkey_nonce(key, nonce)
+    var subkey_nonce_ptr = subkey_nonce.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin]()
     try:
         return chacha20_poly1305_decrypt(
-            Span[UInt8, ...](unsafe_ptr=sp, length=32),
-            Span[UInt8, ...](unsafe_ptr=sp.unsafe_offset(32), length=12),
+            Span[UInt8, ...](unsafe_ptr=subkey_nonce_ptr, length=32),
+            Span[UInt8, ...](unsafe_ptr=subkey_nonce_ptr.unsafe_offset(32), length=12),
             aad,
             ciphertext,
             tag,
             plaintext,
         )
     finally:
-        volatile_wipe(sp, 44)
+        volatile_wipe(subkey_nonce_ptr, 44)
 
 
 def _xchacha_subkey_nonce(
