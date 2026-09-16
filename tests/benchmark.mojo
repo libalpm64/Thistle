@@ -13,6 +13,7 @@ from thistle.camellia import (
     CamelliaCipher, camellia_encrypt_blocks, camellia_ctr_kernel
 )
 from thistle.chacha20 import ChaCha20
+from thistle.chacha20poly1305 import chacha20_poly1305_encrypt
 from thistle.kcipher2 import KCipher2
 from thistle.sha2 import sha256_hash, sha512_hash
 from thistle.sha_ni import sha256ni_hash, has_sha_ni
@@ -20,9 +21,14 @@ from thistle.sha3 import sha3_256
 from thistle.aes import (
     AESKey, cpu_aes_ct_encrypt16, cpu_aes_ct_skey, ROUNDS_128, expand_key_128
 )
-from thistle.aes_ni import has_aes_ni, x86_aes_ecb_kernel
+from thistle.aes_ni import has_aes_ni, x86_aes_ecb_kernel, AESGCMContext
 from thistle.x25519 import x25519, x25519_public_key
 from thistle.pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
+from thistle.tls_kdf import (
+    tls12_prf_sha256_into,
+    tls12_prf_sha384_into,
+    tls13_derive_secret_sha256_into,
+)
 from thistle.ml_kem import (
     K_512, K_768, K_1024, SYMBYTES,
     INDCPA_PUBLICKEYBYTES_MAX, DECAPSKEYBYTES_MAX, CIPHERTEXTBYTES_MAX,
@@ -125,6 +131,129 @@ def benchmark_pbkdf2(duration_secs: Float64) raises -> String:
         + " derivations/s\n"
         + "pbkdf2-sha512-10k | throughput: " + String(Float64(count512) / duration512)
         + " derivations/s"
+    )
+
+
+def benchmark_tls_kdf(duration_secs: Float64) raises -> String:
+    var secret = InlineArray[UInt8, 32](fill=0)
+    var seed_bytes = InlineArray[UInt8, 64](fill=0)
+    var transcript_hash = InlineArray[UInt8, 32](fill=0)
+    for i in range(32):
+        secret[i] = UInt8(i + 1)
+        transcript_hash[i] = UInt8(0xA0 + i)
+    for i in range(64):
+        seed_bytes[i] = UInt8(i)
+
+    var tls12_label = String("master secret").as_bytes()
+    var tls13_label = String("c hs traffic").as_bytes()
+    var tls12_sha256_output = InlineArray[UInt8, 48](fill=0)
+    var tls12_sha384_output = InlineArray[UInt8, 48](fill=0)
+    var tls13_output = InlineArray[UInt8, 32](fill=0)
+    var secret_span = Span[UInt8, ...](unsafe_ptr=secret.unsafe_ptr(), length=32)
+    var seed_span = Span[UInt8, ...](unsafe_ptr=seed_bytes.unsafe_ptr(), length=64)
+    var transcript_span = Span[UInt8, ...](unsafe_ptr=transcript_hash.unsafe_ptr(), length=32)
+    var tls12_sha256_span = Span[mut=True, UInt8, ...](tls12_sha256_output)
+    var tls12_sha384_span = Span[mut=True, UInt8, ...](tls12_sha384_output)
+    var tls13_span = Span[mut=True, UInt8, ...](tls13_output)
+
+    tls12_prf_sha256_into(secret_span, tls12_label, seed_span, tls12_sha256_span)
+    tls12_prf_sha384_into(secret_span, tls12_label, seed_span, tls12_sha384_span)
+    tls13_derive_secret_sha256_into(secret_span, tls13_label, transcript_span, tls13_span)
+
+    var sink = UInt8(0)
+    var tls12_sha256_count = 0
+    var start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        tls12_prf_sha256_into(secret_span, tls12_label, seed_span, tls12_sha256_span)
+        sink ^= tls12_sha256_output[0]
+        tls12_sha256_count += 1
+    var tls12_sha256_duration = perf_counter() - start
+
+    var tls12_sha384_count = 0
+    start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        tls12_prf_sha384_into(secret_span, tls12_label, seed_span, tls12_sha384_span)
+        sink ^= tls12_sha384_output[0]
+        tls12_sha384_count += 1
+    var tls12_sha384_duration = perf_counter() - start
+
+    var tls13_count = 0
+    start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        tls13_derive_secret_sha256_into(secret_span, tls13_label, transcript_span, tls13_span)
+        sink ^= tls13_output[0]
+        tls13_count += 1
+    var tls13_duration = perf_counter() - start
+    _ = sink
+
+    return (
+        "tls12-prf-sha256-48b | throughput: "
+        + String(Float64(tls12_sha256_count) / tls12_sha256_duration)
+        + " ops/s\n"
+        + "tls12-prf-sha384-48b | throughput: "
+        + String(Float64(tls12_sha384_count) / tls12_sha384_duration)
+        + " ops/s\n"
+        + "tls13-derive-secret-sha256-32b | throughput: "
+        + String(Float64(tls13_count) / tls13_duration)
+        + " ops/s"
+    )
+
+
+def benchmark_tls_aead(data_size: Int, duration_secs: Float64) raises -> String:
+    var aes_key = InlineArray[UInt8, 16](fill=0x11)
+    var chacha_key = InlineArray[UInt8, 32](fill=0x22)
+    var nonce = InlineArray[UInt8, 12](fill=0x33)
+    var aad = InlineArray[UInt8, 5](fill=0)
+    var input = List[UInt8](unsafe_uninit_length=data_size)
+    var aes_output = List[UInt8](unsafe_uninit_length=data_size)
+    var chacha_output = List[UInt8](unsafe_uninit_length=data_size)
+    var aes_tag = InlineArray[UInt8, 16](fill=0)
+    var chacha_tag = InlineArray[UInt8, 16](fill=0)
+    for i in range(data_size):
+        input[i] = UInt8(i & 0xFF)
+
+    var input_span = Span[UInt8, ...](input)
+    var nonce_span = Span[UInt8, ...](nonce)
+    var aad_span = Span[UInt8, ...](aad)
+    var chacha_key_span = Span[UInt8, ...](chacha_key)
+    var aes_output_span = Span[mut=True, UInt8, ...](aes_output)
+    var chacha_output_span = Span[mut=True, UInt8, ...](chacha_output)
+    var aes_tag_span = Span[mut=True, UInt8, ...](aes_tag)
+    var chacha_tag_span = Span[mut=True, UInt8, ...](chacha_tag)
+    var aes_ctx = AESGCMContext(Span[UInt8, ...](aes_key))
+
+    aes_ctx.encrypt_into(nonce_span, input_span, aad_span, aes_output_span, aes_tag_span)
+    chacha20_poly1305_encrypt(
+        chacha_key_span, nonce_span, aad_span, input_span, chacha_output_span, chacha_tag_span
+    )
+
+    var sink = aes_output[0] ^ aes_tag[0] ^ chacha_output[0] ^ chacha_tag[0]
+    var aes_count = 0
+    var start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        aes_ctx.encrypt_into(nonce_span, input_span, aad_span, aes_output_span, aes_tag_span)
+        sink ^= aes_output[0] ^ aes_tag[0]
+        aes_count += 1
+    var aes_duration = perf_counter() - start
+
+    var chacha_count = 0
+    start = perf_counter()
+    while perf_counter() - start < duration_secs:
+        chacha20_poly1305_encrypt(
+            chacha_key_span, nonce_span, aad_span, input_span, chacha_output_span, chacha_tag_span
+        )
+        sink ^= chacha_output[0] ^ chacha_tag[0]
+        chacha_count += 1
+    var chacha_duration = perf_counter() - start
+    _ = sink
+
+    var aes_gbps = Float64(aes_count * data_size) / aes_duration / 1_000_000_000.0
+    var chacha_gbps = Float64(chacha_count * data_size) / chacha_duration / 1_000_000_000.0
+    return (
+        "aes-128-gcm-" + String(data_size) + "b | throughput: "
+        + String(aes_gbps) + " gb/s\n"
+        + "chacha20-poly1305-" + String(data_size) + "b | throughput: "
+        + String(chacha_gbps) + " gb/s"
     )
 
 
@@ -1004,6 +1133,10 @@ def main() raises:
     print(benchmark_argon2(duration))
     print(benchmark_x25519(duration))
     print(benchmark_pbkdf2(duration))
+    print(benchmark_tls_kdf(duration))
+    print(benchmark_tls_aead(16 * 1024, duration))
+    print(benchmark_tls_aead(64 * 1024, duration))
+    print(benchmark_tls_aead(1024 * 1024, duration))
     print(benchmark_mlkem_set[K_512]("ml-kem-512", duration))
     print(benchmark_mlkem_set[K_768]("ml-kem-768", duration))
     print(benchmark_mlkem_set[K_1024]("ml-kem-1024", duration))

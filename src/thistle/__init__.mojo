@@ -9,6 +9,14 @@ from .blake3 import blake3_hash, blake3_parallel_hash, Hasher
 
 from .pbkdf2 import hmac_sha256, hmac_sha384, hmac_sha512
 from .pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
+from .tls_kdf import (
+    hkdf_extract_sha256, hkdf_extract_sha256_into,
+    hkdf_expand_sha256, hkdf_expand_sha256_into,
+    tls12_prf_sha256, tls12_prf_sha256_into,
+    tls12_prf_sha384, tls12_prf_sha384_into,
+    tls13_hkdf_expand_label_sha256, tls13_hkdf_expand_label_sha256_into,
+    tls13_derive_secret_sha256, tls13_derive_secret_sha256_into
+)
 from .argon2 import Argon2id, argon2id_hash_string
 
 from .aes import (
@@ -59,6 +67,7 @@ from .rsa import (
     rsa_pss_crt_sign, rsa_pss_crt_sign_with_salt,
     rsa_pss_crt_sha256_sign, rsa_pss_crt_sha384_sign,
     rsa_pss_crt_sha512_sign,
+    rsa_pkcs1_v15_sha256_sign, rsa_pkcs1_v15_crt_sha256_sign,
     rsa_pkcs1_v15_verify, rsa_pkcs1_v15_sha1_verify,
     rsa_pkcs1_v15_sha256_verify, rsa_pkcs1_v15_sha384_verify,
     rsa_pkcs1_v15_sha512_verify

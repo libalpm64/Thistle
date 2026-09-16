@@ -27,6 +27,8 @@ from thistle.pbkdf2 import hmac_sha384
 from thistle.rsa import (
     rsa_pss_sign_with_salt,
     rsa_pss_verify,
+    rsa_pkcs1_v15_sha256_sign,
+    rsa_pkcs1_v15_crt_sha256_sign,
     rsa_pkcs1_v15_sha256_verify,
     RsaPublicKey,
     RsaPrivateKey,
@@ -341,7 +343,7 @@ def test_rsa_inverse_widths() raises:
                         raise Error("RSA inverse value mismatch at bits=" + String(bits))
 
 
-def test_rsa_pss_signing() raises:
+def test_rsa_signing() raises:
     var n = hex_bytes(
         "00c0704ded9d79d29aca25c59bb4711b75a4776fe463b527d2b3eea57198a692081a2645dac540597852a70a22327f38d2068378e37f8d074246eb1879a3a34c530bfa91f629f91c8f9089f489332a6febaa83014cea0e2f7511e8338fe265e8296b7f934529244820f21a7c38de946b182a023ef85c306d1e14ddbfeed54b6daaf5e5c31d02d627e4d068c133511cef3d44bf7a0941b80621193250c8d8fb1893550b3ce828d220a64c9086f01f50c3dc3d1a8081ba185f4798e6bc4a1b913ecfaaf6b45b109a94c765fdb6f662847c1bd48ff83b6f7882ed75f3fb54a176e39ca7856de1e9fd09dd90fcb133ad19b6851e05d8d39b695731fdd3da6a5539e44f"
     )
@@ -450,6 +452,24 @@ def test_rsa_pss_signing() raises:
         raise Error("crt verify")
     if not equal(sig, sig2):
         raise Error("CRT result mismatch")
+
+    var pkcs1_sig = rsa_pkcs1_v15_sha256_sign(
+        Span[UInt8, ...](n), Span[UInt8, ...](e),
+        Span[UInt8, ...](d), Span[UInt8, ...](msg)
+    )
+    if not rsa_pkcs1_v15_sha256_verify(
+        Span[UInt8, ...](n), Span[UInt8, ...](e),
+        Span[UInt8, ...](msg), Span[UInt8, ...](pkcs1_sig)
+    ):
+        raise Error("pkcs1 sign/verify")
+    var pkcs1_crt_sig = rsa_pkcs1_v15_crt_sha256_sign(
+        Span[UInt8, ...](n), Span[UInt8, ...](e),
+        Span[UInt8, ...](p), Span[UInt8, ...](q),
+        Span[UInt8, ...](dp), Span[UInt8, ...](dq),
+        Span[UInt8, ...](qi), Span[UInt8, ...](msg)
+    )
+    if not equal(pkcs1_sig, pkcs1_crt_sig):
+        raise Error("pkcs1 CRT mismatch")
     var full_key = RsaPrivateKey(
         Span[UInt8, ...](n),
         Span[UInt8, ...](e),
@@ -689,7 +709,7 @@ def main() raises:
     test_p384()
     test_keygen()
     test_rsa_inverse_widths()
-    test_rsa_pss_signing()
+    test_rsa_signing()
     test_ecdsa_wycheproof()
     test_rsa_pkcs1_wycheproof()
     test_rsa_pss_wycheproof()

@@ -31,6 +31,17 @@ from thistle.chacha20poly1305 import (
 )
 from thistle.kcipher2 import KCipher2
 from thistle.pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha512
+from thistle.tls_kdf import (
+    hkdf_extract_sha256,
+    hkdf_extract_sha256_into,
+    hkdf_expand_sha256,
+    tls12_prf_sha256,
+    tls12_prf_sha384,
+    tls12_prf_sha384_into,
+    tls13_hkdf_expand_label_sha256,
+    tls13_derive_secret_sha256,
+    tls13_derive_secret_sha256_into,
+)
 from thistle.aes import (
     cpu_aes_encrypt, cpu_aes_ecb_kernel, cpu_aes_cbc_kernel, cpu_aes_ctr_kernel,
     cpu_aes_xts_kernel, AESExpandedKey
@@ -133,6 +144,250 @@ struct TestResult(Copyable, Movable):
     var passed: Int
     var failed: Int
     var failures: List[String]
+
+
+def _test_hkdf_sha256(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var passed, failed = 0, 0
+    var failures = List[String]()
+    for i in range(Int(py=data.__len__())):
+        var vector = data[i]
+        var name = String(vector["name"])
+        var ikm = hex_to_bytes(String(vector["ikm"]))
+        var salt = hex_to_bytes(String(vector["salt"]))
+        var info = hex_to_bytes(String(vector["info"]))
+        var prk = hkdf_extract_sha256(Span[UInt8, ...](salt), Span[UInt8, ...](ikm))
+        if bytes_to_hex(prk) == String(vector["prk"]):
+            passed += 1
+        else:
+            failed += 1
+            failures.append("HKDF-SHA256 extract " + name)
+        var okm = hkdf_expand_sha256(
+            Span[UInt8, ...](prk), Span[UInt8, ...](info), Int(py=vector["length"])
+        )
+        if bytes_to_hex(okm) == String(vector["okm"]):
+            passed += 1
+        else:
+            failed += 1
+            failures.append("HKDF-SHA256 expand " + name)
+    return TestResult(passed, failed, failures^)
+
+
+def _test_tls12_prf_sha256(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var passed, failed = 0, 0
+    var failures = List[String]()
+    for i in range(Int(py=data.__len__())):
+        var vector = data[i]
+        var secret = hex_to_bytes(String(vector["secret"]))
+        var label = string_to_bytes(String(vector["label_ascii"]))
+        var seed = hex_to_bytes(String(vector["seed"]))
+        var output = tls12_prf_sha256(
+            Span[UInt8, ...](secret), Span[UInt8, ...](label),
+            Span[UInt8, ...](seed), Int(py=vector["length"])
+        )
+        if bytes_to_hex(output) == String(vector["output"]):
+            passed += 1
+        else:
+            failed += 1
+            failures.append("TLS1.2 PRF-SHA256 " + String(vector["name"]))
+    return TestResult(passed, failed, failures^)
+
+
+def _test_tls12_prf_sha384(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var passed, failed = 0, 0
+    var failures = List[String]()
+    for i in range(Int(py=data.__len__())):
+        var vector = data[i]
+        var secret = hex_to_bytes(String(vector["secret"]))
+        var label = string_to_bytes(String(vector["label_ascii"]))
+        var seed = hex_to_bytes(String(vector["seed"]))
+        var allocated_output = tls12_prf_sha384(
+            Span[UInt8, ...](secret), Span[UInt8, ...](label),
+            Span[UInt8, ...](seed), Int(py=vector["length"])
+        )
+        var buffered_output = List[UInt8](length=Int(py=vector["length"]), fill=0)
+        tls12_prf_sha384_into(
+            Span[UInt8, ...](secret), Span[UInt8, ...](label),
+            Span[UInt8, ...](seed), Span[mut=True, UInt8, ...](buffered_output)
+        )
+        var expected_output = String(vector["output"])
+        if bytes_to_hex(allocated_output) == expected_output and bytes_to_hex(buffered_output) == expected_output:
+            passed += 1
+        else:
+            failed += 1
+            failures.append("TLS1.2 PRF-SHA384 " + String(vector["name"]))
+    return TestResult(passed, failed, failures^)
+
+
+def _test_tls13_kdf(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var passed, failed = 0, 0
+    var failures = List[String]()
+    for i in range(Int(py=data.__len__())):
+        var vector = data[i]
+        var secret = hex_to_bytes(String(vector["secret"]))
+        var label = string_to_bytes(String(vector["label_ascii"]))
+        var context = hex_to_bytes(String(vector["context"]))
+        var output = tls13_hkdf_expand_label_sha256(
+            Span[UInt8, ...](secret), Span[UInt8, ...](label),
+            Span[UInt8, ...](context), Int(py=vector["length"])
+        )
+        if bytes_to_hex(output) == String(vector["output"]):
+            passed += 1
+        else:
+            failed += 1
+            failures.append("TLS1.3 Expand-Label " + String(vector["name"]))
+        if Int(py=vector["length"]) == 32 and len(context) == 32:
+            var derived = tls13_derive_secret_sha256(
+                Span[UInt8, ...](secret), Span[UInt8, ...](label), Span[UInt8, ...](context)
+            )
+            if bytes_to_hex(derived) == String(vector["output"]):
+                passed += 1
+            else:
+                failed += 1
+                failures.append("TLS1.3 Derive-Secret " + String(vector["name"]))
+    return TestResult(passed, failed, failures^)
+
+
+def _test_tls_kdf_boundaries() raises -> TestResult:
+    var passed, failed = 0, 0
+    var failures = List[String]()
+    var short_prk = List[UInt8](length=31, fill=0)
+    var empty = List[UInt8]()
+    var rejected = False
+    try:
+        _ = hkdf_expand_sha256(Span[UInt8, ...](short_prk), Span[UInt8, ...](empty), 32)
+    except:
+        rejected = True
+    if rejected:
+        passed += 1
+    else:
+        failed += 1
+        failures.append("HKDF-SHA256 accepted a 31-byte PRK")
+
+    var valid_prk = List[UInt8](length=32, fill=0)
+    var extract_out = List[UInt8](length=32, fill=0)
+    var extract_salt = hex_to_bytes("000102030405060708090a0b0c")
+    var extract_ikm = hex_to_bytes(
+        "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b"
+    )
+    hkdf_extract_sha256_into(
+        Span[UInt8, ...](extract_salt), Span[UInt8, ...](extract_ikm),
+        Span[mut=True, UInt8, ...](extract_out)
+    )
+    if bytes_to_hex(extract_out) == (
+        "077709362c2e32df0ddc3f0dc47bba63"
+        "90b6c73bb50f9c3122ec844ad7c2b3e5"
+    ):
+        passed += 1
+    else:
+        failed += 1
+        failures.append("HKDF-SHA256 extract_into RFC5869-A1")
+
+    var short_extract_out = List[UInt8](length=31, fill=0)
+    rejected = False
+    try:
+        hkdf_extract_sha256_into(
+            Span[UInt8, ...](extract_salt), Span[UInt8, ...](extract_ikm),
+            Span[mut=True, UInt8, ...](short_extract_out)
+        )
+    except:
+        rejected = True
+    if rejected:
+        passed += 1
+    else:
+        failed += 1
+        failures.append("HKDF-SHA256 extract_into accepted short output")
+
+    rejected = False
+    try:
+        _ = hkdf_expand_sha256(Span[UInt8, ...](valid_prk), Span[UInt8, ...](empty), 8161)
+    except:
+        rejected = True
+    if rejected:
+        passed += 1
+    else:
+        failed += 1
+        failures.append("HKDF-SHA256 accepted output above 255*HashLen")
+
+    var long_label = List[UInt8](length=250, fill=0x61)
+    rejected = False
+    try:
+        _ = tls13_hkdf_expand_label_sha256(
+            Span[UInt8, ...](valid_prk), Span[UInt8, ...](long_label),
+            Span[UInt8, ...](empty), 32
+        )
+    except:
+        rejected = True
+    if rejected:
+        passed += 1
+    else:
+        failed += 1
+        failures.append("TLS1.3 accepted a 250-byte unprefixed label")
+
+    var long_context = List[UInt8](length=256, fill=0)
+    var one_label = List[UInt8](length=1, fill=0x61)
+    rejected = False
+    try:
+        _ = tls13_hkdf_expand_label_sha256(
+            Span[UInt8, ...](valid_prk), Span[UInt8, ...](one_label),
+            Span[UInt8, ...](long_context), 32
+        )
+    except:
+        rejected = True
+    if rejected:
+        passed += 1
+    else:
+        failed += 1
+        failures.append("TLS1.3 accepted a 256-byte HKDF context")
+
+    var derive_out = List[UInt8](length=31, fill=0)
+    var derive_label = string_to_bytes("derived")
+    var derive_hash = hex_to_bytes(
+        "e3b0c44298fc1c149afbf4c8996fb924"
+        "27ae41e4649b934ca495991b7852b855"
+    )
+    rejected = False
+    try:
+        tls13_derive_secret_sha256_into(
+            Span[UInt8, ...](valid_prk), Span[UInt8, ...](derive_label),
+            Span[UInt8, ...](derive_hash), Span[mut=True, UInt8, ...](derive_out)
+        )
+    except:
+        rejected = True
+    if rejected:
+        passed += 1
+    else:
+        failed += 1
+        failures.append("TLS1.3 derive-secret accepted non-32-byte output")
+
+    return TestResult(passed, failed, failures^)
+
+
+def test_tls_kdf(data: PythonObject, py: PythonObject) raises -> TestResult:
+    var result = _test_hkdf_sha256(data["hkdf_sha256"], py)
+    var next_result = _test_tls12_prf_sha256(data["tls12_prf_sha256"], py)
+    result.passed += next_result.passed
+    result.failed += next_result.failed
+    for i in range(len(next_result.failures)):
+        result.failures.append(next_result.failures[i])
+
+    next_result = _test_tls12_prf_sha384(data["tls12_prf_sha384"], py)
+    result.passed += next_result.passed
+    result.failed += next_result.failed
+    for i in range(len(next_result.failures)):
+        result.failures.append(next_result.failures[i])
+
+    next_result = _test_tls13_kdf(data["tls13_expand_label_sha256"], py)
+    result.passed += next_result.passed
+    result.failed += next_result.failed
+    for i in range(len(next_result.failures)):
+        result.failures.append(next_result.failures[i])
+
+    next_result = _test_tls_kdf_boundaries()
+    result.passed += next_result.passed
+    result.failed += next_result.failed
+    for i in range(len(next_result.failures)):
+        result.failures.append(next_result.failures[i])
+    return result^
 
 
 def load_json(path: String, py: PythonObject) raises -> PythonObject:
@@ -1212,6 +1467,20 @@ def main() raises:
         )
     except e:
         print("AES-GCM [error] " + String(e))
+        af = True
+    print()
+
+    try:
+        print("Testing TLS KDF vectors...")
+        print_result(
+            "TLS-KDF",
+            test_tls_kdf(load_json("tests/vectors/pbkdf2.json", py), py),
+            tp,
+            tf,
+            af,
+        )
+    except e:
+        print("TLS-KDF [error] " + String(e))
         af = True
     print()
 

@@ -210,5 +210,64 @@
       "dklen": 48,
       "derived_key": "714cee1c95fd0d357d981c23e100c330352e4254272b2022fad714b6ee71c28d0674bd94947c5e5f55c1b521b4054d29"
     }
+  ],
+  "hkdf_sha256": [
+    {
+      "name": "RFC5869-A1",
+      "ikm": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "salt": "000102030405060708090a0b0c",
+      "info": "f0f1f2f3f4f5f6f7f8f9",
+      "length": 42,
+      "prk": "077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5",
+      "okm": "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
+    },
+    {
+      "name": "RFC5869-A2",
+      "ikm": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f",
+      "salt": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+      "info": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "length": 82,
+      "prk": "06a6b88c5853361a06104c9ceb35b45cef760014904671014a193f40c15fc244",
+      "okm": "b11e398dc80327a1c8e7f78c596a49344f012eda2d4efad8a050cc4c19afa97c59045a99cac7827271cb41c65e590e09da3275600c2f09b8367793a9aca3db71cc30c58179ec3e87c14c01d5c1f3434f1d87"
+    },
+    {
+      "name": "RFC5869-A3",
+      "ikm": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "salt": "",
+      "info": "",
+      "length": 42,
+      "prk": "19ef24a32c717b167f33a91d6f648bdf96596776afdb6377ac434c1c293ccb04",
+      "okm": "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8"
+    }
+  ],
+  "tls12_prf_sha256": [
+    {
+      "name": "TLS12-PRF-SHA256-100",
+      "secret": "9bbe436ba940f017b17652849a71db35",
+      "label_ascii": "test label",
+      "seed": "a0ba9f936cda311827a6f796ffd5198c",
+      "length": 100,
+      "output": "e3f229ba727be17b8d122620557cd453c2aab21d07c3d495329b52d4e61edb5a6b301791e90d35c9c9a46b4e14baf9af0fa022f7077def17abfd3797c0564bab4fbc91666e9def9b97fce34f796789baa48082d122ee42c5a72e5a5110fff70187347b66"
+    }
+  ],
+  "tls12_prf_sha384": [
+    {
+      "name": "TLS12-PRF-SHA384-148",
+      "secret": "b80b733d6ceefcdc71566ea48e5567df",
+      "label_ascii": "test label",
+      "seed": "cd665cf6a8447dd6ff8b27555edb7465",
+      "length": 148,
+      "output": "7b0c18e9ced410ed1804f2cfa34a336a1c14dffb4900bb5fd7942107e81c83cde9ca0faa60be9fe34f82b1233c9146a0e534cb400fed2700884f9dc236f80edd8bfa961144c9e8d792eca722a7b32fc3d416d473ebc2c5fd4abfdad05d9184259b5bf8cd4d90fa0d31e2dec479e4f1a26066f2eea9a69236a3e52655c9e9aee691c8f3a26854308d5eaa3be85e0990703d73e56f"
+    }
+  ],
+  "tls13_expand_label_sha256": [
+    {
+      "name": "RFC8448-derived-secret",
+      "secret": "33ad0a1c607ec03b09e6cd9893680ce210adf300aa1f2660e1b22e10f170f92a",
+      "label_ascii": "derived",
+      "context": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "length": 32,
+      "output": "6f2615a108c702c5678f54fc9dbab69716c076189c48250cebeac3576c3611ba"
+    }
   ]
 }

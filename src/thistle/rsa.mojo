@@ -1,6 +1,4 @@
-"""RSA-PSS signing and verification, plus PKCS #1 v1.5 verification (RFC 8017, secs. 8.1 and
-8.2).
-"""
+"""RSA-PSS and PKCS #1 v1.5 signing and verification (RFC 8017, sec. 8)."""
 
 from std.collections import List, InlineArray
 from std.memory import Pointer
@@ -274,6 +272,40 @@ def _digest_info_prefix(
         hi = hi - UInt8(48 if hi <= 57 else 87)
         lo = lo - UInt8(48 if lo <= 57 else 87)
         output[unsafe_offset=i] = (hi << 4) | lo
+
+
+def _emsa_pkcs1_v15_sha256_encode(
+    message: Span[UInt8, ...],
+    em_len: Int,
+    output: Pointer[mut=True, UInt8, _, address_space=_],
+) raises -> Bool:
+    """Encode EMSA-PKCS1-v1_5 with SHA-256 (RFC 8017, sec. 9.2)."""
+    comptime h_len = 32
+    comptime prefix_len = 19
+    comptime t_len = prefix_len + h_len
+    if em_len < t_len + 11:
+        return False
+
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = 1
+    var ps_len = em_len - t_len - 3
+    for i in range(ps_len):
+        output[unsafe_offset=2 + i] = 0xFF
+    output[unsafe_offset=2 + ps_len] = 0
+
+    var prefix = InlineArray[UInt8, prefix_len](fill=0)
+    _digest_info_prefix(SHA256, prefix.unsafe_ptr())
+    for i in range(prefix_len):
+        output[unsafe_offset=3 + ps_len + i] = prefix[i]
+
+    var digest = InlineArray[UInt8, h_len](fill=0)
+    _ = _hash_into(SHA256, message, digest.unsafe_ptr())
+    for i in range(h_len):
+        output[unsafe_offset=3 + ps_len + prefix_len + i] = digest[i]
+    var digest_ptr = digest.unsafe_ptr()
+    for i in range(h_len):
+        digest_ptr.unsafe_store[volatile=True](i, UInt8(0))
+    return True
 
 
 @always_inline
@@ -1108,6 +1140,29 @@ struct RsaPrivateKey:
             for i in range(len(salt)):
                 salt_ptr.unsafe_store[volatile=True](i, UInt8(0))
 
+    def pkcs1_v15_sha256_sign(
+        self, message: Span[UInt8, ...], signature: Span[mut=True, UInt8, ...]
+    ) raises -> Bool:
+        """Sign with RSASSA-PKCS1-v1_5/SHA-256 (RFC 8017, secs. 8.2.1 and 9.2)."""
+        if len(signature) < self.public.nb:
+            return False
+        var encoded = InlineArray[UInt8, 528](fill=0)
+        try:
+            if not _emsa_pkcs1_v15_sha256_encode(
+                message, self.public.nb, encoded.unsafe_ptr()
+            ):
+                return False
+            return self._private_op(
+                Span[UInt8, ...](
+                    unsafe_ptr=encoded.unsafe_ptr(), length=self.public.nb
+                ),
+                signature.unsafe_ptr(),
+            )
+        finally:
+            var encoded_ptr = encoded.unsafe_ptr()
+            for i in range(self.public.nb):
+                encoded_ptr.unsafe_store[volatile=True](i, UInt8(0))
+
 
 def _bn_reduce_bytes(
     data: Span[UInt8, ...], key: RsaPublicKey
@@ -1493,6 +1548,29 @@ struct RsaCrtPrivateKey:
             for i in range(len(salt)):
                 salt_ptr.unsafe_store[volatile=True](i, UInt8(0))
 
+    def pkcs1_v15_sha256_sign(
+        self, message: Span[UInt8, ...], signature: Span[mut=True, UInt8, ...]
+    ) raises -> Bool:
+        """CRT sign with RSASSA-PKCS1-v1_5/SHA-256 (RFC 8017, secs. 8.2.1 and 9.2)."""
+        if len(signature) < self.public.nb:
+            return False
+        var encoded = InlineArray[UInt8, 528](fill=0)
+        try:
+            if not _emsa_pkcs1_v15_sha256_encode(
+                message, self.public.nb, encoded.unsafe_ptr()
+            ):
+                return False
+            return self._private_op(
+                Span[UInt8, ...](
+                    unsafe_ptr=encoded.unsafe_ptr(), length=self.public.nb
+                ),
+                signature.unsafe_ptr(),
+            )
+        finally:
+            var encoded_ptr = encoded.unsafe_ptr()
+            for i in range(self.public.nb):
+                encoded_ptr.unsafe_store[volatile=True](i, UInt8(0))
+
 
 def _pkcs1_v15_verify(
     key: RsaPublicKey,
@@ -1684,6 +1762,38 @@ def rsa_pss_crt_sha512_sign(
         modulus, exponent, prime1, prime2, exponent1, exponent2,
         coefficient, message, SHA512, SHA512, 64
     )
+
+
+def rsa_pkcs1_v15_sha256_sign(
+    modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
+    private_exponent: Span[UInt8, ...], message: Span[UInt8, ...]
+) raises -> List[UInt8]:
+    """Sign with RSASSA-PKCS1-v1_5/SHA-256 using a blinded private operation."""
+    var key = RsaPrivateKey(modulus, exponent, private_exponent)
+    var signature = List[UInt8](unsafe_uninit_length=key.public.nb)
+    if not key.pkcs1_v15_sha256_sign(
+        message, Span[mut=True, UInt8, ...](signature)
+    ):
+        raise Error("RSA PKCS#1 v1.5 SHA-256 signing failed")
+    return signature^
+
+
+def rsa_pkcs1_v15_crt_sha256_sign(
+    modulus: Span[UInt8, ...], exponent: Span[UInt8, ...],
+    prime1: Span[UInt8, ...], prime2: Span[UInt8, ...],
+    exponent1: Span[UInt8, ...], exponent2: Span[UInt8, ...],
+    coefficient: Span[UInt8, ...], message: Span[UInt8, ...]
+) raises -> List[UInt8]:
+    """CRT sign with RSASSA-PKCS1-v1_5/SHA-256 using blinded private operations."""
+    var key = RsaCrtPrivateKey(
+        modulus, exponent, prime1, prime2, exponent1, exponent2, coefficient
+    )
+    var signature = List[UInt8](unsafe_uninit_length=key.public.nb)
+    if not key.pkcs1_v15_sha256_sign(
+        message, Span[mut=True, UInt8, ...](signature)
+    ):
+        raise Error("RSA PKCS#1 v1.5 SHA-256 CRT signing failed")
+    return signature^
 
 
 def rsa_pss_sha256_verify(

@@ -718,6 +718,109 @@ def _x86_gcm_ctr_loop[NR: Int](
 
 
 @always_inline
+def _x86_gcm_fused_loop[NR: Int](
+    input_ptr: Pointer[mut=True, UInt8, _, address_space=_],
+    output_ptr: Pointer[mut=True, UInt8, _, address_space=_],
+    round_keys: Pointer[mut=True, UInt32, _, address_space=_],
+    num_blocks: Int,
+    j0_ptr: Pointer[mut=True, UInt8, _, address_space=_],
+    mut gh: _GHash,
+    ghash_ciphertext: Bool
+):
+    # Fold GHASH into the 8-way CTR loop so ciphertext stays in registers.
+    var keys = StaticTuple[SIMD128, NR + 1]()
+    comptime for r in range(NR + 1):
+        keys[r] = _load_round_key(r, round_keys)
+    var j0 = _mm_loadu_si128(j0_ptr)
+    var prefix = j0[1] & UInt64(0xFFFFFFFF)
+    var counter = byte_swap(UInt32(j0[1] >> 32)) + UInt32(1)
+    var y = SIMD128(_bitrev64(gh.y_hi), _bitrev64(gh.y_lo))
+
+    var i = 0
+    while i + 8 <= num_blocks:
+        var blocks = StaticTuple[SIMD128, 8]()
+        comptime for b in range(8):
+            blocks[b] = SIMD128(
+                j0[0], prefix | (UInt64(byte_swap(counter + UInt32(b))) << 32)
+            ) ^ keys[0]
+        comptime for r in range(1, NR):
+            comptime for b in range(8):
+                blocks[b] = _mm_aesenc_si128(blocks[b], keys[r])
+
+        var g = StaticTuple[SIMD128, 8]()
+        comptime for b in range(8):
+            blocks[b] = _mm_aesenclast_si128(blocks[b], keys[NR])
+            var off = (i + b) * 16
+            var pt = _mm_loadu_si128(input_ptr.unsafe_offset(off))
+            var ct = pt ^ blocks[b]
+            _mm_storeu_si128(output_ptr.unsafe_offset(off), ct)
+            g[b] = ct if ghash_ciphertext else pt
+
+        var lo = SIMD128(0)
+        var hi = SIMD128(0)
+        _clmul_acc(_rev128(bitcast[DType.uint8, 16](g[0])) ^ y, gh.hn8, lo, hi)
+        _clmul_acc(_rev128(bitcast[DType.uint8, 16](g[1])), gh.hn7, lo, hi)
+        _clmul_acc(_rev128(bitcast[DType.uint8, 16](g[2])), gh.hn6, lo, hi)
+        _clmul_acc(_rev128(bitcast[DType.uint8, 16](g[3])), gh.hn5, lo, hi)
+        _clmul_acc(_rev128(bitcast[DType.uint8, 16](g[4])), gh.hn4, lo, hi)
+        _clmul_acc(_rev128(bitcast[DType.uint8, 16](g[5])), gh.hn3, lo, hi)
+        _clmul_acc(_rev128(bitcast[DType.uint8, 16](g[6])), gh.hn2, lo, hi)
+        _clmul_acc(_rev128(bitcast[DType.uint8, 16](g[7])), gh.hn, lo, hi)
+        y = _reduce_vec(lo, hi)
+        counter += 8
+        i += 8
+
+    if i + 4 <= num_blocks:
+        var blocks = StaticTuple[SIMD128, 4]()
+        comptime for b in range(4):
+            blocks[b] = SIMD128(
+                j0[0], prefix | (UInt64(byte_swap(counter + UInt32(b))) << 32)
+            ) ^ keys[0]
+        comptime for r in range(1, NR):
+            comptime for b in range(4):
+                blocks[b] = _mm_aesenc_si128(blocks[b], keys[r])
+
+        var g = StaticTuple[SIMD128, 4]()
+        comptime for b in range(4):
+            blocks[b] = _mm_aesenclast_si128(blocks[b], keys[NR])
+            var off = (i + b) * 16
+            var pt = _mm_loadu_si128(input_ptr.unsafe_offset(off))
+            var ct = pt ^ blocks[b]
+            _mm_storeu_si128(output_ptr.unsafe_offset(off), ct)
+            g[b] = ct if ghash_ciphertext else pt
+
+        var lo = SIMD128(0)
+        var hi = SIMD128(0)
+        _clmul_acc(_rev128(bitcast[DType.uint8, 16](g[0])) ^ y, gh.hn4, lo, hi)
+        _clmul_acc(_rev128(bitcast[DType.uint8, 16](g[1])), gh.hn3, lo, hi)
+        _clmul_acc(_rev128(bitcast[DType.uint8, 16](g[2])), gh.hn2, lo, hi)
+        _clmul_acc(_rev128(bitcast[DType.uint8, 16](g[3])), gh.hn, lo, hi)
+        y = _reduce_vec(lo, hi)
+        counter += 4
+        i += 4
+
+    while i < num_blocks:
+        var block = SIMD128(
+            j0[0], prefix | (UInt64(byte_swap(counter)) << 32)
+        ) ^ keys[0]
+        comptime for r in range(1, NR):
+            block = _mm_aesenc_si128(block, keys[r])
+        block = _mm_aesenclast_si128(block, keys[NR])
+        var off = i * 16
+        var pt = _mm_loadu_si128(input_ptr.unsafe_offset(off))
+        var ct = pt ^ block
+        _mm_storeu_si128(output_ptr.unsafe_offset(off), ct)
+        var g = ct if ghash_ciphertext else pt
+        y = _gf_mul_nat(_rev128(bitcast[DType.uint8, 16](g)) ^ y, gh.hn)
+        counter += 1
+        i += 1
+
+    gh.y_hi = _bitrev64(y[0])
+    gh.y_lo = _bitrev64(y[1])
+    volatile_wipe(Pointer(to=keys).unsafe_bitcast[UInt64](), 2 * (NR + 1))
+
+
+@always_inline
 def _arm_gcm_ctr_loop[NR: Int](
     input_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     output_ptr: Pointer[mut=True, UInt8, _, address_space=_],
@@ -1174,6 +1277,20 @@ def _gctr_and_ghash(
     var full_blocks = length // 16
 
     var fused = False
+    comptime if has_x86_aes_ni() and has_x86_pclmul():
+        if rounds == 10:
+            _x86_gcm_fused_loop[10](
+                input_ptr, output_ptr, rk, full_blocks, j0_buf.unsafe_ptr(), gh, ghash_ciphertext
+            )
+        elif rounds == 12:
+            _x86_gcm_fused_loop[12](
+                input_ptr, output_ptr, rk, full_blocks, j0_buf.unsafe_ptr(), gh, ghash_ciphertext
+            )
+        else:
+            _x86_gcm_fused_loop[14](
+                input_ptr, output_ptr, rk, full_blocks, j0_buf.unsafe_ptr(), gh, ghash_ciphertext
+            )
+        fused = True
     comptime if has_arm_crypto():
         if rounds == 10:
             _arm_gcm_fused_loop[10](
@@ -1280,92 +1397,96 @@ struct AESGCMContext(Copyable, Movable):
         volatile_wipe(self._rk.unsafe_ptr(), 60)
         volatile_wipe(Pointer(to=self._gh0).unsafe_bitcast[UInt64](), 20)
 
-    def encrypt(
-        self, iv: Span[UInt8, ...], plaintext: Span[UInt8, ...], aad: Span[UInt8, ...]
-    ) raises -> Tuple[List[UInt8], List[UInt8]]:
+    def encrypt_into(
+        self, iv: Span[UInt8, ...], plaintext: Span[UInt8, ...], aad: Span[UInt8, ...],
+        ciphertext: Span[mut=True, UInt8, ...], tag: Span[mut=True, UInt8, ...]
+    ) raises:
         if len(iv) == 0:
             raise Error("invalid iv size")
         var n = len(plaintext)
         if n > _GCM_MAX_INPUT_BYTES:
             raise Error("plaintext too long for AES-GCM")
-        var ciphertext = List[UInt8](unsafe_uninit_length=n)
-        var pt_ptr = (
-            plaintext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
-        )
-        var tag = InlineArray[UInt8, 16](fill=0)
-        var rk = self._rk.copy()
+        if len(ciphertext) < n:
+            raise Error("AES-GCM ciphertext output is too small")
+        if len(tag) < 16:
+            raise Error("AES-GCM tag output is too small")
+        var pt_ptr = plaintext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
+        var rk_ptr = self._rk.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
+        var computed_tag = InlineArray[UInt8, 16](fill=0)
         var gh = self._gh0.copy()
 
         try:
             _gcm_core_keyed(
-                rk.unsafe_ptr(),
-                self._rounds,
-                gh,
-                iv,
-                aad,
-                pt_ptr,
-                ciphertext.unsafe_ptr(),
-                n,
-                tag,
+                rk_ptr, self._rounds, gh, iv, aad, pt_ptr, ciphertext.unsafe_ptr(), n, computed_tag,
                 ghash_ciphertext=True,
             )
-
-            var tag_out = List[UInt8](capacity=16)
             for i in range(16):
-                tag_out.append(tag[i])
-            return (ciphertext^, tag_out^)
+                tag[i] = computed_tag[i]
         finally:
-            volatile_wipe(rk.unsafe_ptr(), 60)
             volatile_wipe(Pointer(to=gh).unsafe_bitcast[UInt64](), 20)
-            volatile_wipe(tag.unsafe_ptr(), 16)
+            volatile_wipe(computed_tag.unsafe_ptr(), 16)
+
+    def encrypt(
+        self, iv: Span[UInt8, ...], plaintext: Span[UInt8, ...], aad: Span[UInt8, ...]
+    ) raises -> Tuple[List[UInt8], List[UInt8]]:
+        var n = len(plaintext)
+        var ciphertext = List[UInt8](unsafe_uninit_length=n)
+        var tag = List[UInt8](unsafe_uninit_length=16)
+        self.encrypt_into(
+            iv, plaintext, aad, Span[mut=True, UInt8, ...](ciphertext),
+            Span[mut=True, UInt8, ...](tag)
+        )
+        return (ciphertext^, tag^)
+
+    def decrypt_into(
+        self, iv: Span[UInt8, ...], ciphertext: Span[UInt8, ...], aad: Span[UInt8, ...],
+        tag: Span[UInt8, ...], plaintext: Span[mut=True, UInt8, ...]
+    ) raises -> Bool:
+        if len(iv) == 0:
+            raise Error("invalid iv size")
+        if len(tag) != 16:
+            return False
+        var n = len(ciphertext)
+        if n > _GCM_MAX_INPUT_BYTES:
+            raise Error("ciphertext too long for AES-GCM")
+        if len(plaintext) < n:
+            raise Error("AES-GCM plaintext output is too small")
+        var ct_ptr = ciphertext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
+        var rk_ptr = self._rk.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
+        var computed_tag = InlineArray[UInt8, 16](fill=0)
+        var gh = self._gh0.copy()
+
+        try:
+            _gcm_core_keyed(
+                rk_ptr, self._rounds, gh, iv, aad, ct_ptr, plaintext.unsafe_ptr(), n, computed_tag,
+                ghash_ciphertext=False,
+            )
+            var diff = UInt8(0)
+            for i in range(16):
+                diff |= computed_tag[i] ^ tag[i]
+            if diff != 0:
+                var pt_ptr = plaintext.unsafe_ptr()
+                for i in range(n):
+                    pt_ptr.unsafe_store[volatile=True](i, UInt8(0))
+                return False
+            return True
+        finally:
+            volatile_wipe(Pointer(to=gh).unsafe_bitcast[UInt64](), 20)
+            volatile_wipe(computed_tag.unsafe_ptr(), 16)
 
     def decrypt(
         self, iv: Span[UInt8, ...], ciphertext: Span[UInt8, ...],
         aad: Span[UInt8, ...], tag: Span[UInt8, ...]
     ) raises -> Tuple[List[UInt8], Bool]:
-        if len(iv) == 0:
-            raise Error("invalid iv size")
         if len(tag) != 16:
             raise Error("invalid tag size")
         var n = len(ciphertext)
-        if n > _GCM_MAX_INPUT_BYTES:
-            raise Error("ciphertext too long for AES-GCM")
         var plaintext = List[UInt8](unsafe_uninit_length=n)
-        var ct_ptr = (
-            ciphertext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
-        )
-        var computed_tag = InlineArray[UInt8, 16](fill=0)
-        var rk = self._rk.copy()
-        var gh = self._gh0.copy()
-
-        try:
-            _gcm_core_keyed(
-                rk.unsafe_ptr(),
-                self._rounds,
-                gh,
-                iv,
-                aad,
-                ct_ptr,
-                plaintext.unsafe_ptr(),
-                n,
-                computed_tag,
-                ghash_ciphertext=False,
-            )
-
-            var diff = UInt8(0)
-            for i in range(16):
-                diff |= computed_tag[i] ^ tag[i]
-
-            if diff != 0:
-                var pt_ptr = plaintext.unsafe_ptr()
-                for i in range(n):
-                    pt_ptr.unsafe_store[volatile=True](i, UInt8(0))
-                return (List[UInt8](), False)
-            return (plaintext^, True)
-        finally:
-            volatile_wipe(rk.unsafe_ptr(), 60)
-            volatile_wipe(Pointer(to=gh).unsafe_bitcast[UInt64](), 20)
-            volatile_wipe(computed_tag.unsafe_ptr(), 16)
+        if not self.decrypt_into(
+            iv, ciphertext, aad, tag, Span[mut=True, UInt8, ...](plaintext)
+        ):
+            return (List[UInt8](), False)
+        return (plaintext^, True)
 
 
 def _valid_gcm_key(key: Span[UInt8, ...]) -> Bool:

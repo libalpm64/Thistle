@@ -1,27 +1,30 @@
 # Thistle
 
-Thistle is a high-performance Crypto Library written in Mojo.
+Thistle is a high-performance cryptography library written in Mojo.
 
-### Currently supported Algorithms:
+### Supported algorithms
 
-* **Argon2**
-* **Blake2b**
-* **Blake3**
+* **Argon2id**
+* **BLAKE2b**
+* **BLAKE3**
 * **Camellia**
-* **Pbkdf2**
-* **SHA2**
+* **PBKDF2-HMAC** (SHA-256/SHA-512)
+* **HMAC** (SHA-256/SHA-384/SHA-512)
+* **HKDF** (SHA-256 extract/expand)
+* **SHA-2**
 * **SHA-NI**
-* **SHA3**
-* **ChaCha20** (Poly1305/XPoly1305)
+* **SHA-3**
+* **ChaCha20-Poly1305 / XChaCha20-Poly1305**
 * **KCipher-2**
-* **ML-KEM/ML-DSA**
-* **AES-GPU** (ECB/CTR; GCM counter stage only)
-* **AES-NI** (XTS/CBC/ECB/CTR/GCM)
-* **AES-Software** (XTS/CBC/ECB/CTR/GCM)
-* **Ed25519/X25519** (including ephemeral key generation)
-* **P-256/P-384** (ECDH, ECDSA, ephemeral key generation)
-* **RSA-PSS** signing and verification
-* **RSA PKCS#1 v1.5** signature verification
+* **ML-KEM / ML-DSA**
+* **AES-NI** (ECB/CBC/CTR/XTS/GCM)
+* **AES software** (ECB/CBC/CTR/XTS/GCM)
+* **AES GPU** (ECB/CTR; GCM counter stage only)
+* **Ed25519 / X25519** (including ephemeral key generation)
+* **P-256 / P-384** (ECDH, ECDSA, ephemeral key generation)
+* **RSA-PSS** signing and verification (SHA-256/SHA-384/SHA-512)
+* **RSA PKCS#1 v1.5** signing and verification (SHA-256 signing; SHA-256/SHA-384/SHA-512 verification)
+* **TLS 1.2 PRF** (SHA-256/SHA-384)
 
 [Thistle documentation website](https://libalpm64.github.io/Thistle/)
 

@@ -18,6 +18,8 @@ from .chacha20 import (
 from .poly1305 import Poly1305
 from .utils import volatile_wipe
 
+comptime _AEAD_CHUNK = 16384
+
 
 def hchacha20(
     key: Span[UInt8, ...], input16: Span[UInt8, ...], output: Span[mut=True, UInt8, ...]
@@ -49,6 +51,26 @@ def hchacha20(
     (out_ptr.unsafe_offset(16)).unsafe_bitcast[UInt32]().unsafe_store[alignment=1](0, row3)
 
 
+@always_inline
+def _poly_pad16(
+    mut p: Poly1305, length: Int,
+    zeros: Pointer[mut=True, UInt8, _, address_space=_]
+):
+    var rem = length & 15
+    if rem != 0:
+        p.update(Span[UInt8, ...](unsafe_ptr=zeros, length=16 - rem))
+
+
+@always_inline
+def _poly_lengths(mut p: Poly1305, aad_len: Int, text_len: Int):
+    var lens = InlineArray[UInt8, 16](fill=0)
+    lens.unsafe_ptr().unsafe_bitcast[UInt64]().unsafe_store[alignment=1](0, UInt64(aad_len))
+    (lens.unsafe_ptr().unsafe_offset(8)).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](
+        0, UInt64(text_len)
+    )
+    p.update(Span[UInt8, ...](unsafe_ptr=lens.unsafe_ptr(), length=16))
+
+
 def _aead_tag(
     poly_key: Span[UInt8, ...],
     aad: Span[UInt8, ...],
@@ -59,17 +81,10 @@ def _aead_tag(
     var zeros16 = InlineArray[UInt8, 16](fill=0)
     var zp = zeros16.unsafe_ptr()
     p.update(aad)
-    if len(aad) % 16 != 0:
-        p.update(Span[UInt8, ...](unsafe_ptr=zp, length=16 - len(aad) % 16))
+    _poly_pad16(p, len(aad), zp)
     p.update(ciphertext)
-    if len(ciphertext) % 16 != 0:
-        p.update(Span[UInt8, ...](unsafe_ptr=zp, length=16 - len(ciphertext) % 16))
-    var lens = InlineArray[UInt8, 16](fill=0)
-    lens.unsafe_ptr().unsafe_bitcast[UInt64]().unsafe_store[alignment=1](0, UInt64(len(aad)))
-    (lens.unsafe_ptr().unsafe_offset(8)).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](
-        0, UInt64(len(ciphertext))
-    )
-    p.update(Span[UInt8, ...](unsafe_ptr=lens.unsafe_ptr(), length=16))
+    _poly_pad16(p, len(ciphertext), zp)
+    _poly_lengths(p, len(aad), len(ciphertext))
     p.finalize_into(Span[mut=True, UInt8, ...](unsafe_ptr=output, length=16))
 
 
@@ -95,16 +110,24 @@ def _aead_encrypt(
     var poly_key_span = Span[UInt8, ...](unsafe_ptr=poly_key.unsafe_ptr(), length=32)
 
     try:
+        var p = Poly1305(poly_key_span)
+        var zeros16 = InlineArray[UInt8, 16](fill=0)
+        var zp = zeros16.unsafe_ptr()
+        p.update(aad)
+        _poly_pad16(p, len(aad), zp)
+
         var cipher = ChaCha20(key_bytes, nonce_span, counter=1)
         var src = input.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
-        cipher._stream_xor(src, output, len(input))
+        var offset = 0
+        while offset < len(input):
+            var take = min(_AEAD_CHUNK, len(input) - offset)
+            cipher._stream_xor(src.unsafe_offset(offset), output.unsafe_offset(offset), take)
+            p.update(Span[UInt8, ...](unsafe_ptr=output.unsafe_offset(offset), length=take))
+            offset += take
 
-        _aead_tag(
-            poly_key_span,
-            aad,
-            Span[UInt8, ...](unsafe_ptr=output, length=len(input)),
-            tag,
-        )
+        _poly_pad16(p, len(input), zp)
+        _poly_lengths(p, len(aad), len(input))
+        p.finalize_into(Span[mut=True, UInt8, ...](unsafe_ptr=tag, length=16))
     finally:
         volatile_wipe(poly_key.unsafe_ptr(), 32)
         volatile_wipe(Pointer(to=key_bytes).unsafe_mut_cast[True]().unsafe_bitcast[UInt8](), 32)

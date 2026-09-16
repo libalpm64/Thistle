@@ -96,6 +96,15 @@ def _limbs_at(
     )
 
 
+@always_inline
+def _mul_block_acc(
+    ptr: Pointer[mut=False, UInt8, _, address_space=_], offset: Int, r: _RPower,
+    mut d0: UInt128, mut d1: UInt128, mut d2: UInt128
+):
+    var m = _limbs_at(ptr, offset, UInt64(1) << 40)
+    _mul_acc(m[0], m[1], m[2], r, d0, d1, d2)
+
+
 struct Poly1305:
     """One-time authenticator with a 32-byte key (RFC 8439, sec. 2.5). The API becomes terminal
     after wiping or successful finalization; invalid output sizes remain retryable.
@@ -208,26 +217,29 @@ struct Poly1305:
         var h2 = self.h2
         var off = 0
         for _ in range(count8):
-            var m0 = _limbs_at(ptr, off, UInt64(1) << 40)
-            var m1 = _limbs_at(ptr, off + 16, UInt64(1) << 40)
-            var m2 = _limbs_at(ptr, off + 32, UInt64(1) << 40)
-            var m3 = _limbs_at(ptr, off + 48, UInt64(1) << 40)
-            var m4 = _limbs_at(ptr, off + 64, UInt64(1) << 40)
-            var m5 = _limbs_at(ptr, off + 80, UInt64(1) << 40)
-            var m6 = _limbs_at(ptr, off + 96, UInt64(1) << 40)
-            var m7 = _limbs_at(ptr, off + 112, UInt64(1) << 40)
-            var d0 = UInt128(0)
-            var d1 = UInt128(0)
-            var d2 = UInt128(0)
-            _mul_acc(h0 + m0[0], h1 + m0[1], h2 + m0[2], self.r8, d0, d1, d2)
-            _mul_acc(m1[0], m1[1], m1[2], self.r7, d0, d1, d2)
-            _mul_acc(m2[0], m2[1], m2[2], self.r6, d0, d1, d2)
-            _mul_acc(m3[0], m3[1], m3[2], self.r5, d0, d1, d2)
-            _mul_acc(m4[0], m4[1], m4[2], self.r4, d0, d1, d2)
-            _mul_acc(m5[0], m5[1], m5[2], self.r3, d0, d1, d2)
-            _mul_acc(m6[0], m6[1], m6[2], self.r2, d0, d1, d2)
-            _mul_acc(m7[0], m7[1], m7[2], self.r, d0, d1, d2)
-            _reduce(h0, h1, h2, d0, d1, d2)
+            var even_d0 = UInt128(0)
+            var even_d1 = UInt128(0)
+            var even_d2 = UInt128(0)
+            var odd_d0 = UInt128(0)
+            var odd_d1 = UInt128(0)
+            var odd_d2 = UInt128(0)
+
+            var m = _limbs_at(ptr, off, UInt64(1) << 40)
+            _mul_acc(
+                h0 + m[0], h1 + m[1], h2 + m[2], self.r8,
+                even_d0, even_d1, even_d2
+            )
+            _mul_block_acc(ptr, off + 16, self.r7, odd_d0, odd_d1, odd_d2)
+            _mul_block_acc(ptr, off + 32, self.r6, even_d0, even_d1, even_d2)
+            _mul_block_acc(ptr, off + 48, self.r5, odd_d0, odd_d1, odd_d2)
+            _mul_block_acc(ptr, off + 64, self.r4, even_d0, even_d1, even_d2)
+            _mul_block_acc(ptr, off + 80, self.r3, odd_d0, odd_d1, odd_d2)
+            _mul_block_acc(ptr, off + 96, self.r2, even_d0, even_d1, even_d2)
+            _mul_block_acc(ptr, off + 112, self.r, odd_d0, odd_d1, odd_d2)
+            _reduce(
+                h0, h1, h2,
+                even_d0 + odd_d0, even_d1 + odd_d1, even_d2 + odd_d2
+            )
             off += 128
         self.h0 = h0
         self.h1 = h1
