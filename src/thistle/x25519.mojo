@@ -1,10 +1,9 @@
 """X25519 key agreement (RFC 7748, secs. 5 and 6.1), with raw and all-zero-checking interfaces."""
 
 from .curve25519 import FieldElement51
-from .utils import StackInlineArray
 from .random import random_bytes
 from .ed25519 import _mul_base_ct
-from std.collections import List
+from std.collections import Array, List
 
 
 @always_inline
@@ -61,7 +60,7 @@ def _x25519[basepoint: Bool](
         raise Error("X25519 point must be 32 bytes")
     if len(output) < 32:
         raise Error("X25519 output needs at least 32 writable bytes")
-    var scalar = StackInlineArray[UInt8, 32](fill=0)
+    var scalar = Array[UInt8, 32](fill=0)
     for i in range(32):
         scalar[i] = scalar_in[i]
     # Clamp scalar bits: clear 0, 1, 2, and 255; set 254 (RFC 7748, sec. 5).
@@ -153,7 +152,7 @@ def x25519_public_key(
     # The Montgomery base point u=9 maps to the standard Ed25519 base point.
     # Constant-time fixed-base Edwards multiplication produces projective y=Y/Z,
     # which maps back with u=(1+y)/(1-y)=(Z+Y)/(Z-Y).
-    var scalar = StackInlineArray[UInt8, 32](fill=0)
+    var scalar = Array[UInt8, 32](fill=0)
     for i in range(32):
         scalar[i] = private_key[i]
     scalar[0] &= 248

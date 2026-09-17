@@ -5,9 +5,8 @@ XChaCha20 uses draft-irtf-cfrg-xchacha-03, sec. 2 (Internet-Draft):
 https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-xchacha-03
 """
 
-from std.memory import bitcast
-from std.memory.unsafe_pointer import Pointer
-from std.collections import InlineArray
+from std.memory import Pointer, bitcast
+from std.collections import Array
 from .chacha20 import (
     ChaCha20,
     chacha20_block_core,
@@ -63,7 +62,7 @@ def _poly_pad16(
 
 @always_inline
 def _poly_lengths(mut p: Poly1305, aad_len: Int, text_len: Int):
-    var lens = InlineArray[UInt8, 16](fill=0)
+    var lens = Array[UInt8, 16](fill=0)
     lens.unsafe_ptr().unsafe_bitcast[UInt64]().unsafe_store[alignment=1](0, UInt64(aad_len))
     (lens.unsafe_ptr().unsafe_offset(8)).unsafe_bitcast[UInt64]().unsafe_store[alignment=1](
         0, UInt64(text_len)
@@ -78,7 +77,7 @@ def _aead_tag(
     output: Pointer[mut=True, UInt8, _, address_space=_],
 ) raises:
     var p = Poly1305(poly_key)
-    var zeros16 = InlineArray[UInt8, 16](fill=0)
+    var zeros16 = Array[UInt8, 16](fill=0)
     var zp = zeros16.unsafe_ptr()
     p.update(aad)
     _poly_pad16(p, len(aad), zp)
@@ -97,7 +96,7 @@ def _aead_encrypt(
     tag: Pointer[mut=True, UInt8, _, address_space=_],
 ) raises:
     var key_bytes = key.unsafe_ptr().unsafe_load[width=32, alignment=1](0)
-    var nonce_bytes = InlineArray[UInt8, 12](fill=0)
+    var nonce_bytes = Array[UInt8, 12](fill=0)
     for i in range(12):
         nonce_bytes[i] = nonce[i]
 
@@ -105,13 +104,13 @@ def _aead_encrypt(
     var nonce_span = Span[UInt8, ...](nonce_bytes)
     var nw = _chacha20_nonce_words(nonce_span)
     var block0 = chacha20_block_core(kw, 0, nw)
-    var poly_key = InlineArray[UInt8, 32](fill=0)
+    var poly_key = Array[UInt8, 32](fill=0)
     poly_key.unsafe_ptr().unsafe_store[alignment=1](0, bitcast[DType.uint8, 64](block0).slice[32]())
     var poly_key_span = Span[UInt8, ...](unsafe_ptr=poly_key.unsafe_ptr(), length=32)
 
     try:
         var p = Poly1305(poly_key_span)
-        var zeros16 = InlineArray[UInt8, 16](fill=0)
+        var zeros16 = Array[UInt8, 16](fill=0)
         var zp = zeros16.unsafe_ptr()
         p.update(aad)
         _poly_pad16(p, len(aad), zp)
@@ -178,17 +177,17 @@ def chacha20_poly1305_decrypt(
         raise Error("ChaCha20-Poly1305 plaintext output is too small")
 
     var key_bytes = key.unsafe_ptr().unsafe_load[width=32, alignment=1](0)
-    var nonce_bytes = InlineArray[UInt8, 12](fill=0)
+    var nonce_bytes = Array[UInt8, 12](fill=0)
     for i in range(12):
         nonce_bytes[i] = nonce[i]
     var kw = bitcast[DType.uint32, 8](key_bytes)
     var nonce_span = Span[UInt8, ...](nonce_bytes)
     var nw = _chacha20_nonce_words(nonce_span)
     var block0 = chacha20_block_core(kw, 0, nw)
-    var poly_key = InlineArray[UInt8, 32](fill=0)
+    var poly_key = Array[UInt8, 32](fill=0)
     poly_key.unsafe_ptr().unsafe_store[alignment=1](0, bitcast[DType.uint8, 64](block0).slice[32]())
 
-    var expected = InlineArray[UInt8, 16](fill=0)
+    var expected = Array[UInt8, 16](fill=0)
     try:
         _aead_tag(
             Span[UInt8, ...](unsafe_ptr=poly_key.unsafe_ptr(), length=32),
@@ -282,8 +281,8 @@ def xchacha20_poly1305_decrypt(
 
 def _xchacha_subkey_nonce(
     key: Span[UInt8, ...], nonce: Span[UInt8, ...]
-) raises -> InlineArray[UInt8, 44]:
-    var out = InlineArray[UInt8, 44](fill=0)
+) raises -> Array[UInt8, 44]:
+    var out = Array[UInt8, 44](fill=0)
     hchacha20(
         key,
         Span[UInt8, ...](unsafe_ptr=nonce.unsafe_ptr(), length=16),

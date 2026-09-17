@@ -1,6 +1,6 @@
 """Hardware AES (FIPS 197) and AES-GCM (NIST SP 800-38D) with reusable key schedules."""
 
-from std.collections import List, InlineArray
+from std.collections import List, Array
 from std.bit import byte_swap
 from std.sys import llvm_intrinsic, CompilationTarget
 from std.memory import bitcast, unsafe_memset_zero, unsafe_memcpy, Pointer
@@ -205,8 +205,8 @@ def x86_aes_encrypt_256_direct(
 @always_inline
 def _arm_load_keys[N: Int](
     round_keys: Pointer[mut=True, UInt32, _, address_space=_]
-) -> InlineArray[SIMD16, N]:
-    var keys = InlineArray[SIMD16, N](fill=SIMD16(0))
+) -> Array[SIMD16, N]:
+    var keys = Array[SIMD16, N](fill=SIMD16(0))
     comptime for i in range(N):
         var raw = (
             (round_keys.unsafe_offset(i * 4)).unsafe_bitcast[UInt8]().unsafe_load[
@@ -221,7 +221,7 @@ def _arm_load_keys[N: Int](
 
 @always_inline
 def _arm_enc_block[NR: Int](
-    x0: SIMD16, keys: InlineArray[SIMD16, NR + 1]
+    x0: SIMD16, keys: Array[SIMD16, NR + 1]
 ) -> SIMD16:
     """Apply ARM AES rounds; omit AESMC in the final round."""
     var x = x0
@@ -884,7 +884,7 @@ def _arm_gcm_fused_loop[NR: Int](
 
     var i = 0
     while i + 8 <= num_blocks:
-        var b = InlineArray[SIMD16, 8](fill=SIMD16(0))
+        var b = Array[SIMD16, 8](fill=SIMD16(0))
         comptime for k in range(8):
             var cv = j0u32
             cv[3] = llvm_intrinsic["llvm.bswap.i32", UInt32, has_side_effect=False](
@@ -899,7 +899,7 @@ def _arm_gcm_fused_loop[NR: Int](
 
         var p = input_ptr.unsafe_offset(i * 16)
         var q = output_ptr.unsafe_offset(i * 16)
-        var g = InlineArray[SIMD16, 8](fill=SIMD16(0))
+        var g = Array[SIMD16, 8](fill=SIMD16(0))
         comptime for k in range(8):
             var pt = p.unsafe_load[width=16, alignment=1](k * 16)
             var ct = pt ^ b[k]
@@ -920,7 +920,7 @@ def _arm_gcm_fused_loop[NR: Int](
         i += 8
 
     if i + 4 <= num_blocks:
-        var b = InlineArray[SIMD16, 4](fill=SIMD16(0))
+        var b = Array[SIMD16, 4](fill=SIMD16(0))
         comptime for k in range(4):
             var cv = j0u32
             cv[3] = llvm_intrinsic["llvm.bswap.i32", UInt32, has_side_effect=False](
@@ -935,7 +935,7 @@ def _arm_gcm_fused_loop[NR: Int](
 
         var p = input_ptr.unsafe_offset(i * 16)
         var q = output_ptr.unsafe_offset(i * 16)
-        var g = InlineArray[SIMD16, 4](fill=SIMD16(0))
+        var g = Array[SIMD16, 4](fill=SIMD16(0))
         comptime for k in range(4):
             var pt = p.unsafe_load[width=16, alignment=1](k * 16)
             var ct = pt ^ b[k]
@@ -978,7 +978,7 @@ def _soft_gcm_ctr_kernel(
     rounds: Int
 ) -> None:
     var skey = cpu_aes_ct_skey(round_keys, rounds)
-    var ks = InlineArray[UInt8, 256](fill=0)
+    var ks = Array[UInt8, 256](fill=0)
     var kp = ks.unsafe_ptr()
     var i = 0
     while i < num_blocks:
@@ -1099,7 +1099,7 @@ def _gf_mul_nat(a: SIMD128, b: SIMD128) -> SIMD128:
     return _reduce_vec(lo, hi)
 
 
-struct _GHash(Copyable, Movable):
+struct _GHash(Copyable):
     var h_hi: UInt64
     var h_lo: UInt64
     var y_hi: UInt64
@@ -1193,7 +1193,7 @@ struct _GHash(Copyable, Movable):
             off += 16
 
         if off < length:
-            var block = InlineArray[UInt8, 16](fill=0)
+            var block = Array[UInt8, 16](fill=0)
             for i in range(length - off):
                 block[i] = data[unsafe_offset=off + i]
             y = _gf_mul_nat(_load_nat128(block.unsafe_ptr()) ^ y, self.hn)
@@ -1206,7 +1206,7 @@ struct _GHash(Copyable, Movable):
     ):
         var off = 0
         while off < length:
-            var block = InlineArray[UInt8, 16](fill=0)
+            var block = Array[UInt8, 16](fill=0)
             var n = length - off
             if n > 16:
                 n = 16
@@ -1242,7 +1242,7 @@ def _encrypt_block(
 
 def _derive_j0(
     h_hi: UInt64, h_lo: UInt64,
-    iv: Span[UInt8, ...], mut j0: InlineArray[UInt8, 16]
+    iv: Span[UInt8, ...], mut j0: Array[UInt8, 16]
 ):
     if len(iv) == 12:
         for i in range(12):
@@ -1264,14 +1264,14 @@ def _derive_j0(
 
 def _gctr_and_ghash(
     rk: Pointer[mut=True, UInt32, _, address_space=_], rounds: Int,
-    j0: InlineArray[UInt8, 16],
+    j0: Array[UInt8, 16],
     input_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     output_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     length: Int,
     mut gh: _GHash,
     ghash_ciphertext: Bool
 ):
-    var j0_buf = InlineArray[UInt8, 16](fill=0)
+    var j0_buf = Array[UInt8, 16](fill=0)
     for i in range(16):
         j0_buf[i] = j0[i]
     var full_blocks = length // 16
@@ -1313,8 +1313,8 @@ def _gctr_and_ghash(
 
     var rem = length - full_blocks * 16
     if rem > 0:
-        var ctr = InlineArray[UInt8, 16](fill=0)
-        var ks = InlineArray[UInt8, 16](fill=0)
+        var ctr = Array[UInt8, 16](fill=0)
+        var ks = Array[UInt8, 16](fill=0)
         _write_gcm_counter(ctr.unsafe_ptr(), j0_buf.unsafe_ptr(), full_blocks)
         _encrypt_block(rk, rounds, ctr.unsafe_ptr(), ks.unsafe_ptr())
         var off = full_blocks * 16
@@ -1341,10 +1341,10 @@ def _gcm_core_keyed(
     input_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     output_ptr: Pointer[mut=True, UInt8, _, address_space=_],
     length: Int,
-    mut tag: InlineArray[UInt8, 16],
+    mut tag: Array[UInt8, 16],
     ghash_ciphertext: Bool
 ) raises:
-    var j0 = InlineArray[UInt8, 16](fill=0)
+    var j0 = Array[UInt8, 16](fill=0)
     _derive_j0(gh.h_hi, gh.h_lo, iv, j0)
 
     if len(aad) > 0:
@@ -1354,7 +1354,7 @@ def _gcm_core_keyed(
     _gctr_and_ghash(rk, rounds, j0, input_ptr, output_ptr, length, gh, ghash_ciphertext)
     gh.update_lengths(UInt64(len(aad)) * 8, UInt64(length) * 8)
 
-    var ek_j0 = InlineArray[UInt8, 16](fill=0)
+    var ek_j0 = Array[UInt8, 16](fill=0)
     _encrypt_block(rk, rounds, j0.unsafe_ptr(), ek_j0.unsafe_ptr())
     var t_hi = gh.y_hi ^ load_64be(ek_j0.unsafe_ptr(), 0)
     var t_lo = gh.y_lo ^ load_64be(ek_j0.unsafe_ptr(), 8)
@@ -1362,9 +1362,9 @@ def _gcm_core_keyed(
     store_64be(tag.unsafe_ptr(), 8, t_lo)
 
 
-struct AESGCMContext(Copyable, Movable):
+struct AESGCMContext(Copyable):
     """Cache the AES schedule and GHASH powers for repeated operations with one key."""
-    var _rk: InlineArray[UInt32, 60]
+    var _rk: Array[UInt32, 60]
     var _rounds: Int
     var _gh0: _GHash
 
@@ -1372,9 +1372,9 @@ struct AESGCMContext(Copyable, Movable):
         if not _valid_gcm_key(key):
             raise Error("invalid key size")
         self._rounds = 10 if len(key) == 16 else (12 if len(key) == 24 else 14)
-        self._rk = InlineArray[UInt32, 60](fill=0)
+        self._rk = Array[UInt32, 60](fill=0)
 
-        var key_buf = InlineArray[UInt8, 32](fill=0)
+        var key_buf = Array[UInt8, 32](fill=0)
         for i in range(len(key)):
             key_buf[i] = key[i]
         if len(key) == 16:
@@ -1385,8 +1385,8 @@ struct AESGCMContext(Copyable, Movable):
             expand_key_256_into(key_buf.unsafe_ptr(), self._rk.unsafe_ptr())
         volatile_wipe(key_buf.unsafe_ptr(), 32)
 
-        var zero_block = InlineArray[UInt8, 16](fill=0)
-        var h_block = InlineArray[UInt8, 16](fill=0)
+        var zero_block = Array[UInt8, 16](fill=0)
+        var h_block = Array[UInt8, 16](fill=0)
         _encrypt_block(self._rk.unsafe_ptr(), self._rounds, zero_block.unsafe_ptr(), h_block.unsafe_ptr())
         self._gh0 = _GHash(
             load_64be(h_block.unsafe_ptr(), 0), load_64be(h_block.unsafe_ptr(), 8)
@@ -1412,7 +1412,7 @@ struct AESGCMContext(Copyable, Movable):
             raise Error("AES-GCM tag output is too small")
         var pt_ptr = plaintext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
         var rk_ptr = self._rk.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
-        var computed_tag = InlineArray[UInt8, 16](fill=0)
+        var computed_tag = Array[UInt8, 16](fill=0)
         var gh = self._gh0.copy()
 
         try:
@@ -1453,7 +1453,7 @@ struct AESGCMContext(Copyable, Movable):
             raise Error("AES-GCM plaintext output is too small")
         var ct_ptr = ciphertext.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
         var rk_ptr = self._rk.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()
-        var computed_tag = InlineArray[UInt8, 16](fill=0)
+        var computed_tag = Array[UInt8, 16](fill=0)
         var gh = self._gh0.copy()
 
         try:

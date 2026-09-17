@@ -262,7 +262,7 @@ def run_aes_sw(mut rng: Rng) raises -> Bool:
 def run_chacha20(mut rng: Rng) raises -> Bool:
     var cls = _classes(N_FAST, rng)
     var inp = _fast_inputs(cls, 32, rng)
-    var nonce = InlineArray[UInt8, 12](fill=0)
+    var nonce = Array[UInt8, 12](fill=0)
     var times = List[Float64](capacity=N_FAST)
     var sink: UInt8 = 0
     var data = List[UInt8]()

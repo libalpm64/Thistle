@@ -1,8 +1,7 @@
 """X25519 key agreement against Wycheproof vectors."""
-from std.collections import List
+from std.collections import Array, List
 from std.python import Python
 from thistle.x25519 import x25519
-from thistle.utils import StackInlineArray
 
 
 def hex_to_bytes(s: String) -> List[UInt8]:
@@ -18,7 +17,7 @@ def hex_to_bytes(s: String) -> List[UInt8]:
     return r^
 
 
-def matches32(actual: StackInlineArray[UInt8, 32], expected: List[UInt8]) -> Bool:
+def matches32(actual: Array[UInt8, 32], expected: List[UInt8]) -> Bool:
     for i in range(32):
         if actual[i] != expected[i]:
             return False
@@ -29,7 +28,7 @@ def run_case(tc_id: String, private_hex: String, public_hex: String, shared_hex:
     var private_key = hex_to_bytes(private_hex)
     var public_key = hex_to_bytes(public_hex)
     var expected = hex_to_bytes(shared_hex)
-    var actual = StackInlineArray[UInt8, 32](fill=0)
+    var actual = Array[UInt8, 32](fill=0)
     x25519(
         Span[UInt8, ...](private_key),
         Span[UInt8, ...](public_key),

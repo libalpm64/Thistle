@@ -3,11 +3,11 @@ with RFC 6979 nonces.
 """
 
 from std.builtin.globals import global_constant
-from .p384_table import p384_base_table
-from .utils import u64_nonzero_choice, u64_zero_choice
-from .sha2 import sha384_hash
-from .pbkdf2 import hmac_sha384
 from std.utils import StaticTuple
+from .p384_table import p384_base_table
+from .pbkdf2 import hmac_sha384
+from .sha2 import sha384_hash
+from .utils import u64_nonzero_choice, u64_zero_choice, zero_list_u8
 from .weierstrass import (
     Limbs, U384, Point, JacobianPoint, cmp as ws_cmp, sub_raw as ws_sub_raw, add_raw as ws_add_raw, select as ws_select, zero_choice as ws_zero_choice, add_mod as ws_add_mod, sub_mod as ws_sub_mod, from_be as ws_from_be, to_be as ws_to_be, mont_mul as ws_mont_mul, mont_sqr as ws_mont_sqr, to_mont as ws_to_mont, from_mont as ws_from_mont, mul_mod as ws_mul_mod, square_mod as ws_square_mod, is_on_curve as ws_is_on_curve, mul_small_mod as ws_mul_small_mod, jacobian_double_ct as ws_jacobian_double_ct, jacobian_add as ws_jacobian_add, jacobian_infinity as ws_jacobian_infinity, select_jacobian_ct as ws_select_jacobian_ct, jacobian_add_affine_non_equal_ct as ws_jacobian_add_affine, pow_mod as ws_pow_mod, sqn as ws_sqn, inv_p as ws_inv_p, jacobian_to_affine as ws_jacobian_to_affine, scalar_mult_jacobian_w5 as ws_scalar_mult_jacobian_w5, scalar_mult_base as ws_scalar_mult_base, scalar_mult_base_jacobian as ws_scalar_mult_base_jacobian, base_table_entry as ws_base_table_entry, mod_inv_ct as ws_mod_inv_ct, reduce_mod as ws_reduce_mod, point_add as ws_point_add, rfc6979 as ws_rfc6979
 )
@@ -216,7 +216,7 @@ def _to_be(x: U384, output: Pointer[mut=True, UInt8, _, address_space=_]):
     ws_to_be(x, output)
 
 
-struct P384Point(Copyable, ImplicitlyCopyable, Movable):
+struct P384Point(ImplicitlyCopyable):
     """Affine P-384 coordinates with an explicit infinity flag."""
     var x: U384
     var y: U384
@@ -232,22 +232,12 @@ struct P384Point(Copyable, ImplicitlyCopyable, Movable):
         self.y = y
         self.infinity = infinity
 
-    def __copyinit__(out self, copy: Self):
-        self.x = copy.x
-        self.y = copy.y
-        self.infinity = copy.infinity
-
-    def __moveinit__(out self, deinit take: Self):
-        self.x = take.x
-        self.y = take.y
-        self.infinity = take.infinity
-
     @staticmethod
     def generator() -> P384Point:
         return P384Point(_gx(), _gy(), False)
 
 
-struct P384JacobianPoint(Copyable, ImplicitlyCopyable, Movable):
+struct P384JacobianPoint(ImplicitlyCopyable):
     """Jacobian P-384 coordinates: x = X/Z^2 and y = Y/Z^3, with an explicit infinity flag."""
     var x: U384
     var y: U384
@@ -265,19 +255,6 @@ struct P384JacobianPoint(Copyable, ImplicitlyCopyable, Movable):
         self.y = y
         self.z = z
         self.infinity = infinity
-
-    def __copyinit__(out self, copy: Self):
-        self.x = copy.x
-        self.y = copy.y
-        self.z = copy.z
-        self.infinity = copy.infinity
-
-    def __moveinit__(out self, deinit take: Self):
-        self.x = take.x
-        self.y = take.y
-        self.z = take.z
-        self.infinity = take.infinity
-
 
 @always_inline
 def _select_u384(a: U384, b: U384, choice: UInt64) -> U384:
@@ -436,15 +413,11 @@ def p384_public_key(
         return False
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
-        var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
-        for i in range(6):
-            dp.unsafe_store[volatile=True](i, UInt64(0))
+        _wipe_u384(d)
         return False
     var q = _scalar_mult_base(d)
     var ok = p384_encode_uncompressed(q, output)
-    var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
-    for i in range(6):
-        dp.unsafe_store[volatile=True](i, UInt64(0))
+    _wipe_u384(d)
     return ok
 
 
@@ -461,20 +434,14 @@ def p384_ecdh(
         return False
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
-        var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
-        for i in range(6):
-            dp.unsafe_store[volatile=True](i, UInt64(0))
+        _wipe_u384(d)
         return False
     var q = p384_decode_uncompressed(public_key)
     if q.infinity:
-        var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
-        for i in range(6):
-            dp.unsafe_store[volatile=True](i, UInt64(0))
+        _wipe_u384(d)
         return False
     var shared = _scalar_mult(d, q)
-    var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
-    for i in range(6):
-        dp.unsafe_store[volatile=True](i, UInt64(0))
+    _wipe_u384(d)
     if shared.infinity:
         return False
     _to_be(shared.x, output.unsafe_ptr())
@@ -549,12 +516,6 @@ def _wipe_u384(mut x: U384):
         ptr.unsafe_store[volatile=True](i, UInt64(0))
 
 
-def _wipe_list_u8(mut data: List[UInt8]):
-    var ptr = data.unsafe_ptr()
-    for i in range(len(data)):
-        ptr.unsafe_store[volatile=True](i, UInt8(0))
-
-
 def _rfc6979_p384(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int) -> U384:
     return ws_rfc6979[6](private_key, digest, skip, _n())
 
@@ -621,7 +582,7 @@ def p384_ecdsa_sign(
     var ok = p384_ecdsa_sign_digest(
         private_key, Span[UInt8, ...](digest), signature
     )
-    _wipe_list_u8(digest)
+    zero_list_u8(digest)
     return ok
 
 
@@ -715,4 +676,4 @@ def p384_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
                 _wipe_u384(d)
                 return (private_key^, public_key^)
         _wipe_u384(d)
-        _wipe_list_u8(private_key)
+        zero_list_u8(private_key)

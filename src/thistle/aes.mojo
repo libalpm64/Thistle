@@ -30,7 +30,7 @@ def _ct_encrypt1(
     skey: List[UInt64],
     rounds: Int
 ) -> None:
-    var buf = InlineArray[UInt8, 64](fill=0)
+    var buf = Array[UInt8, 64](fill=0)
     var bp = buf.unsafe_ptr()
     for i in range(16):
         bp[unsafe_offset=i] = block[unsafe_offset=i]
@@ -73,7 +73,7 @@ def cpu_aes_ecb_kernel(
     """
     _validate_aes_block_count(num_blocks)
     var skey = cpu_aes_ct_skey(round_keys, rounds)
-    var scratch = InlineArray[UInt8, 256](fill=0)
+    var scratch = Array[UInt8, 256](fill=0)
     var sp = scratch.unsafe_ptr()
     var i = 0
     while i < num_blocks:
@@ -159,7 +159,7 @@ def cpu_aes_ctr_kernel(
     """
     _validate_aes_block_count(num_blocks)
     var skey = cpu_aes_ct_skey(round_keys, rounds)
-    var ks = InlineArray[UInt8, 256](fill=0)
+    var ks = Array[UInt8, 256](fill=0)
     var kp = ks.unsafe_ptr()
     var i = 0
     while i < num_blocks:
@@ -241,13 +241,13 @@ def cpu_aes_xts_kernel(
 @always_inline
 def sub_word(w: UInt32) -> UInt32:
     """Apply the Boyar-Peralta circuit for the AES S-box (FIPS 197, sec. 5.1.1) to four bytes."""
-    var blk = InlineArray[UInt8, 16](fill=0)
+    var blk = Array[UInt8, 16](fill=0)
     var bp = blk.unsafe_ptr()
     bp[unsafe_offset=0] = UInt8((w >> 24) & 0xff)
     bp[unsafe_offset=1] = UInt8((w >> 16) & 0xff)
     bp[unsafe_offset=2] = UInt8((w >> 8) & 0xff)
     bp[unsafe_offset=3] = UInt8(w & 0xff)
-    var q = InlineArray[SIMD[DType.uint64, 1], 8](fill=0)
+    var q = Array[SIMD[DType.uint64, 1], 8](fill=0)
     var pair = _ct_interleave_in[1](_ct_le32(bp, 0), 0, 0, 0)
     q[0] = pair[0]
     q[4] = pair[1]
@@ -325,7 +325,7 @@ def expand_key_256_into(
         w.unsafe_store(i, w.unsafe_load(i - 8) ^ temp)
 
 
-struct AESExpandedKey(Movable):
+struct AESExpandedKey:
     """Own an AES-128/192/256 round-key schedule and wipe it on destruction."""
 
     var _round_keys: StackBuffer[UInt32, 60]
@@ -487,7 +487,7 @@ def _ct_swapn[W: Int](
 
 
 @always_inline
-def _ct_ortho[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
+def _ct_ortho[W: Int](mut q: Array[SIMD[DType.uint64, W], 8]):
     """Transpose eight 64-bit words with successive 1-, 2-, and 4-bit swaps."""
     var p01 = _ct_swapn(0x5555555555555555, 1, q[0], q[1])
     var p23 = _ct_swapn(0x5555555555555555, 1, q[2], q[3])
@@ -512,7 +512,7 @@ def _ct_ortho[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
 
 
 @always_inline
-def _ct_sbox[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
+def _ct_sbox[W: Int](mut q: Array[SIMD[DType.uint64, W], 8]):
     """Compute the AES S-box (FIPS 197, sec. 5.1.1) with a Boyar-Peralta circuit, avoiding
     secret-indexed table lookups.
     """
@@ -656,7 +656,7 @@ def _ct_sbox[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
 
 
 @always_inline
-def _ct_shift_rows[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
+def _ct_shift_rows[W: Int](mut q: Array[SIMD[DType.uint64, W], 8]):
     """Apply ShiftRows in the bitsliced layout (FIPS 197, sec. 5.1.2)."""
     comptime for i in range(8):
         var x = q[i]
@@ -677,7 +677,7 @@ def _ct_rotr32[W: Int](x: SIMD[DType.uint64, W]) -> SIMD[DType.uint64, W]:
 
 
 @always_inline
-def _ct_mix_columns[W: Int](mut q: InlineArray[SIMD[DType.uint64, W], 8]):
+def _ct_mix_columns[W: Int](mut q: Array[SIMD[DType.uint64, W], 8]):
     """Apply MixColumns in the bitsliced layout (FIPS 197, sec. 5.1.3)."""
     var q0 = q[0]
     var q1 = q[1]
@@ -717,7 +717,7 @@ def cpu_aes_ct_skey(
         var w1 = SIMD[DType.uint64, 1](UInt64(byte_swap(round_keys.unsafe_load(r * 4 + 1))))
         var w2 = SIMD[DType.uint64, 1](UInt64(byte_swap(round_keys.unsafe_load(r * 4 + 2))))
         var w3 = SIMD[DType.uint64, 1](UInt64(byte_swap(round_keys.unsafe_load(r * 4 + 3))))
-        var q = InlineArray[SIMD[DType.uint64, 1], 8](fill=0)
+        var q = Array[SIMD[DType.uint64, 1], 8](fill=0)
         for i in range(4):
             var pair = _ct_interleave_in[1](w0, w1, w2, w3)
             q[i] = pair[0]
@@ -748,7 +748,7 @@ def _ct_store_le32(p: Pointer[mut=True, UInt8, _, address_space=_], off: Int, w:
 
 @always_inline
 def _ct_encrypt_state[W: Int](
-    mut q: InlineArray[SIMD[DType.uint64, W], 8],
+    mut q: Array[SIMD[DType.uint64, W], 8],
     skp: Pointer[mut=False, UInt64, _, address_space=_],
     rounds: Int
 ) -> None:
@@ -776,7 +776,7 @@ def _ct_encrypt_blocks[W: Int](
     rounds: Int
 ) -> None:
     """Encrypt bitsliced blocks; the final round omits MixColumns (FIPS 197, Algorithm 1)."""
-    var q = InlineArray[SIMD[DType.uint64, W], 8](fill=0)
+    var q = Array[SIMD[DType.uint64, W], 8](fill=0)
     for i in range(4):
         var w0 = SIMD[DType.uint64, W](0)
         var w1 = SIMD[DType.uint64, W](0)
@@ -831,7 +831,7 @@ def cpu_aes_ct_encrypt(
 ) -> None:
     """Encrypt one 16-byte block in place using the bitsliced core."""
     var skey = cpu_aes_ct_skey(round_keys, rounds)
-    var buf = InlineArray[UInt8, 64](fill=0)
+    var buf = Array[UInt8, 64](fill=0)
     var bp = buf.unsafe_ptr()
     for i in range(16):
         bp[unsafe_offset=i] = pt_bytes[unsafe_offset=i]

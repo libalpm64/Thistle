@@ -77,12 +77,12 @@ def round_fn[r: Int](
 
     return (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15)
 # fmt: on
-struct Blake2b(Movable):
+struct Blake2b:
     """Streaming BLAKE2b with 128-byte blocks and configurable digest length (RFC 7693, sec. 3)."""
     var h: SIMD[DType.uint64, 8]
     var t_low: UInt64
     var t_high: UInt64
-    var buffer: InlineArray[UInt64, 16]
+    var buffer: Array[UInt64, 16]
     var buffer_len: Int
     var out_len: Int
     var key_len: Int
@@ -99,7 +99,7 @@ struct Blake2b(Movable):
         self.h = BLAKE2B_IV
         self.t_low = 0
         self.t_high = 0
-        self.buffer = InlineArray[UInt64, 16](fill=0)
+        self.buffer = Array[UInt64, 16](fill=0)
         self.buffer_len = 0
 
         var p0: UInt64 = 0x01010000
@@ -118,7 +118,7 @@ struct Blake2b(Movable):
         self.h = BLAKE2B_IV
         self.t_low = 0
         self.t_high = 0
-        self.buffer = InlineArray[UInt64, 16](fill=0)
+        self.buffer = Array[UInt64, 16](fill=0)
         self.buffer_len = 0
 
         var p0: UInt64 = 0x01010000

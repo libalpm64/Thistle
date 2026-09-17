@@ -47,7 +47,7 @@ from thistle.p256 import (
 from thistle.p384 import (
     p384_public_key, p384_ecdsa_sign, p384_ecdsa_verify
 )
-from thistle.utils import StackBuffer, StackInlineArray
+from thistle.utils import StackBuffer
 from std.utils import StaticTuple
 
 comptime TEST_KEY: StaticTuple[UInt8, 16] = StaticTuple[UInt8, 16](
@@ -69,9 +69,9 @@ def generate_data(length: Int) -> List[UInt8]:
 
 
 def benchmark_x25519(duration_secs: Float64) raises -> String:
-    var scalar = InlineArray[UInt8, 32](fill=0)
-    var point = InlineArray[UInt8, 32](fill=0)
-    var out = InlineArray[UInt8, 32](fill=0)
+    var scalar = Array[UInt8, 32](fill=0)
+    var point = Array[UInt8, 32](fill=0)
+    var out = Array[UInt8, 32](fill=0)
     for i in range(32):
         scalar[i] = UInt8(i + 1)
         point[i] = UInt8(9) if i == 0 else UInt8(0)
@@ -135,9 +135,9 @@ def benchmark_pbkdf2(duration_secs: Float64) raises -> String:
 
 
 def benchmark_tls_kdf(duration_secs: Float64) raises -> String:
-    var secret = InlineArray[UInt8, 32](fill=0)
-    var seed_bytes = InlineArray[UInt8, 64](fill=0)
-    var transcript_hash = InlineArray[UInt8, 32](fill=0)
+    var secret = Array[UInt8, 32](fill=0)
+    var seed_bytes = Array[UInt8, 64](fill=0)
+    var transcript_hash = Array[UInt8, 32](fill=0)
     for i in range(32):
         secret[i] = UInt8(i + 1)
         transcript_hash[i] = UInt8(0xA0 + i)
@@ -146,9 +146,9 @@ def benchmark_tls_kdf(duration_secs: Float64) raises -> String:
 
     var tls12_label = String("master secret").as_bytes()
     var tls13_label = String("c hs traffic").as_bytes()
-    var tls12_sha256_output = InlineArray[UInt8, 48](fill=0)
-    var tls12_sha384_output = InlineArray[UInt8, 48](fill=0)
-    var tls13_output = InlineArray[UInt8, 32](fill=0)
+    var tls12_sha256_output = Array[UInt8, 48](fill=0)
+    var tls12_sha384_output = Array[UInt8, 48](fill=0)
+    var tls13_output = Array[UInt8, 32](fill=0)
     var secret_span = Span[UInt8, ...](unsafe_ptr=secret.unsafe_ptr(), length=32)
     var seed_span = Span[UInt8, ...](unsafe_ptr=seed_bytes.unsafe_ptr(), length=64)
     var transcript_span = Span[UInt8, ...](unsafe_ptr=transcript_hash.unsafe_ptr(), length=32)
@@ -200,15 +200,15 @@ def benchmark_tls_kdf(duration_secs: Float64) raises -> String:
 
 
 def benchmark_tls_aead(data_size: Int, duration_secs: Float64) raises -> String:
-    var aes_key = InlineArray[UInt8, 16](fill=0x11)
-    var chacha_key = InlineArray[UInt8, 32](fill=0x22)
-    var nonce = InlineArray[UInt8, 12](fill=0x33)
-    var aad = InlineArray[UInt8, 5](fill=0)
+    var aes_key = Array[UInt8, 16](fill=0x11)
+    var chacha_key = Array[UInt8, 32](fill=0x22)
+    var nonce = Array[UInt8, 12](fill=0x33)
+    var aad = Array[UInt8, 5](fill=0)
     var input = List[UInt8](unsafe_uninit_length=data_size)
     var aes_output = List[UInt8](unsafe_uninit_length=data_size)
     var chacha_output = List[UInt8](unsafe_uninit_length=data_size)
-    var aes_tag = InlineArray[UInt8, 16](fill=0)
-    var chacha_tag = InlineArray[UInt8, 16](fill=0)
+    var aes_tag = Array[UInt8, 16](fill=0)
+    var chacha_tag = Array[UInt8, 16](fill=0)
     for i in range(data_size):
         input[i] = UInt8(i & 0xFF)
 
@@ -392,8 +392,8 @@ def benchmark_mldsa_set(
 
 
 def benchmark_p384(duration_secs: Float64) -> String:
-    var scalar256 = InlineArray[UInt8, 32](fill=0)
-    var out256 = InlineArray[UInt8, 65](fill=0)
+    var scalar256 = Array[UInt8, 32](fill=0)
+    var out256 = Array[UInt8, 65](fill=0)
     scalar256[31] = 7
     var scalar256_span = Span[UInt8, ...](scalar256)
     _ = p256_public_key(
@@ -408,8 +408,8 @@ def benchmark_p384(duration_secs: Float64) -> String:
         count256 += 1
     var duration256 = perf_counter() - start
 
-    var scalar = InlineArray[UInt8, 48](fill=0)
-    var out = InlineArray[UInt8, 97](fill=0)
+    var scalar = Array[UInt8, 48](fill=0)
+    var out = Array[UInt8, 97](fill=0)
     scalar[47] = 7
     var scalar_span = Span[UInt8, ...](scalar)
     _ = p384_public_key(scalar_span, Span[mut=True, UInt8, ...](out))
@@ -429,13 +429,13 @@ def benchmark_p384(duration_secs: Float64) -> String:
 
 
 def benchmark_ecdsa(duration_secs: Float64) -> String:
-    var p256_key = InlineArray[UInt8, 32](fill=1)
-    var p384_key = InlineArray[UInt8, 48](fill=1)
-    var message = InlineArray[UInt8, 64](fill=7)
-    var p256_sig = InlineArray[UInt8, 64](fill=0)
-    var p384_sig = InlineArray[UInt8, 96](fill=0)
-    var p256_pk = InlineArray[UInt8, 65](fill=0)
-    var p384_pk = InlineArray[UInt8, 97](fill=0)
+    var p256_key = Array[UInt8, 32](fill=1)
+    var p384_key = Array[UInt8, 48](fill=1)
+    var message = Array[UInt8, 64](fill=7)
+    var p256_sig = Array[UInt8, 64](fill=0)
+    var p384_sig = Array[UInt8, 96](fill=0)
+    var p256_pk = Array[UInt8, 65](fill=0)
+    var p384_pk = Array[UInt8, 97](fill=0)
     var msg = Span[UInt8, ...](message)
 
     var p256_count = 0
@@ -504,10 +504,10 @@ def benchmark_ecdsa(duration_secs: Float64) -> String:
 
 
 def benchmark_ed25519(duration_secs: Float64) raises -> String:
-    var sk = InlineArray[UInt8, 32](fill=0)
-    var pk = InlineArray[UInt8, 32](fill=0)
-    var msg = InlineArray[UInt8, 64](fill=0)
-    var sig = InlineArray[UInt8, 64](fill=0)
+    var sk = Array[UInt8, 32](fill=0)
+    var pk = Array[UInt8, 32](fill=0)
+    var msg = Array[UInt8, 64](fill=0)
+    var sig = Array[UInt8, 64](fill=0)
     for i in range(32):
         sk[i] = UInt8(i * 7 + 1)
     for i in range(64):
@@ -728,7 +728,7 @@ def benchmark_chacha20(data_size: Int, duration_secs: Float64) raises -> String:
     var key = SIMD[DType.uint8, 32](0)
     for i in range(32):
         key[i] = UInt8(i)
-    var nonce = InlineArray[UInt8, 12](fill=0)
+    var nonce = Array[UInt8, 12](fill=0)
     
     var data = List[UInt8](capacity=data_size)
     for i in range(data_size):

@@ -36,7 +36,7 @@ def _scale19[small_limbs: Bool](x: UInt64) -> UInt128:
         return UInt128(x) * UInt128(19)
 
 
-struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
+struct FieldElement51(ImplicitlyCopyable):
     """Field element in five 51-bit limbs; intermediate values need not be canonical."""
     var limbs: SIMD[DType.uint64, 8]
 
@@ -51,14 +51,6 @@ struct FieldElement51(Copyable, ImplicitlyCopyable, Movable):
     @always_inline
     def __init__(out self, limbs: SIMD[DType.uint64, 8]):
         self.limbs = limbs
-
-    @always_inline
-    def __copyinit__(out self, copy: Self):
-        self.limbs = copy.limbs
-
-    @always_inline
-    def __moveinit__(out self, deinit take: Self):
-        self.limbs = take.limbs
 
     @staticmethod
     def ZERO() -> FieldElement51:

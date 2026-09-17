@@ -1,13 +1,13 @@
 """Argon2id (RFC 9106), with PHC password-string helpers."""
 
-from std.collections import List
 from std.base64 import b64encode, b64decode
-from .random import random_bytes
-from .utils import StackBuffer, bytes_to_hex, volatile_wipe
+from std.bit import rotate_bits_left
+from std.collections import List
 from std.memory import Layout, Pointer, alloc, unsafe_memcpy, unsafe_memset_zero
 from max.algorithm import parallelize
-from std.bit import rotate_bits_left
 from .blake2b import Blake2b
+from .random import random_bytes
+from .utils import StackBuffer, bytes_to_hex, volatile_wipe
 
 comptime MASK32 = 0xFFFFFFFF
 
@@ -636,22 +636,20 @@ struct Argon2id:
                         var seg_end = (slice_idx + 1) * segment_length
 
                         @always_inline
-                        @__copy_capture(
-                            scratch,
-                            memory,
-                            seg_start,
-                            seg_end,
-                            segment_length,
-                            lane_length,
-                            memory_blocks,
-                            pass_index,
-                            slice_idx,
-                            iterations,
-                            type_code,
-                            parallelism,
-                        )
-                        @parameter
-                        def process_lane(lane: Int):
+                        def process_lane(lane: Int) {
+                            var scratch,
+                            var memory,
+                            var seg_start,
+                            var seg_end,
+                            var segment_length,
+                            var lane_length,
+                            var memory_blocks,
+                            var pass_index,
+                            var slice_idx,
+                            var iterations,
+                            var type_code,
+                            var parallelism,
+                        }:
                             _argon2_process_lane(
                                 scratch,
                                 memory,
@@ -668,7 +666,7 @@ struct Argon2id:
                                 parallelism,
                             )
 
-                        parallelize[process_lane](parallelism)
+                        parallelize(process_lane, parallelism)
 
                 # XOR the final block of every lane, then apply H′ to produce the tag (RFC 9106,
                 # sec. 3.2, steps 7-8).

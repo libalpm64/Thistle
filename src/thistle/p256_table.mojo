@@ -1,7 +1,7 @@
 # Precomputed P-256 width-7 base-point table for constant-time fixed-base multiplication.
 from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
-from std.collections import InlineArray
+from std.collections import Array
 from std.memory import Pointer
 
 comptime _P256_W7_0_0 = SIMD[DType.uint64, 128](
@@ -2977,12 +2977,12 @@ def p256_w7_fill(p: Pointer[mut=True, UInt64, _]):
     p256_w7_fill_3(p.unsafe_offset(27 * 512))
 
 
-def _p256_w7_table() -> InlineArray[UInt64, 37 * 64 * 8]:
-    var table = InlineArray[UInt64, 37 * 64 * 8](fill=0)
+def _p256_w7_table() -> Array[UInt64, 37 * 64 * 8]:
+    var table = Array[UInt64, 37 * 64 * 8](fill=0)
     p256_w7_fill(table.unsafe_ptr())
     # Compile-time transposition arranges vectorized masked scans as:
     # window, coordinate limb (x then y), magnitude 1..64.
-    var columns = InlineArray[UInt64, 37 * 64 * 8](fill=0)
+    var columns = Array[UInt64, 37 * 64 * 8](fill=0)
     for j in range(37):
         for limb in range(8):
             for t in range(64):

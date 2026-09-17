@@ -2,12 +2,12 @@
 with RFC 6979 nonces.
 """
 
-from .p256_table import P256_W7_TABLE
 from std.builtin.globals import global_constant
-from .utils import u64_nonzero_choice
-from .sha2 import sha256_hash
-from .pbkdf2 import hmac_sha256
 from std.utils import StaticTuple
+from .p256_table import P256_W7_TABLE
+from .pbkdf2 import hmac_sha256
+from .sha2 import sha256_hash
+from .utils import u64_nonzero_choice, zero_list_u8
 from .weierstrass import (
     Limbs, U256, Point, JacobianPoint, cmp as ws_cmp, sub_raw as ws_sub_raw, add_raw as ws_add_raw, select as ws_select, zero_choice as ws_zero_choice, add_mod as ws_add_mod, sub_mod as ws_sub_mod, from_be as ws_from_be, to_be as ws_to_be, mont_mul as ws_mont_mul, mont_sqr as ws_mont_sqr, to_mont as ws_to_mont, from_mont as ws_from_mont, mul_mod as ws_mul_mod, square_mod as ws_square_mod, is_on_curve as ws_is_on_curve, mul_small_mod as ws_mul_small_mod, jacobian_double_ct as ws_jacobian_double_ct, jacobian_add as ws_jacobian_add, jacobian_infinity as ws_jacobian_infinity, select_jacobian_ct as ws_select_jacobian_ct, jacobian_add_affine_non_equal_ct as ws_jacobian_add_affine, pow_mod as ws_pow_mod, sqn as ws_sqn, inv_p as ws_inv_p, jacobian_to_affine as ws_jacobian_to_affine, scalar_mult_jacobian_w5 as ws_scalar_mult_jacobian_w5, reduce_mod as ws_reduce_mod, point_add as ws_point_add, rfc6979 as ws_rfc6979
 )
@@ -211,7 +211,7 @@ def _to_be(x: U256, output: Pointer[mut=True, UInt8, _, address_space=_]):
     ws_to_be(x, output)
 
 
-struct P256Point(Copyable, ImplicitlyCopyable, Movable):
+struct P256Point(ImplicitlyCopyable):
     """Affine P-256 coordinates with an explicit infinity flag."""
     var x: U256
     var y: U256
@@ -227,22 +227,12 @@ struct P256Point(Copyable, ImplicitlyCopyable, Movable):
         self.y = y
         self.infinity = infinity
 
-    def __copyinit__(out self, copy: Self):
-        self.x = copy.x
-        self.y = copy.y
-        self.infinity = copy.infinity
-
-    def __moveinit__(out self, deinit take: Self):
-        self.x = take.x
-        self.y = take.y
-        self.infinity = take.infinity
-
     @staticmethod
     def generator() -> P256Point:
         return P256Point(_gx(), _gy(), False)
 
 
-struct P256JacobianPoint(Copyable, ImplicitlyCopyable, Movable):
+struct P256JacobianPoint(ImplicitlyCopyable):
     """Jacobian P-256 coordinates: x = X/Z^2 and y = Y/Z^3, with an explicit infinity flag."""
     var x: U256
     var y: U256
@@ -260,19 +250,6 @@ struct P256JacobianPoint(Copyable, ImplicitlyCopyable, Movable):
         self.y = y
         self.z = z
         self.infinity = infinity
-
-    def __copyinit__(out self, copy: Self):
-        self.x = copy.x
-        self.y = copy.y
-        self.z = copy.z
-        self.infinity = copy.infinity
-
-    def __moveinit__(out self, deinit take: Self):
-        self.x = take.x
-        self.y = take.y
-        self.z = take.z
-        self.infinity = take.infinity
-
 
 @always_inline
 def _select_u256(a: U256, b: U256, choice: UInt64) -> U256:
@@ -350,7 +327,7 @@ def _base_table_entry_w7(
 ) -> P256Point:
     # Scan all 64 magnitudes four at a time. Table addresses depend only on the
     # public window index and scan counter; the secret magnitude is used only in masks.
-    var sums = InlineArray[SIMD[DType.uint64, 4], 8](fill=SIMD[DType.uint64, 4](0))
+    var sums = Array[SIMD[DType.uint64, 4], 8](fill=SIMD[DType.uint64, 4](0))
     var indexes = SIMD[DType.uint64, 4](1, 2, 3, 4)
     for t in range(16):
         var mask = indexes.eq(SIMD[DType.uint64, 4](d))
@@ -390,7 +367,7 @@ def _booth_recode_w7(value: UInt64) -> UInt64:
     return (digit << 1) + (sign & UInt64(1))
 
 
-struct P256XYZZPoint(Copyable, ImplicitlyCopyable, Movable):
+struct P256XYZZPoint(ImplicitlyCopyable):
     """Projective point with cached Z^2 and Z^3, all in Montgomery form."""
     var x: U256
     var y: U256
@@ -563,15 +540,11 @@ def p256_public_key(
         return False
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
-        var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
-        for i in range(4):
-            dp.unsafe_store[volatile=True](i, UInt64(0))
+        _wipe_u256(d)
         return False
     var q = _scalar_mult_base(d)
     var ok = _encode_uncompressed_trusted(q, output)
-    var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
-    for i in range(4):
-        dp.unsafe_store[volatile=True](i, UInt64(0))
+    _wipe_u256(d)
     return ok
 
 
@@ -588,20 +561,14 @@ def p256_ecdh(
         return False
     var d = _from_be(private_key)
     if d.is_zero() or _cmp(d, _n()) >= 0:
-        var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
-        for i in range(4):
-            dp.unsafe_store[volatile=True](i, UInt64(0))
+        _wipe_u256(d)
         return False
     var q = p256_decode_uncompressed(public_key)
     if q.infinity:
-        var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
-        for i in range(4):
-            dp.unsafe_store[volatile=True](i, UInt64(0))
+        _wipe_u256(d)
         return False
     var shared = _scalar_mult(d, q)
-    var dp = Pointer(to=d).unsafe_bitcast[UInt64]()
-    for i in range(4):
-        dp.unsafe_store[volatile=True](i, UInt64(0))
+    _wipe_u256(d)
     if shared.infinity:
         return False
     _to_be(shared.x, output.unsafe_ptr())
@@ -652,7 +619,7 @@ def _n_sqn(x: U256, count: Int) -> U256:
 
 
 def _n_inv(x: U256) -> U256:
-    var table = InlineArray[U256, 14](fill=U256())
+    var table = Array[U256, 14](fill=U256())
     table[0] = _n_to_mont(x)
     table[1] = _n_mont_mul(table[0], table[0])
     table[2] = _n_mont_mul(table[0], table[1])
@@ -689,12 +656,6 @@ def _wipe_u256(mut x: U256):
     var ptr = Pointer(to=x).unsafe_bitcast[UInt64]()
     for i in range(4):
         ptr.unsafe_store[volatile=True](i, UInt64(0))
-
-
-def _wipe_list_u8(mut data: List[UInt8]):
-    var ptr = data.unsafe_ptr()
-    for i in range(len(data)):
-        ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
 def _rfc6979_p256(private_key: Span[UInt8, ...], digest: Span[UInt8, ...], skip: Int) -> U256:
@@ -763,7 +724,7 @@ def p256_ecdsa_sign(
     var ok = p256_ecdsa_sign_digest(
         private_key, Span[UInt8, ...](digest), signature
     )
-    _wipe_list_u8(digest)
+    zero_list_u8(digest)
     return ok
 
 
@@ -863,10 +824,10 @@ def _jacobian_add_affine_public(p: P256JacobianPoint, q: P256Point) -> P256Jacob
     return P256JacobianPoint(x3, y3, _mont_mul(p.z, h), False)
 
 
-def _naf_public[width: Int](k: U256) -> InlineArray[Int, 257]:
+def _naf_public[width: Int](k: U256) -> Array[Int, 257]:
     """Recode a public scalar as signed odd digits, allowing a carry into bit 256."""
-    var naf = InlineArray[Int, 257](fill=0)
-    var words = InlineArray[UInt64, 5](fill=0)
+    var naf = Array[Int, 257](fill=0)
+    var words = Array[UInt64, 5](fill=0)
     for i in range(4):
         words[i] = k.limbs[i]
     var pos = 0
@@ -902,18 +863,18 @@ def _double_scalar_mult_public(u1: U256, u2: U256, p: P256Point) -> P256Jacobian
     ref base_table = global_constant[P256_W7_TABLE]()
     var tptr = base_table.unsafe_ptr()
     var pm = P256Point(_to_mont(p.x), _to_mont(p.y), False)
-    var jac = InlineArray[P256JacobianPoint, 8](fill=_jacobian_infinity())
+    var jac = Array[P256JacobianPoint, 8](fill=_jacobian_infinity())
     jac[0] = P256JacobianPoint(pm.x, pm.y, _one_mont(), False)
     var twice = _jacobian_double_ct(jac[0])
     for i in range(1, 8):
         jac[i] = _jacobian_add_public(jac[i - 1], twice)
     # Batch-normalize P, 3P, ..., 15P with one inversion.
-    var prefix = InlineArray[U256, 8](fill=U256())
+    var prefix = Array[U256, 8](fill=U256())
     prefix[0] = jac[0].z
     for i in range(1, 8):
         prefix[i] = _mont_mul(prefix[i - 1], jac[i].z)
     var inv = _inv_p(prefix[7])
-    var table = InlineArray[P256Point, 8](fill=P256Point())
+    var table = Array[P256Point, 8](fill=P256Point())
     for i in range(7, -1, -1):
         var zi = inv
         if i > 0:
@@ -1039,4 +1000,4 @@ def p256_keygen() raises -> Tuple[List[UInt8], List[UInt8]]:
                 _wipe_u256(d)
                 return (private_key^, public_key^)
         _wipe_u256(d)
-        _wipe_list_u8(private_key)
+        zero_list_u8(private_key)

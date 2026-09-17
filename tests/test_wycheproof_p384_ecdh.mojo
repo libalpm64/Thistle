@@ -1,8 +1,7 @@
 """P-384 ECDH against Wycheproof vectors, with test-only ASN.1 point extraction."""
-from std.collections import List
+from std.collections import Array, List
 from std.python import Python
 from thistle.p384 import p384_ecdh
-from thistle.utils import StackInlineArray
 
 
 def hex_to_bytes(s: String) -> List[UInt8]:
@@ -93,7 +92,7 @@ def normalize_p384_private_key(var private_key: List[UInt8]) -> List[UInt8]:
 
 
 def matches48(
-    actual: StackInlineArray[UInt8, 48], expected: List[UInt8]
+    actual: Array[UInt8, 48], expected: List[UInt8]
 ) -> Bool:
     for i in range(48):
         if actual[i] != expected[i]:
@@ -118,7 +117,7 @@ def run_case(
         # trailing SEC 1 point.
         public_key = extract_trailing_sec1_p384_public_key(public_der)
     var expected = hex_to_bytes(shared_hex)
-    var actual = StackInlineArray[UInt8, 48](fill=0)
+    var actual = Array[UInt8, 48](fill=0)
     var got = p384_ecdh(
         Span[UInt8, ...](private_key),
         Span[UInt8, ...](public_key),

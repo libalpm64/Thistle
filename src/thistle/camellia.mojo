@@ -2,7 +2,7 @@
 
 from std.memory import bitcast, Pointer
 from std.bit import byte_swap, rotate_bits_left
-from std.collections import InlineArray
+from std.collections import Array
 from std.os import abort
 from std.sys import llvm_intrinsic
 from std.utils import StaticTuple
@@ -149,8 +149,8 @@ comptime _LANES_S4: UInt64 = (UInt64(0xFF) << 24) | (UInt64(0xFF) << 48)
 
 
 @always_inline
-def _slice_subkey(k: UInt64) -> InlineArray[UInt64, 8]:
-    var out = InlineArray[UInt64, 8](fill=0)
+def _slice_subkey(k: UInt64) -> Array[UInt64, 8]:
+    var out = Array[UInt64, 8](fill=0)
     var lanes = byte_swap(k) 
     for kk in range(8):
         var p: UInt64 = 0
@@ -162,20 +162,20 @@ def _slice_subkey(k: UInt64) -> InlineArray[UInt64, 8]:
 
 @always_inline
 def _f_planes[W: Int](
-    left: InlineArray[SIMD[DType.uint64, W], 8],
-    mut right: InlineArray[SIMD[DType.uint64, W], 8],
-    kp: InlineArray[UInt64, 192],
+    left: Array[SIMD[DType.uint64, W], 8],
+    mut right: Array[SIMD[DType.uint64, W], 8],
+    kp: Array[UInt64, 192],
     base: Int
 ):
-    var a = InlineArray[SIMD[DType.uint64, W], 8](fill=0)
+    var a = Array[SIMD[DType.uint64, W], 8](fill=0)
     comptime for k in range(8):
         a[k] = left[k] ^ kp[base + k]
 
-    var b = InlineArray[SIMD[DType.uint64, W], 8](fill=0)
+    var b = Array[SIMD[DType.uint64, W], 8](fill=0)
     comptime for k in range(8):
         b[k] = (a[k] & ~_LANES_S4) | (a[(k + 7) % 8] & _LANES_S4)
 
-    var c = InlineArray[SIMD[DType.uint64, W], 8](fill=0)
+    var c = Array[SIMD[DType.uint64, W], 8](fill=0)
     comptime for k in range(8):
         var acc = SIMD[DType.uint64, W](0)
         comptime for j in range(8):
@@ -186,7 +186,7 @@ def _f_planes[W: Int](
 
     _ct_sbox(c)
 
-    var d = InlineArray[SIMD[DType.uint64, W], 8](fill=0)
+    var d = Array[SIMD[DType.uint64, W], 8](fill=0)
     comptime for k in range(8):
         var acc = SIMD[DType.uint64, W](0)
         comptime for j in range(8):
@@ -197,7 +197,7 @@ def _f_planes[W: Int](
         d[k] = acc
 
     comptime m23: UInt64 = _LANES_S2 | _LANES_S3
-    var e = InlineArray[SIMD[DType.uint64, W], 8](fill=0)
+    var e = Array[SIMD[DType.uint64, W], 8](fill=0)
     comptime for k in range(8):
         e[k] = (d[k] & ~m23)
             | (d[(k + 7) % 8] & _LANES_S2)
@@ -218,14 +218,14 @@ def _f_planes[W: Int](
 
 @always_inline
 def _fl_planes[inv: Bool, W: Int](
-    mut x: InlineArray[SIMD[DType.uint64, W], 8],
-    kep: InlineArray[UInt64, 48],
+    mut x: Array[SIMD[DType.uint64, W], 8],
+    kep: Array[UInt64, 48],
     base: Int
 ):
     comptime if inv:
         comptime for k in range(8):
             x[k] ^= (x[k] | kep[base + k]) >> 32
-    var t = InlineArray[SIMD[DType.uint64, W], 8](fill=0)
+    var t = Array[SIMD[DType.uint64, W], 8](fill=0)
     comptime for k in range(8):
         t[k] = x[k] & kep[base + k] & _LANES_D
     x[0] ^= (((t[7] >> 8) | (t[7] << 24)) & _LANES_D) << 32
@@ -262,12 +262,6 @@ def rotl128[n: Int](high: UInt64, low: UInt64) -> SIMD[DType.uint64, 2]:
 
 comptime _BIT0_OF_EACH_BYTE: UInt64 = 0x0101010101010101
 comptime _ONE_VALUE_LANES: UInt64 = 0xFF
-
-
-@always_inline
-def _wipe_u64(ptr: Pointer[mut=True, UInt64, _, address_space=_], count: Int):
-    for i in range(count):
-        ptr.unsafe_store[volatile=True](i, UInt64(0))
 
 
 @always_inline
@@ -317,11 +311,11 @@ def _f_scalar(f_in: UInt64, ke: UInt64) -> UInt64:
     pin = (pin & ~_LANES_S4) | (rol1 & _LANES_S4)
 
     var xt = transpose8x8(pin)
-    var q = InlineArray[SIMD[DType.uint64, 1], 8](fill=0)
+    var q = Array[SIMD[DType.uint64, 1], 8](fill=0)
     comptime for k in range(8):
         q[k] = (xt >> UInt64(8 * k)) & 0xFF
 
-    var a = InlineArray[SIMD[DType.uint64, 1], 8](fill=0)
+    var a = Array[SIMD[DType.uint64, 1], 8](fill=0)
     comptime for k in range(8):
         var acc: UInt64 = 0
         comptime for j in range(8):
@@ -332,7 +326,7 @@ def _f_scalar(f_in: UInt64, ke: UInt64) -> UInt64:
 
     _ct_sbox[1](a)
 
-    var b = InlineArray[SIMD[DType.uint64, 1], 8](fill=0)
+    var b = Array[SIMD[DType.uint64, 1], 8](fill=0)
     comptime for k in range(8):
         var acc: UInt64 = 0
         comptime for j in range(8):
@@ -535,22 +529,22 @@ def _flinv_scalar(y: UInt64, ke: UInt64) -> UInt64:
 struct CamelliaCipher:
     """Camellia with 128-, 192-, or 256-bit keys and a 16-byte block size (RFC 3713, sec. 2)."""
     var kw: SIMD[DType.uint64, 4]
-    var k: InlineArray[UInt64, 24]
-    var ke: InlineArray[UInt64, 6]
-    var kp: InlineArray[UInt64, 192]
-    var kep: InlineArray[UInt64, 48]
-    var khw: InlineArray[UInt64, 24]
-    var kwhw: InlineArray[UInt64, 4]
+    var k: Array[UInt64, 24]
+    var ke: Array[UInt64, 6]
+    var kp: Array[UInt64, 192]
+    var kep: Array[UInt64, 48]
+    var khw: Array[UInt64, 24]
+    var kwhw: Array[UInt64, 4]
     var is_128: Bool
 
     def __init__(out self, key: Span[UInt8, ...]) raises:
         self.kw = SIMD[DType.uint64, 4](0)
-        self.k = InlineArray[UInt64, 24](fill=0)
-        self.ke = InlineArray[UInt64, 6](fill=0)
-        self.kp = InlineArray[UInt64, 192](fill=0)
-        self.kep = InlineArray[UInt64, 48](fill=0)
-        self.khw = InlineArray[UInt64, 24](fill=0)
-        self.kwhw = InlineArray[UInt64, 4](fill=0)
+        self.k = Array[UInt64, 24](fill=0)
+        self.ke = Array[UInt64, 6](fill=0)
+        self.kp = Array[UInt64, 192](fill=0)
+        self.kep = Array[UInt64, 48](fill=0)
+        self.khw = Array[UInt64, 24](fill=0)
+        self.kwhw = Array[UInt64, 4](fill=0)
         self.is_128 = len(key) == 16
 
         if self.is_128:
@@ -574,13 +568,13 @@ struct CamelliaCipher:
             self.kwhw[r] = byte_swap(self.kw[r])
 
     def wipe(mut self):
-        _wipe_u64(Pointer(to=self.kw).unsafe_bitcast[UInt64](), 4)
-        _wipe_u64(self.k.unsafe_ptr(), 24)
-        _wipe_u64(self.ke.unsafe_ptr(), 6)
-        _wipe_u64(self.kp.unsafe_ptr(), 192)
-        _wipe_u64(self.kep.unsafe_ptr(), 48)
-        _wipe_u64(self.khw.unsafe_ptr(), 24)
-        _wipe_u64(self.kwhw.unsafe_ptr(), 4)
+        volatile_wipe(Pointer(to=self.kw).unsafe_bitcast[UInt64](), 4)
+        volatile_wipe(self.k.unsafe_ptr(), 24)
+        volatile_wipe(self.ke.unsafe_ptr(), 6)
+        volatile_wipe(self.kp.unsafe_ptr(), 192)
+        volatile_wipe(self.kep.unsafe_ptr(), 48)
+        volatile_wipe(self.khw.unsafe_ptr(), 24)
+        volatile_wipe(self.kwhw.unsafe_ptr(), 4)
 
     def __deinit__(deinit self):
         self.wipe()
@@ -702,8 +696,8 @@ struct CamelliaCipher:
 @always_inline
 def _load_half[W: Int](
     buf: Pointer[mut=True, UInt8, _, address_space=_], off: Int, kw: UInt64
-) -> InlineArray[SIMD[DType.uint64, W], 8]:
-    var q = InlineArray[SIMD[DType.uint64, W], 8](fill=0)
+) -> Array[SIMD[DType.uint64, W], 8]:
+    var q = Array[SIMD[DType.uint64, W], 8](fill=0)
     var kwl = byte_swap(kw)
     comptime for e in range(W):
         comptime for j in range(8):
@@ -720,7 +714,7 @@ def _load_half[W: Int](
 def _store_half[W: Int](
     buf: Pointer[mut=True, UInt8, _, address_space=_],
     off: Int,
-    mut q: InlineArray[SIMD[DType.uint64, W], 8],
+    mut q: Array[SIMD[DType.uint64, W], 8],
     kw: UInt64
 ):
     _ct_ortho(q)
@@ -738,9 +732,9 @@ def _store_half[W: Int](
 
 @always_inline
 def _six_rounds[forward: Bool, W: Int](
-    mut a: InlineArray[SIMD[DType.uint64, W], 8],
-    mut b: InlineArray[SIMD[DType.uint64, W], 8],
-    kp: InlineArray[UInt64, 192],
+    mut a: Array[SIMD[DType.uint64, W], 8],
+    mut b: Array[SIMD[DType.uint64, W], 8],
+    kp: Array[UInt64, 192],
     kbase: Int
 ):
     comptime for r in range(6):
@@ -816,9 +810,9 @@ comptime _BITREV4 = StaticTuple[Int, 16](
 
 
 @always_inline
-def _transpose16(mut m: InlineArray[_U8x16, 16]):
+def _transpose16(mut m: Array[_U8x16, 16]):
     # Transpose the 16x16 byte matrix through 8-, 16-, 32-, and 64-bit interleaves.
-    var t = InlineArray[_U8x16, 16](fill=_U8x16(0))
+    var t = Array[_U8x16, 16](fill=_U8x16(0))
     comptime for i in range(8):
         var il = m[2 * i].interleave(m[2 * i + 1])
         t[i] = il.slice[16]()
@@ -850,14 +844,14 @@ def _splat_byte(k: UInt64, j: Int) -> _U8x16:
 
 @always_inline
 def _f_bs(
-    l: InlineArray[_U8x16, 8],
-    mut r: InlineArray[_U8x16, 8],
+    l: Array[_U8x16, 8],
+    mut r: Array[_U8x16, 8],
     k: UInt64
 ):
     # Apply F to 16 blocks; k uses the byte-swapped layout expected by _splat_byte
     # (RFC 3713, sec. 2.4.1).
     # Factor the P transform into shared XOR terms.
-    var y = InlineArray[_U8x16, 8](fill=_U8x16(0))
+    var y = Array[_U8x16, 8](fill=_U8x16(0))
     comptime for j in range(8):
         y[j] = _sbox_bs[j](l[j] ^ _splat_byte(k, j))
 
@@ -881,7 +875,7 @@ def _f_bs(
 
 
 @always_inline
-def _fl_rot_bs(mut h: InlineArray[_U8x16, 8], ke: UInt64):
+def _fl_rot_bs(mut h: Array[_U8x16, 8], ke: UInt64):
     # h holds x1 then x2 in big-endian byte order; ke holds k1 then k2.
     # Rotate x1 & k1 across its four byte positions, including the wraparound bit.
     var t0 = h[0] & _splat_byte(ke, 7)
@@ -895,7 +889,7 @@ def _fl_rot_bs(mut h: InlineArray[_U8x16, 8], ke: UInt64):
 
 
 @always_inline
-def _fl_bs[inv: Bool](mut h: InlineArray[_U8x16, 8], ke: UInt64):
+def _fl_bs[inv: Bool](mut h: Array[_U8x16, 8], ke: UInt64):
     # x2 ^= rotl1(x1 & k1), x1 ^= (x2 | k2) (RFC 3713, sec. 2.4.2).
     comptime if inv:
         comptime for j in range(4):
@@ -909,8 +903,8 @@ def _fl_bs[inv: Bool](mut h: InlineArray[_U8x16, 8], ke: UInt64):
 
 @always_inline
 def _six_rounds_bs[forward: Bool](
-    mut a: InlineArray[_U8x16, 8],
-    mut b: InlineArray[_U8x16, 8],
+    mut a: Array[_U8x16, 8],
+    mut b: Array[_U8x16, 8],
     cipher: CamelliaCipher,
     kbase: Int
 ):
@@ -926,13 +920,13 @@ def _six_rounds_bs[forward: Bool](
 def _batch16_hw[encrypt: Bool](
     cipher: CamelliaCipher, buf: Pointer[mut=True, UInt8, _, address_space=_]
 ):
-    var m = InlineArray[_U8x16, 16](fill=_U8x16(0))
+    var m = Array[_U8x16, 16](fill=_U8x16(0))
     comptime for i in range(16):
         m[i] = buf.unsafe_load[width=16, alignment=1](i * 16)
     _transpose16(m)
 
-    var a = InlineArray[_U8x16, 8](fill=_U8x16(0))
-    var b = InlineArray[_U8x16, 8](fill=_U8x16(0))
+    var a = Array[_U8x16, 8](fill=_U8x16(0))
+    var b = Array[_U8x16, 8](fill=_U8x16(0))
 
     comptime if encrypt:
         comptime for j in range(8):
@@ -1096,7 +1090,7 @@ def _camellia_blocks[encrypt: Bool](
             _batch16_hw[encrypt](cipher, data.unsafe_offset(i * 16))
             i += 16
         if i < num_blocks:
-            var scratch = InlineArray[UInt8, 256](fill=0)
+            var scratch = Array[UInt8, 256](fill=0)
             var sp = scratch.unsafe_ptr()
             for j in range((num_blocks - i) * 16):
                 sp[unsafe_offset=j] = data[unsafe_offset=i * 16 + j]
@@ -1112,7 +1106,7 @@ def _camellia_blocks[encrypt: Bool](
             _batch[encrypt, 1](cipher, data.unsafe_offset(i * 16))
             i += 8
         if i < num_blocks:
-            var scratch = InlineArray[UInt8, 128](fill=0)
+            var scratch = Array[UInt8, 128](fill=0)
             var sp = scratch.unsafe_ptr()
             for j in range((num_blocks - i) * 16):
                 sp[unsafe_offset=j] = data[unsafe_offset=i * 16 + j]
@@ -1174,8 +1168,8 @@ def camellia_cbc_decrypt_kernel(
     iv_ptr: Pointer[mut=True, UInt8, _, address_space=_]
 ):
     _validate_camellia_block_count(num_blocks)
-    var ct = InlineArray[UInt8, 1024](fill=0)
-    var pt = InlineArray[UInt8, 1024](fill=0)
+    var ct = Array[UInt8, 1024](fill=0)
+    var pt = Array[UInt8, 1024](fill=0)
     var ctp = ct.unsafe_ptr()
     var ptp = pt.unsafe_ptr()
     var prev = iv_ptr.unsafe_load[width=16, alignment=1](0)
@@ -1205,7 +1199,7 @@ def camellia_ctr_kernel(
     nonce_ptr: Pointer[mut=True, UInt8, _, address_space=_]
 ):
     _validate_camellia_block_count(num_blocks)
-    var ks = InlineArray[UInt8, 512](fill=0)
+    var ks = Array[UInt8, 512](fill=0)
     var kp = ks.unsafe_ptr()
     var i = 0
     comptime if _has_hw_sbox():

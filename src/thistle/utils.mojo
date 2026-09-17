@@ -6,100 +6,9 @@ from std.sys import simd_width_of
 from std.memory import Pointer
 
 
-struct StackInlineArray[ElementType: Copyable & Deinitable, size: Int](Copyable):
-    """Fixed-capacity stack array with checked indexing; out-of-bounds access aborts."""
-    var _data: InlineArray[Self.ElementType, Self.size]
-
-    @always_inline
-    def __init__(out self, *, var fill: Self.ElementType):
-        self._data = InlineArray[Self.ElementType, Self.size](fill=fill^)
-
-    @always_inline
-    def __init__(out self, var *elems: Self.ElementType, __list_literal__: NoneType):
-        if len(elems) != Self.size:
-            abort("StackInlineArray literal length must match its size")
-        self = Self(storage=elems^)
-
-    @always_inline
-    def __init__[
-        origin: MutOrigin
-    ](
-        out self,
-        *,
-        var storage: VariadicList[
-            elt_is_mutable=True, origin=origin, Self.ElementType, is_owned=True
-        ]
-    ):
-        if len(storage) != Self.size:
-            abort("StackInlineArray storage length must match its size")
-        # Each owned variadic element below move-initializes exactly one slot.
-        # No slot is read, assigned, or deinitialized before that initialization.
-        self._data = InlineArray[Self.ElementType, Self.size](
-            uninitialized=True
-        )
-
-        var ptr = self.unsafe_ptr()
-
-        comptime for i in range(Self.size):
-            ptr.unsafe_write_move_from(
-                Pointer(to=storage[i]).unsafe_mut_cast[True]()
-            )
-            ptr = ptr.unsafe_offset(1)
-
-        storage^._annihilate()
-
-    @always_inline
-    def unsafe_ptr[
-        origin: Origin, address_space: AddressSpace, //
-    ](ref[origin, address_space] self) -> Pointer[
-        Self.ElementType,
-        origin,
-        address_space=address_space
-    ]:
-        return (
-            self._data.unsafe_ptr()
-            .unsafe_mut_cast[origin.mut]()
-            .unsafe_origin_cast[origin]()
-            .unsafe_address_space_cast[address_space]()
-        )
-
-    @always_inline
-    def unsafe_get[I: Indexer](ref self, idx: I) -> ref[self._data] Self.ElementType:
-        var i = index(idx)
-        if i < 0 or i >= Self.size:
-            abort("StackInlineArray index out of bounds")
-        return self._data.unsafe_get(i)
-
-    @always_inline
-    def __getitem_param__[
-        idx: Some[Indexer]
-    ](ref self) -> ref[self._data] Self.ElementType:
-        comptime i = index(idx)
-        comptime assert 0 <= i < Self.size, "Index must be within bounds."
-        return self.unsafe_get(i)
-
-    @always_inline
-    def __getitem_param__[
-        idx: Int
-    ](ref self) -> ref[self._data] Self.ElementType:
-        comptime i = index(idx)
-        comptime assert 0 <= i < Self.size, "Index must be within bounds."
-        return self.unsafe_get(i)
-
-    @always_inline
-    def __getitem__(ref self, idx: Int) -> ref[self._data] Self.ElementType:
-        return self.unsafe_get(idx)
-
-    @always_inline
-    def unsafe_set(mut self, idx: Int, var value: Self.ElementType):
-        if idx < 0 or idx >= Self.size:
-            abort("StackInlineArray index out of bounds")
-        self._data[idx] = value^
-
-
-struct StackBuffer[T: Copyable & Deinitable & Defaultable, N: Int](Movable):
+struct StackBuffer[T: Copyable & Deinitable & Defaultable, N: Int]:
     """Stack buffer with a runtime length and fixed capacity; overflow aborts."""
-    var _data: InlineArray[Self.T, Self.N]
+    var _data: Array[Self.T, Self.N]
     var _len: Int
 
     @always_inline
@@ -107,12 +16,12 @@ struct StackBuffer[T: Copyable & Deinitable & Defaultable, N: Int](Movable):
         comptime assert (
             Self.T.__del__is_trivial
         ), "StackBuffer requires trivially destructible types (UInt8, UInt32, UInt64, etc)"
-        self._data = InlineArray[Self.T, Self.N](fill=Self.T())
+        self._data = Array[Self.T, Self.N](fill=Self.T())
         self._len = 0
 
     @always_inline
     def __init__(out self, *, var fill: Self.T):
-        self._data = InlineArray[Self.T, Self.N](fill=fill^)
+        self._data = Array[Self.T, Self.N](fill=fill^)
         self._len = Self.N
 
     @always_inline
@@ -266,6 +175,12 @@ def volatile_wipe(ptr: Pointer[mut=True, UInt32, _, address_space=_], n: Int):
 def volatile_wipe(ptr: Pointer[mut=True, UInt64, _, address_space=_], n: Int):
     for i in range(n):
         ptr.unsafe_store[volatile=True](i, UInt64(0))
+
+
+@always_inline
+def zero_list_u8(mut data: List[UInt8]):
+    """Volatile-wipe a byte list without changing its length."""
+    volatile_wipe(data.unsafe_ptr(), len(data))
 
 
 @always_inline

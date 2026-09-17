@@ -1,6 +1,6 @@
 """RSA-PSS and PKCS #1 v1.5 signing and verification (RFC 8017, sec. 8)."""
 
-from std.collections import List, InlineArray
+from std.collections import List, Array
 from std.memory import Pointer
 from std.bit import rotate_bits_left, count_leading_zeros
 from std.utils import StaticTuple
@@ -34,7 +34,7 @@ def _bn_zero() -> StaticTuple[UInt64, _NL]:
     return out
 
 
-def _sha1(data: Span[UInt8, ...]) -> InlineArray[UInt8, 20]:
+def _sha1(data: Span[UInt8, ...]) -> Array[UInt8, 20]:
     var h0: UInt32 = 0x67452301
     var h1: UInt32 = 0xEFCDAB89
     var h2: UInt32 = 0x98BADCFE
@@ -53,7 +53,7 @@ def _sha1(data: Span[UInt8, ...]) -> InlineArray[UInt8, 20]:
     for i in range(7, -1, -1):
         padded.append(UInt8((bits >> UInt64(8 * i)) & 0xFF))
 
-    var w = InlineArray[UInt32, 80](fill=0)
+    var w = Array[UInt32, 80](fill=0)
     var off = 0
     while off < len(padded):
         for t in range(16):
@@ -97,8 +97,8 @@ def _sha1(data: Span[UInt8, ...]) -> InlineArray[UInt8, 20]:
         h4 += e
         off += 64
 
-    var out = InlineArray[UInt8, 20](fill=0)
-    var hs = InlineArray[UInt32, 5](fill=0)
+    var out = Array[UInt8, 20](fill=0)
+    var hs = Array[UInt32, 5](fill=0)
     hs[0] = h0
     hs[1] = h1
     hs[2] = h2
@@ -165,8 +165,8 @@ def _mgf1(
     output: Pointer[mut=True, UInt8, _, address_space=_]
 ) raises:
     var h_len = _hash_len(alg)
-    var block = InlineArray[UInt8, 128](fill=0)
-    var digest = InlineArray[UInt8, 64](fill=0)
+    var block = Array[UInt8, 128](fill=0)
+    var digest = Array[UInt8, 64](fill=0)
     for i in range(seed_len):
         block[i] = seed[unsafe_offset=i]
     var done = 0
@@ -206,14 +206,14 @@ def _emsa_pss_encode(
     if em_len < h_len + 2 or len(salt) > em_len - h_len - 2:
         return False
 
-    var m_hash = InlineArray[UInt8, 64](fill=0)
+    var m_hash = Array[UInt8, 64](fill=0)
     _ = _hash_into(sha, message, m_hash.unsafe_ptr())
-    var mprime = InlineArray[UInt8, 534](fill=0)
+    var mprime = Array[UInt8, 534](fill=0)
     for i in range(h_len):
         mprime[8 + i] = m_hash[i]
     for i in range(len(salt)):
         mprime[8 + h_len + i] = salt[i]
-    var h = InlineArray[UInt8, 64](fill=0)
+    var h = Array[UInt8, 64](fill=0)
     _ = _hash_into(
         sha,
         Span[UInt8, ...](unsafe_ptr=mprime.unsafe_ptr(), length=8 + h_len + len(salt)),
@@ -221,12 +221,12 @@ def _emsa_pss_encode(
     )
 
     var db_len = em_len - h_len - 1
-    var db = InlineArray[UInt8, 528](fill=0)
+    var db = Array[UInt8, 528](fill=0)
     var ps_len = db_len - len(salt) - 1
     db[ps_len] = 1
     for i in range(len(salt)):
         db[ps_len + 1 + i] = salt[i]
-    var mask = InlineArray[UInt8, 528](fill=0)
+    var mask = Array[UInt8, 528](fill=0)
     _mgf1(mgf_sha, h.unsafe_ptr(), h_len, db_len, mask.unsafe_ptr())
     for i in range(db_len):
         output[unsafe_offset=i] = db[i] ^ mask[i]
@@ -293,12 +293,12 @@ def _emsa_pkcs1_v15_sha256_encode(
         output[unsafe_offset=2 + i] = 0xFF
     output[unsafe_offset=2 + ps_len] = 0
 
-    var prefix = InlineArray[UInt8, prefix_len](fill=0)
+    var prefix = Array[UInt8, prefix_len](fill=0)
     _digest_info_prefix(SHA256, prefix.unsafe_ptr())
     for i in range(prefix_len):
         output[unsafe_offset=3 + ps_len + i] = prefix[i]
 
-    var digest = InlineArray[UInt8, h_len](fill=0)
+    var digest = Array[UInt8, h_len](fill=0)
     _ = _hash_into(SHA256, message, digest.unsafe_ptr())
     for i in range(h_len):
         output[unsafe_offset=3 + ps_len + prefix_len + i] = digest[i]
@@ -490,7 +490,7 @@ def _mont_sqr_k[K: Int](
     n: StaticTuple[UInt64, _NL],
     n0: UInt64
 ) -> StaticTuple[UInt64, _NL]:
-    var t = InlineArray[UInt64, 2 * _NL + 2](fill=0)
+    var t = Array[UInt64, 2 * _NL + 2](fill=0)
     comptime for z in range(2 * K + 1):
         t[z] = 0
 
@@ -745,7 +745,7 @@ struct RsaPublicKey:
         if em_len < h_len + 2 or salt_len > em_len - h_len - 2:
             return False
 
-        var em = InlineArray[UInt8, 528](fill=0)
+        var em = Array[UInt8, 528](fill=0)
         if not self._public_op(signature, em.unsafe_ptr()):
             return False
         var pad_diff: UInt8 = 0
@@ -761,9 +761,9 @@ struct RsaPublicKey:
         var top_mask = UInt8(0xFF) >> UInt8(8 * em_len - em_bits)
         pad_diff |= ep[unsafe_offset=0] & ~top_mask
 
-        var db_mask = InlineArray[UInt8, 528](fill=0)
+        var db_mask = Array[UInt8, 528](fill=0)
         _mgf1(mgf_sha, h_ptr, h_len, db_len, db_mask.unsafe_ptr())
-        var db = InlineArray[UInt8, 528](fill=0)
+        var db = Array[UInt8, 528](fill=0)
         for i in range(db_len):
             db[i] = ep[unsafe_offset=i] ^ db_mask[i]
         db[0] &= top_mask
@@ -775,17 +775,17 @@ struct RsaPublicKey:
         if pad_diff != 0:
             return False
 
-        var m_hash = InlineArray[UInt8, 64](fill=0)
+        var m_hash = Array[UInt8, 64](fill=0)
         _ = _hash_into(sha, message, m_hash.unsafe_ptr())
 
-        var mprime = InlineArray[UInt8, 534](fill=0)
+        var mprime = Array[UInt8, 534](fill=0)
         for i in range(8):
             mprime[i] = 0
         for i in range(h_len):
             mprime[8 + i] = m_hash[i]
         for i in range(salt_len):
             mprime[8 + h_len + i] = db[ps_len + 1 + i]
-        var h2 = InlineArray[UInt8, 64](fill=0)
+        var h2 = Array[UInt8, 64](fill=0)
         _ = _hash_into(
             sha,
             Span[UInt8, ...](unsafe_ptr=mprime.unsafe_ptr(), length=8 + h_len + salt_len),
@@ -889,8 +889,8 @@ def _bn_inverse_odd(a: StaticTuple[UInt64, _NL], key: RsaPublicKey) -> Tuple[Sta
     # Twice the modulus bit width bounds the steps; completed states remain unchanged.
     # Store GCD state and scratch values in contiguous limb rows so each iteration
     # updates them in place; retain all rows through the final wipe.
-    var state = InlineArray[UInt64, 4 * _NL](fill=0)
-    var scratch = InlineArray[UInt64, 4 * _NL](fill=0)
+    var state = Array[UInt64, 4 * _NL](fill=0)
+    var scratch = Array[UInt64, 4 * _NL](fill=0)
     var u = state.unsafe_ptr()
     var v = u.unsafe_offset(_NL)
     var x = v.unsafe_offset(_NL)
@@ -1000,7 +1000,7 @@ struct _RsaBlinding:
 struct RsaPrivateKey:
     """RSA private key using message blinding and fixed-window private exponentiation."""
     var public: RsaPublicKey
-    var d: InlineArray[UInt8, 528]
+    var d: Array[UInt8, 528]
 
     def __init__(
         out self,
@@ -1011,7 +1011,7 @@ struct RsaPrivateKey:
         self.public = RsaPublicKey(modulus, exponent)
         if self.public.mod_bits < 2048:
             raise Error("RSA signing requires a modulus of at least 2048 bits")
-        self.d = InlineArray[UInt8, 528](fill=0)
+        self.d = Array[UInt8, 528](fill=0)
         var lead = 0
         while lead < len(private_exponent) and private_exponent[lead] == 0:
             lead += 1
@@ -1059,7 +1059,7 @@ struct RsaPrivateKey:
             var limb = result[(nb - 1 - i) >> 3]
             signature[unsafe_offset=i] = UInt8((limb >> UInt64(8 * ((nb - 1 - i) & 7))) & 0xFF)
 
-        var recovered = InlineArray[UInt8, 528](fill=0)
+        var recovered = Array[UInt8, 528](fill=0)
         var sig_span = Span[UInt8, ...](unsafe_ptr=signature, length=nb)
         var valid = self.public._public_op(sig_span, recovered.unsafe_ptr())
         var diff = UInt8(0)
@@ -1087,7 +1087,7 @@ struct RsaPrivateKey:
             return False
         var em_bits = self.public.mod_bits - 1
         var em_len = (em_bits + 7) // 8
-        var encoded = InlineArray[UInt8, 528](fill=0)
+        var encoded = Array[UInt8, 528](fill=0)
         try:
             if not _emsa_pss_encode(
                 message,
@@ -1146,7 +1146,7 @@ struct RsaPrivateKey:
         """Sign with RSASSA-PKCS1-v1_5/SHA-256 (RFC 8017, secs. 8.2.1 and 9.2)."""
         if len(signature) < self.public.nb:
             return False
-        var encoded = InlineArray[UInt8, 528](fill=0)
+        var encoded = Array[UInt8, 528](fill=0)
         try:
             if not _emsa_pkcs1_v15_sha256_encode(
                 message, self.public.nb, encoded.unsafe_ptr()
@@ -1184,7 +1184,7 @@ def _bn_reduce_bytes(
 
 def _private_pow(
     key: RsaPublicKey,
-    exponent: InlineArray[UInt8, 528],
+    exponent: Array[UInt8, 528],
     input: StaticTuple[UInt64, _NL],
     exponent_bytes: Int = 0
 ) -> StaticTuple[UInt64, _NL]:
@@ -1242,11 +1242,11 @@ def _bn_equal(
 
 
 struct _RsaExponentBlinding:
-    var bytes: InlineArray[UInt8, 528]
+    var bytes: Array[UInt8, 528]
     var length: Int
 
-    def __init__(out self, key: RsaPublicKey, exponent: InlineArray[UInt8, 528]) raises:
-        self.bytes = InlineArray[UInt8, 528](fill=0)
+    def __init__(out self, key: RsaPublicKey, exponent: Array[UInt8, 528]) raises:
+        self.bytes = Array[UInt8, 528](fill=0)
         self.length = key.nb + 16
         if self.length > 528 or key.k + 2 > _NL:
             raise Error("RSA CRT exponent blinding size unsupported")
@@ -1286,8 +1286,8 @@ struct RsaCrtPrivateKey:
     var public: RsaPublicKey
     var p: RsaPublicKey
     var q: RsaPublicKey
-    var dp: InlineArray[UInt8, 528]
-    var dq: InlineArray[UInt8, 528]
+    var dp: Array[UInt8, 528]
+    var dq: Array[UInt8, 528]
     var qinv: StaticTuple[UInt64, _NL]
 
     def __init__(
@@ -1300,11 +1300,11 @@ struct RsaCrtPrivateKey:
         self.public = RsaPublicKey(modulus, exponent)
         if self.public.mod_bits < 2048:
             raise Error("RSA signing requires a modulus of at least 2048 bits")
-        var three = InlineArray[UInt8, 1](fill=3)
+        var three = Array[UInt8, 1](fill=3)
         self.p = RsaPublicKey(prime1, Span[UInt8, ...](unsafe_ptr=three.unsafe_ptr(), length=1))
         self.q = RsaPublicKey(prime2, Span[UInt8, ...](unsafe_ptr=three.unsafe_ptr(), length=1))
-        self.dp = InlineArray[UInt8, 528](fill=0)
-        self.dq = InlineArray[UInt8, 528](fill=0)
+        self.dp = Array[UInt8, 528](fill=0)
+        self.dq = Array[UInt8, 528](fill=0)
         self.qinv = _bn_zero()
         if self.p.k + self.q.k > _NL:
             raise Error("RSA CRT factors are too large")
@@ -1355,7 +1355,7 @@ struct RsaCrtPrivateKey:
         if _bn_ge_ct(self.qinv, self.p.n, self.p.k):
             raise Error("RSA CRT coefficient must be smaller than prime1")
 
-        var q_bytes = InlineArray[UInt8, 528](fill=0)
+        var q_bytes = Array[UInt8, 528](fill=0)
         for i in range(self.q.nb):
             var limb = self.q.n[(self.q.nb - 1 - i) >> 3]
             q_bytes[i] = UInt8((limb >> UInt64(8 * ((self.q.nb - 1 - i) & 7))) & 0xFF)
@@ -1412,7 +1412,7 @@ struct RsaCrtPrivateKey:
             return False
         var blinding = _RsaBlinding(self.public)
         var blinded = blinding.blind(input, self.public)
-        var blinded_bytes = InlineArray[UInt8, 528](fill=0)
+        var blinded_bytes = Array[UInt8, 528](fill=0)
         for i in range(self.public.nb):
             blinded_bytes[i] = UInt8(blinded[(self.public.nb - 1 - i) >> 3] >> UInt64(8 * ((self.public.nb - 1 - i) & 7)))
         var blinded_span = Span[UInt8, ...](unsafe_ptr=blinded_bytes.unsafe_ptr(), length=self.public.nb)
@@ -1423,7 +1423,7 @@ struct RsaCrtPrivateKey:
         var m1 = _private_pow(self.p, dp.bytes, mp, dp.length)
         var m2 = _private_pow(self.q, dq.bytes, mq, dq.length)
 
-        var m2_bytes = InlineArray[UInt8, 528](fill=0)
+        var m2_bytes = Array[UInt8, 528](fill=0)
         for i in range(self.q.nb):
             var limb = m2[(self.q.nb - 1 - i) >> 3]
             m2_bytes[i] = UInt8((limb >> UInt64(8 * ((self.q.nb - 1 - i) & 7))) & 0xFF)
@@ -1457,7 +1457,7 @@ struct RsaCrtPrivateKey:
             var limb = result[(self.public.nb - 1 - i) >> 3]
             signature[unsafe_offset=i] = UInt8((limb >> UInt64(8 * ((self.public.nb - 1 - i) & 7))) & 0xFF)
 
-        var recovered = InlineArray[UInt8, 528](fill=0)
+        var recovered = Array[UInt8, 528](fill=0)
         var valid = self.public._public_op(
             Span[UInt8, ...](unsafe_ptr=signature, length=self.public.nb), recovered.unsafe_ptr()
         )
@@ -1495,7 +1495,7 @@ struct RsaCrtPrivateKey:
             return False
         var em_bits = self.public.mod_bits - 1
         var em_len = (em_bits + 7) // 8
-        var encoded = InlineArray[UInt8, 528](fill=0)
+        var encoded = Array[UInt8, 528](fill=0)
         try:
             if not _emsa_pss_encode(
                 message,
@@ -1554,7 +1554,7 @@ struct RsaCrtPrivateKey:
         """CRT sign with RSASSA-PKCS1-v1_5/SHA-256 (RFC 8017, secs. 8.2.1 and 9.2)."""
         if len(signature) < self.public.nb:
             return False
-        var encoded = InlineArray[UInt8, 528](fill=0)
+        var encoded = Array[UInt8, 528](fill=0)
         try:
             if not _emsa_pkcs1_v15_sha256_encode(
                 message, self.public.nb, encoded.unsafe_ptr()
@@ -1585,7 +1585,7 @@ def _pkcs1_v15_verify(
     if key.nb < t_len + 11:
         return False
 
-    var em = InlineArray[UInt8, 528](fill=0)
+    var em = Array[UInt8, 528](fill=0)
     if not key._public_op(signature, em.unsafe_ptr()):
         return False
 
@@ -1595,12 +1595,12 @@ def _pkcs1_v15_verify(
         diff |= em[2 + i] ^ UInt8(0xFF)
     diff |= em[2 + ps_len]
 
-    var prefix = InlineArray[UInt8, 19](fill=0)
+    var prefix = Array[UInt8, 19](fill=0)
     _digest_info_prefix(sha, prefix.unsafe_ptr())
     for i in range(prefix_len):
         diff |= em[3 + ps_len + i] ^ prefix[i]
 
-    var digest = InlineArray[UInt8, 64](fill=0)
+    var digest = Array[UInt8, 64](fill=0)
     _ = _hash_into(sha, message, digest.unsafe_ptr())
     for i in range(h_len):
         diff |= em[3 + ps_len + prefix_len + i] ^ digest[i]

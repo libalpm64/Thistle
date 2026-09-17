@@ -3,9 +3,9 @@
 """
 
 from std.bit import byte_swap
-from std.collections import InlineArray
+from std.collections import Array
 from std.gpu import global_idx
-from std.memory.unsafe_pointer import Pointer
+from std.memory import Pointer
 from .aes import (
     _ct_encrypt_state,
     _ct_interleave_in,
@@ -15,7 +15,7 @@ from .aes import (
 )
 
 comptime _GPUWord = SIMD[DType.uint64, 1]
-comptime _GPUState = InlineArray[_GPUWord, 8]
+comptime _GPUState = Array[_GPUWord, 8]
 
 
 @always_inline

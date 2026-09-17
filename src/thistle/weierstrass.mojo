@@ -2,7 +2,7 @@
 (RFC 6979, sec. 3.2).
 """
 
-from std.collections import InlineArray
+from std.collections import Array
 from std.utils import StaticTuple
 from std.memory import Pointer
 from std.os import abort
@@ -13,7 +13,7 @@ from .pbkdf2 import RFC6979HMAC, HMACSHA256State, HMACSHA384State
 comptime _MASK64 = UInt128(0xFFFFFFFFFFFFFFFF)
 
 
-struct Limbs[N: Int](Copyable, ImplicitlyCopyable, Movable):
+struct Limbs[N: Int](ImplicitlyCopyable):
     """Unsigned integer stored as N little-endian 64-bit limbs."""
     var limbs: StaticTuple[UInt64, Self.N]
 
@@ -160,7 +160,7 @@ def to_be[N: Int](x: Limbs[N], output: Pointer[mut=True, UInt8, _, address_space
             output[unsafe_offset=i * 8 + k] = UInt8((limb >> UInt64(56 - 8 * k)) & 0xFF)
 
 
-struct Point[N: Int](Copyable, ImplicitlyCopyable, Movable):
+struct Point[N: Int](ImplicitlyCopyable):
     """Affine short-Weierstrass coordinates; callers choose ordinary or Montgomery field form.
     """
     var x: Limbs[Self.N]
@@ -178,7 +178,7 @@ struct Point[N: Int](Copyable, ImplicitlyCopyable, Movable):
         self.infinity = infinity
 
 
-struct JacobianPoint[N: Int](Copyable, ImplicitlyCopyable, Movable):
+struct JacobianPoint[N: Int](ImplicitlyCopyable):
     """Jacobian coordinates: x = X/Z^2 and y = Y/Z^3, with an explicit infinity flag."""
     var x: Limbs[Self.N]
     var y: Limbs[Self.N]
@@ -404,7 +404,7 @@ def mont_mul[N: Int, N0: UInt64](a: Limbs[N], b: Limbs[N], p: Limbs[N]) -> Limbs
         comptime for i in range(4):
             out.limbs[i] = fast.limbs[i]
         return out
-    var acc = InlineArray[UInt64, 16](fill=0)
+    var acc = Array[UInt64, 16](fill=0)
     comptime for i in range(N):
         var bi = b.limbs[i]
         var carry: UInt64 = 0
@@ -775,18 +775,18 @@ def scalar_mult_jacobian[N: Int, N0: UInt64](
     k: Limbs[N], p: Point[N], mod: Limbs[N], rr: Limbs[N], one_mont: Limbs[N]
 ) -> JacobianPoint[N]:
     var pm = Point[N](to_mont[N, N0](p.x, rr, mod), to_mont[N, N0](p.y, rr, mod), False)
-    var jac = InlineArray[JacobianPoint[N], 15](fill=JacobianPoint[N]())
+    var jac = Array[JacobianPoint[N], 15](fill=JacobianPoint[N]())
     jac[0] = JacobianPoint[N](pm.x, pm.y, one_mont, False)
     jac[1] = jacobian_double_ct[N, N0](jac[0], mod, rr)
     for i in range(2, 15):
         jac[i] = jacobian_add_affine_non_equal_ct[N, N0](jac[i - 1], pm, mod, rr, one_mont)
-    var prefix = InlineArray[Limbs[N], 15](fill=Limbs[N].zero())
+    var prefix = Array[Limbs[N], 15](fill=Limbs[N].zero())
     prefix[0] = jac[0].z
     for i in range(1, 15):
         prefix[i] = mont_mul[N, N0](prefix[i - 1], jac[i].z, mod)
     var inv_acc = inv_p[N, N0](prefix[14], mod, rr)
-    var tx = InlineArray[Limbs[N], 15](fill=Limbs[N].zero())
-    var ty = InlineArray[Limbs[N], 15](fill=Limbs[N].zero())
+    var tx = Array[Limbs[N], 15](fill=Limbs[N].zero())
+    var ty = Array[Limbs[N], 15](fill=Limbs[N].zero())
     for jj in range(15):
         var j = 14 - jj
         var zinv = inv_acc
@@ -861,19 +861,19 @@ def scalar_mult_jacobian_w5[N: Int, N0: UInt64](
     Batch-normalize the table with one inversion.
     """
     var pm = Point[N](to_mont[N, N0](p.x, rr, mod), to_mont[N, N0](p.y, rr, mod), False)
-    var jac = InlineArray[JacobianPoint[N], 16](fill=JacobianPoint[N]())
+    var jac = Array[JacobianPoint[N], 16](fill=JacobianPoint[N]())
     jac[0] = JacobianPoint[N](pm.x, pm.y, one_mont, False)
     jac[1] = jacobian_double_ct[N, N0](jac[0], mod, rr)
     for i in range(2, 16):
         jac[i] = jacobian_add_affine_non_equal_ct[N, N0](jac[i - 1], pm, mod, rr, one_mont)
 
-    var prefix = InlineArray[Limbs[N], 16](fill=Limbs[N].zero())
+    var prefix = Array[Limbs[N], 16](fill=Limbs[N].zero())
     prefix[0] = jac[0].z
     for i in range(1, 16):
         prefix[i] = mont_mul[N, N0](prefix[i - 1], jac[i].z, mod)
     var inv_acc = inv_p[N, N0](prefix[15], mod, rr)
-    var tx = InlineArray[Limbs[N], 16](fill=Limbs[N].zero())
-    var ty = InlineArray[Limbs[N], 16](fill=Limbs[N].zero())
+    var tx = Array[Limbs[N], 16](fill=Limbs[N].zero())
+    var ty = Array[Limbs[N], 16](fill=Limbs[N].zero())
     for jj in range(16):
         var j = 15 - jj
         var zinv = inv_acc
@@ -915,7 +915,7 @@ def scalar_mult_jacobian_w5[N: Int, N0: UInt64](
 def mod_inv_ct[N: Int, N0: UInt64](x: Limbs[N], m: Limbs[N], rr: Limbs[N], m_minus2: Limbs[N], one_mont: Limbs[N]) -> Limbs[N]:
     # Fixed-window exponentiation by m - 2; the exponent and table indices are public.
     var base = to_mont[N, N0](x, rr, m)
-    var powers = InlineArray[Limbs[N], 16](fill=Limbs[N].zero())
+    var powers = Array[Limbs[N], 16](fill=Limbs[N].zero())
     powers[0] = one_mont
     powers[1] = base
     for i in range(2, 16):
@@ -1014,13 +1014,13 @@ def _rfc6979_impl[N: Int, H: RFC6979HMAC & Deinitable](
     if skip < 0:
         abort("RFC 6979 skip count cannot be negative")
     var h1 = reduce_mod(from_be[N](digest), n)
-    var h1_bytes = InlineArray[UInt8, N * 8](fill=0)
+    var h1_bytes = Array[UInt8, N * 8](fill=0)
     to_be(h1, h1_bytes.unsafe_ptr())
-    var k = InlineArray[UInt8, N * 8](fill=0)
-    var v = InlineArray[UInt8, N * 8](fill=1)
-    var next_k = InlineArray[UInt8, N * 8](fill=0)
-    var next_v = InlineArray[UInt8, N * 8](fill=0)
-    var seed = InlineArray[UInt8, N * 8 * 3 + 1](fill=0)
+    var k = Array[UInt8, N * 8](fill=0)
+    var v = Array[UInt8, N * 8](fill=1)
+    var next_k = Array[UInt8, N * 8](fill=0)
+    var next_v = Array[UInt8, N * 8](fill=0)
+    var seed = Array[UInt8, N * 8 * 3 + 1](fill=0)
     var seed_len = N * 8 * 3 + 1
 
     for i in range(N * 8):
@@ -1075,14 +1075,10 @@ def _rfc6979_impl[N: Int, H: RFC6979HMAC & Deinitable](
                 volatile_wipe(next_k.unsafe_ptr(), N * 8)
                 volatile_wipe(next_v.unsafe_ptr(), N * 8)
                 volatile_wipe(h1_bytes.unsafe_ptr(), N * 8)
-                var h_ptr = Pointer(to=h1).unsafe_bitcast[UInt64]()
-                for i in range(N):
-                    h_ptr.unsafe_store[volatile=True](i, UInt64(0))
+                volatile_wipe(Pointer(to=h1).unsafe_bitcast[UInt64](), N)
                 return candidate^
             accepted += 1
-        var c_ptr = Pointer(to=candidate).unsafe_bitcast[UInt64]()
-        for i in range(N):
-            c_ptr.unsafe_store[volatile=True](i, UInt64(0))
+        volatile_wipe(Pointer(to=candidate).unsafe_bitcast[UInt64](), N)
         # Rekey with V || 0x00, then update V (RFC 6979, sec. 3.2.h.3).
         for i in range(N * 8):
             seed[i] = v[i]

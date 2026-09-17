@@ -62,8 +62,8 @@ def _pbkdf2_derive[H: HMACer](
     if dklen % hash_len != 0:
         num_blocks += 1
     var derived_key = List[UInt8](capacity=dklen)
-    var t_block = InlineArray[UInt8, 64](fill=0)
-    var input_block = InlineArray[UInt8, 64](fill=0)
+    var t_block = Array[UInt8, 64](fill=0)
+    var input_block = Array[UInt8, 64](fill=0)
     for block_idx in range(1, num_blocks + 1):
         hmac.hmac_with_counter(salt, UInt32(block_idx))
         unsafe_memcpy(dest=t_block.unsafe_ptr(), src=hmac.u_block_ptr(), count=hash_len)
@@ -399,9 +399,7 @@ struct HMACSHA256State(RFC6979HMAC):
         if len(key) > 64:
             var key_hash = sha256_hash(key)
             unsafe_memcpy(dest=key_block.ptr(), src=key_hash.unsafe_ptr(), count=32)
-            var key_hash_ptr = key_hash.unsafe_ptr()
-            for i in range(32):
-                key_hash_ptr.unsafe_store[volatile=True](i, UInt8(0))
+            volatile_wipe(key_hash.unsafe_ptr(), 32)
         else:
             for i in range(len(key)):
                 key_block[i] = key[i]
@@ -423,9 +421,8 @@ struct HMACSHA256State(RFC6979HMAC):
     def __deinit__(deinit self):
         var inner_ptr = Pointer(to=self.inner_state).unsafe_bitcast[UInt32]()
         var outer_ptr = Pointer(to=self.outer_state).unsafe_bitcast[UInt32]()
-        for i in range(8):
-            inner_ptr.unsafe_store[volatile=True](i, UInt32(0))
-            outer_ptr.unsafe_store[volatile=True](i, UInt32(0))
+        volatile_wipe(inner_ptr, 8)
+        volatile_wipe(outer_ptr, 8)
 
     @always_inline
     def hmac_into(
@@ -457,9 +454,7 @@ struct HMACSHA384State(RFC6979HMAC):
         if len(key) > 128:
             var key_hash = sha384_hash(key)
             unsafe_memcpy(dest=key_block.ptr(), src=key_hash.unsafe_ptr(), count=48)
-            var key_hash_ptr = key_hash.unsafe_ptr()
-            for i in range(48):
-                key_hash_ptr.unsafe_store[volatile=True](i, UInt8(0))
+            volatile_wipe(key_hash.unsafe_ptr(), 48)
         else:
             for i in range(len(key)):
                 key_block[i] = key[i]
@@ -481,9 +476,8 @@ struct HMACSHA384State(RFC6979HMAC):
     def __deinit__(deinit self):
         var inner_ptr = Pointer(to=self.inner_state).unsafe_bitcast[UInt64]()
         var outer_ptr = Pointer(to=self.outer_state).unsafe_bitcast[UInt64]()
-        for i in range(8):
-            inner_ptr.unsafe_store[volatile=True](i, UInt64(0))
-            outer_ptr.unsafe_store[volatile=True](i, UInt64(0))
+        volatile_wipe(inner_ptr, 8)
+        volatile_wipe(outer_ptr, 8)
 
     @always_inline
     def hmac_into(

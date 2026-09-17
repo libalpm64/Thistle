@@ -1,6 +1,6 @@
 from std.python import Python, PythonObject
 from std.collections import List
-from std.memory.unsafe_pointer import Pointer
+from std.memory import Pointer
 from std.memory import Layout, alloc
 from thistle.sha2 import (
     bytes_to_hex,
@@ -140,7 +140,7 @@ def list_to_simd32(lst: List[UInt8]) -> SIMD[DType.uint8, 32]:
 
 
 @fieldwise_init
-struct TestResult(Copyable, Movable):
+struct TestResult(Copyable):
     var passed: Int
     var failed: Int
     var failures: List[String]

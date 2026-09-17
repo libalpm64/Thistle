@@ -3,11 +3,10 @@
 from std.collections import List
 from std.algorithm.functional import vectorize
 from std.builtin.globals import global_constant
-from std.sys import inlined_assembly
-from std.sys import simd_width_of
+from std.sys import inlined_assembly, simd_width_of
 from std.os import abort
 from std.memory import unsafe_memcpy
-from thistle.sha3 import (
+from .sha3 import (
     SHA3Context,
     sha3_256_into,
     sha3_512_into,
@@ -19,8 +18,8 @@ from thistle.sha3 import (
     shake_finalize,
     shake_squeeze_prefix_into
 )
-from thistle.random import random_bytes
-from thistle.utils import StackBuffer, zero_stack_u8
+from .random import random_bytes
+from .utils import StackBuffer, zero_list_u8, zero_stack_u8
 
 comptime K_512 = 2
 comptime K_768 = 3
@@ -98,7 +97,7 @@ def _require_valid_k(k: Int):
         abort("invalid ML-KEM parameter k")
 
 
-comptime ZETAS_TABLE: InlineArray[Int16, 128] = [
+comptime ZETAS_TABLE: Array[Int16, 128] = [
     -1044, -758, -359, -1517, 1493, 1422, 287, 202,
     -171, 622, 1577, 182, 962, -1202, -1474, 1468,
     573, -1325, 264, 383, -829, 1458, -1602, -130,
@@ -125,37 +124,20 @@ def _zeta(i: Int) -> Int16:
     return zetas.unsafe_ptr()[unsafe_offset=i]
 
 
-struct Poly(Copyable, Movable):
+struct Poly(Copyable):
     """Polynomial with 256 coefficients modulo q = 3329 (FIPS 203, sec. 2.4.4)."""
-    var coeffs: InlineArray[Int16, N]
+    var coeffs: Array[Int16, N]
 
     @always_inline
     def __init__(out self):
-        self.coeffs = InlineArray[Int16, N](fill=0)
+        self.coeffs = Array[Int16, N](fill=0)
 
-    @always_inline
-    def __copyinit__(out self, existing: Self):
-        self.coeffs = existing.coeffs
-
-    @always_inline
-    def __moveinit__(out self, deinit existing: Self):
-        self.coeffs = existing.coeffs^
-
-
-struct Polyvec(Copyable, Movable):
-    var vec: InlineArray[Poly, K_MAX]
+struct Polyvec(Copyable):
+    var vec: Array[Poly, K_MAX]
 
     @always_inline
     def __init__(out self):
-        self.vec = InlineArray[Poly, K_MAX](fill=Poly())
-
-    @always_inline
-    def __copyinit__(out self, existing: Self):
-        self.vec = existing.vec
-
-    @always_inline
-    def __moveinit__(out self, deinit existing: Self):
-        self.vec = existing.vec^
+        self.vec = Array[Poly, K_MAX](fill=Poly())
 
 
 @always_inline
@@ -295,7 +277,7 @@ def poly_cbd_eta2(mut r: Poly, buf: Span[UInt8, ...]) raises:
     cbd2(r, buf)
 
 
-def ntt(mut r: InlineArray[Int16, N]):
+def ntt(mut r: Array[Int16, N]):
     """Apply the seven-layer NTT using bit-reversed zetas (FIPS 203, Algorithm 9)."""
     comptime W = simd_width_of[DType.int16]()
     var ptr = r.unsafe_ptr()
@@ -324,7 +306,7 @@ def ntt(mut r: InlineArray[Int16, N]):
                     r[j] = r[j] + t
 
 
-def invntt(mut r: InlineArray[Int16, N]):
+def invntt(mut r: Array[Int16, N]):
     """Apply the inverse NTT (FIPS 203, Algorithm 10), using Montgomery-scaled factor 1441."""
     comptime F: Int16 = 1441
     comptime W = simd_width_of[DType.int16]()
@@ -519,7 +501,7 @@ def polyvec_compress(mut out: List[UInt8], ref a: Polyvec, k: Int) raises:
     if k == K_512 or k == K_768:
         for i in range(k):
             for j in range(N // 4):
-                var t = InlineArray[UInt16, 4](fill=0)
+                var t = Array[UInt16, 4](fill=0)
                 for l in range(4):
                     t[l] = _positive_coeff(a.vec[i].coeffs[4 * j + l])
                     var d0 = UInt64(t[l]) << 10
@@ -535,7 +517,7 @@ def polyvec_compress(mut out: List[UInt8], ref a: Polyvec, k: Int) raises:
     elif k == K_1024:
         for i in range(k):
             for j in range(N // 8):
-                var t = InlineArray[UInt16, 8](fill=0)
+                var t = Array[UInt16, 8](fill=0)
                 for l in range(8):
                     t[l] = _positive_coeff(a.vec[i].coeffs[8 * j + l])
                     var d0 = UInt64(t[l]) << 11
@@ -567,7 +549,7 @@ def polyvec_compress_stack(mut out: StackBuffer[UInt8, CIPHERTEXTBYTES_MAX], ref
     if k == K_512 or k == K_768:
         for i in range(k):
             for j in range(N // 4):
-                var t = InlineArray[UInt16, 4](fill=0)
+                var t = Array[UInt16, 4](fill=0)
                 for l in range(4):
                     t[l] = _positive_coeff(a.vec[i].coeffs[4 * j + l])
                     var d0 = UInt64(t[l]) << 10
@@ -583,7 +565,7 @@ def polyvec_compress_stack(mut out: StackBuffer[UInt8, CIPHERTEXTBYTES_MAX], ref
     elif k == K_1024:
         for i in range(k):
             for j in range(N // 8):
-                var t = InlineArray[UInt16, 8](fill=0)
+                var t = Array[UInt16, 8](fill=0)
                 for l in range(8):
                     t[l] = _positive_coeff(a.vec[i].coeffs[8 * j + l])
                     var d0 = UInt64(t[l]) << 11
@@ -695,7 +677,7 @@ def poly_tomsg_stack(mut msg: StackBuffer[UInt8, SYMBYTES], a: Poly):
 def poly_compress(mut out: List[UInt8], ref a: Poly, k: Int) raises:
     if k == K_512 or k == K_768:
         for i in range(N // 8):
-            var t = InlineArray[UInt8, 8](fill=0)
+            var t = Array[UInt8, 8](fill=0)
             for j in range(8):
                 var u = a.coeffs[8 * i + j]
                 u += (u >> 15) & Int16(Q)
@@ -710,7 +692,7 @@ def poly_compress(mut out: List[UInt8], ref a: Poly, k: Int) raises:
             out.append(t[6] | (t[7] << 4))
     elif k == K_1024:
         for i in range(N // 8):
-            var t = InlineArray[UInt8, 8](fill=0)
+            var t = Array[UInt8, 8](fill=0)
             for j in range(8):
                 var u = a.coeffs[8 * i + j]
                 u += (u >> 15) & Int16(Q)
@@ -736,7 +718,7 @@ def poly_compress_stack(mut out: StackBuffer[UInt8, CIPHERTEXTBYTES_MAX], ref a:
         raise Error("ML-KEM compressed destination is too small")
     if k == K_512 or k == K_768:
         for i in range(N // 8):
-            var t = InlineArray[UInt8, 8](fill=0)
+            var t = Array[UInt8, 8](fill=0)
             for j in range(8):
                 var u = a.coeffs[8 * i + j]
                 u += (u >> 15) & Int16(Q)
@@ -751,7 +733,7 @@ def poly_compress_stack(mut out: StackBuffer[UInt8, CIPHERTEXTBYTES_MAX], ref a:
             out.push_unchecked(t[6] | (t[7] << 4))
     elif k == K_1024:
         for i in range(N // 8):
-            var t = InlineArray[UInt8, 8](fill=0)
+            var t = Array[UInt8, 8](fill=0)
             for j in range(8):
                 var u = a.coeffs[8 * i + j]
                 u += (u >> 15) & Int16(Q)
@@ -1029,7 +1011,7 @@ def poly_getnoise_eta2(mut r: Poly, seed: Span[UInt8, ...], iv: UInt8) raises:
         zero_stack_u8(buf)
 
 
-def gen_matrix(mut a: InlineArray[Polyvec, K_MAX], seed: Span[UInt8, ...], transposed: Bool, k: Int
+def gen_matrix(mut a: Array[Polyvec, K_MAX], seed: Span[UInt8, ...], transposed: Bool, k: Int
 ) raises:
     if not _valid_k(k):
         raise Error("ML-KEM gen_matrix invalid k")
@@ -1041,7 +1023,7 @@ def gen_matrix(mut a: InlineArray[Polyvec, K_MAX], seed: Span[UInt8, ...], trans
                 sample_ntt_into(a[i].vec[j], seed, UInt8(j), UInt8(i))
 
 
-def gen_matrix_k_static[k: Int, transposed: Bool](mut a: InlineArray[Polyvec, K_MAX], seed: Span[UInt8, ...]) raises:
+def gen_matrix_k_static[k: Int, transposed: Bool](mut a: Array[Polyvec, K_MAX], seed: Span[UInt8, ...]) raises:
     comptime assert k == K_512 or k == K_768 or k == K_1024, "invalid ML-KEM k"
     comptime for i in range(k):
         comptime for j in range(k):
@@ -1051,18 +1033,18 @@ def gen_matrix_k_static[k: Int, transposed: Bool](mut a: InlineArray[Polyvec, K_
                 sample_ntt_into(a[i].vec[j], seed, UInt8(j), UInt8(i))
 
 
-struct KPKEEncryptionKey(Copyable, Movable):
+struct KPKEEncryptionKey(Copyable):
     var pv: Polyvec
-    var p: InlineArray[UInt8, SYMBYTES]
+    var p: Array[UInt8, SYMBYTES]
     var k: Int
 
     def __init__(out self):
         self.pv = Polyvec()
-        self.p = InlineArray[UInt8, SYMBYTES](fill=0)
+        self.p = Array[UInt8, SYMBYTES](fill=0)
         self.k = 0
 
 
-struct KPKEDecapsulationKey(Copyable, Movable):
+struct KPKEDecapsulationKey(Copyable):
     var pv: Polyvec
     var k: Int
 
@@ -1071,26 +1053,26 @@ struct KPKEDecapsulationKey(Copyable, Movable):
         self.k = 0
 
 
-struct EncapsulationKey(Copyable, Movable):
+struct EncapsulationKey(Copyable):
     var pke_ek: KPKEEncryptionKey
-    var raw_bytes: InlineArray[UInt8, INDCPA_PUBLICKEYBYTES_MAX]
-    var h: InlineArray[UInt8, SYMBYTES]
+    var raw_bytes: Array[UInt8, INDCPA_PUBLICKEYBYTES_MAX]
+    var h: Array[UInt8, SYMBYTES]
 
     def __init__(out self):
         self.pke_ek = KPKEEncryptionKey()
-        self.raw_bytes = InlineArray[UInt8, INDCPA_PUBLICKEYBYTES_MAX](fill=0)
-        self.h = InlineArray[UInt8, SYMBYTES](fill=0)
+        self.raw_bytes = Array[UInt8, INDCPA_PUBLICKEYBYTES_MAX](fill=0)
+        self.h = Array[UInt8, SYMBYTES](fill=0)
 
 
-struct DecapsulationKey(Copyable, Movable):
+struct DecapsulationKey(Copyable):
     var pke_dk: KPKEDecapsulationKey
     var ek: EncapsulationKey
-    var z: InlineArray[UInt8, SYMBYTES]
+    var z: Array[UInt8, SYMBYTES]
 
     def __init__(out self):
         self.pke_dk = KPKEDecapsulationKey()
         self.ek = EncapsulationKey()
-        self.z = InlineArray[UInt8, SYMBYTES](fill=0)
+        self.z = Array[UInt8, SYMBYTES](fill=0)
 
     def __deinit__(deinit self):
         _wipe_polyvec(self.pke_dk.pv, K_MAX)
@@ -1099,7 +1081,7 @@ struct DecapsulationKey(Copyable, Movable):
             z_ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
-def pack_pk_stack(mut out: StackBuffer[UInt8, ...], ref pk: Polyvec, seed: InlineArray[UInt8, SYMBYTES], k: Int
+def pack_pk_stack(mut out: StackBuffer[UInt8, ...], ref pk: Polyvec, seed: Array[UInt8, SYMBYTES], k: Int
 ) -> Bool:
     var pk_len = polyvec_byte_size(k)
     if pk_len == 0 or out.remaining() < pk_len + SYMBYTES:
@@ -1162,7 +1144,7 @@ def k_pke_keygen(mut ek: KPKEEncryptionKey, mut dk: KPKEDecapsulationKey, d: Spa
     var rho = Span[UInt8, ...](unsafe_ptr=g.ptr(), length=SYMBYTES)
     var sigma = Span[UInt8, ...](unsafe_ptr=g.ptr().unsafe_offset(SYMBYTES), length=SYMBYTES)
 
-    var a = InlineArray[Polyvec, K_MAX](fill=Polyvec())
+    var a = Array[Polyvec, K_MAX](fill=Polyvec())
     gen_matrix(a, Span[UInt8, ...](rho), False, k)
 
     var nonce = UInt8(0)
@@ -1213,7 +1195,7 @@ def k_pke_keygen_k[k: Int](mut ek: KPKEEncryptionKey, mut dk: KPKEDecapsulationK
     var rho = Span[UInt8, ...](unsafe_ptr=g.ptr(), length=SYMBYTES)
     var sigma = Span[UInt8, ...](unsafe_ptr=g.ptr().unsafe_offset(SYMBYTES), length=SYMBYTES)
 
-    var a = InlineArray[Polyvec, K_MAX](fill=Polyvec())
+    var a = Array[Polyvec, K_MAX](fill=Polyvec())
     gen_matrix_k_static[k, False](a, Span[UInt8, ...](rho))
 
     var nonce = UInt8(0)
@@ -1261,7 +1243,7 @@ def k_pke_encrypt_into(mut ciphertext: StackBuffer[UInt8, CIPHERTEXTBYTES_MAX], 
     var message_poly = Poly()
     var epp = Poly()
     var v = Poly()
-    var at = InlineArray[Polyvec, K_MAX](fill=Polyvec())
+    var at = Array[Polyvec, K_MAX](fill=Polyvec())
     var sp = Polyvec()
     var ep = Polyvec()
     var b = Polyvec()
@@ -1319,7 +1301,7 @@ def k_pke_encrypt_into_k[k: Int](mut ciphertext: StackBuffer[UInt8, CIPHERTEXTBY
     var message_poly = Poly()
     var epp = Poly()
     var v = Poly()
-    var at = InlineArray[Polyvec, K_MAX](fill=Polyvec())
+    var at = Array[Polyvec, K_MAX](fill=Polyvec())
     var sp = Polyvec()
     var ep = Polyvec()
     var b = Polyvec()
@@ -1569,12 +1551,6 @@ def _ct_select_u8(a: UInt8, b: UInt8, choice: UInt8) -> UInt8:
     return a ^ (mask & (a ^ b))
 
 
-def _zero_list(mut data: List[UInt8]):
-    var ptr = data.unsafe_ptr()
-    for i in range(len(data)):
-        ptr.unsafe_store[volatile=True](i, UInt8(0))
-
-
 def decapsulation_key_decode(mut dk: DecapsulationKey, input: Span[UInt8, ...], k: Int) raises -> Bool:
     var dk_len = _decapsulation_key_size(k)
     var sk_len = polyvec_byte_size(k)
@@ -1655,7 +1631,7 @@ def mlkem_keygen(parameter_set: String
     try:
         return mlkem_keygen_seed(Span[UInt8, ...](seed), parameter_set)
     finally:
-        _zero_list(seed)
+        zero_list_u8(seed)
 
 
 def _mlkem_keygen_random_k[k: Int]() raises -> Tuple[List[UInt8], List[UInt8]]:
@@ -1674,7 +1650,7 @@ def _mlkem_keygen_random_k[k: Int]() raises -> Tuple[List[UInt8], List[UInt8]]:
             dk.append(dk_buf[i])
         return (ek^, dk^)
     finally:
-        _zero_list(seed)
+        zero_list_u8(seed)
         zero_stack_u8(ek_buf)
         zero_stack_u8(dk_buf)
 
@@ -1705,7 +1681,7 @@ def mlkem_encaps(ek_bytes: Span[UInt8, ...], parameter_set: String) raises -> Tu
         var result = mlkem_encaps_seed(ek_bytes, Span[UInt8, ...](m), parameter_set)
         return result^
     finally:
-        _zero_list(m)
+        zero_list_u8(m)
 
 
 def _mlkem_encaps_random_k[k: Int](ek_bytes: Span[UInt8, ...]) raises -> Tuple[List[UInt8], List[UInt8], Bool]:
@@ -1724,7 +1700,7 @@ def _mlkem_encaps_random_k[k: Int](ek_bytes: Span[UInt8, ...]) raises -> Tuple[L
             shared.append(shared_buf[i])
         return (ciphertext^, shared^, True)
     finally:
-        _zero_list(m)
+        zero_list_u8(m)
         zero_stack_u8(shared_buf)
         zero_stack_u8(ciphertext_buf)
 

@@ -1,8 +1,7 @@
 """P-256 ECDH against Wycheproof vectors, with test-only ASN.1 point extraction."""
-from std.collections import List
+from std.collections import Array, List
 from std.python import Python
 from thistle.p256 import p256_ecdh
-from thistle.utils import StackInlineArray
 
 
 def hex_to_bytes(s: String) -> List[UInt8]:
@@ -96,7 +95,7 @@ def normalize_p256_private_key(var private_key: List[UInt8]) -> List[UInt8]:
 
 
 def matches32(
-    actual: StackInlineArray[UInt8, 32], expected: List[UInt8]
+    actual: Array[UInt8, 32], expected: List[UInt8]
 ) -> Bool:
     for i in range(32):
         if actual[i] != expected[i]:
@@ -121,7 +120,7 @@ def run_case(
         # trailing SEC 1 point.
         public_key = extract_trailing_sec1_p256_public_key(public_der)
     var expected = hex_to_bytes(shared_hex)
-    var actual = StackInlineArray[UInt8, 32](fill=0)
+    var actual = Array[UInt8, 32](fill=0)
     var got = p256_ecdh(
         Span[UInt8, ...](private_key),
         Span[UInt8, ...](public_key),

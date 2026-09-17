@@ -2,7 +2,7 @@
 # Each affine-Niels entry stores three five-limb field elements plus one padding limb.
 from std.builtin.dtype import DType
 from std.builtin.simd import SIMD
-from std.collections import InlineArray
+from std.collections import Array
 
 comptime _ED25519_BT0 = SIMD[DType.uint64, 128](
     1288382639258501, 245678601348599, 269427782077623, 1462984067271730, 137412439391563, 62697248952638, 204681361388450, 631292143396476, 338455783676468, 1213667448819585, 301289933810280, 1259582250014073, 1422107436869536, 796239922652654, 1953934009299142, 0, 
@@ -445,8 +445,8 @@ comptime _ED25519_B_ODD7 = SIMD[DType.uint64, 128](
 )
 
 @no_inline
-def ed25519_base_table() -> InlineArray[UInt64, 4096]:
-    var t = InlineArray[UInt64, 4096](fill=0)
+def ed25519_base_table() -> Array[UInt64, 4096]:
+    var t = Array[UInt64, 4096](fill=0)
     var p = t.unsafe_ptr()
     p.unsafe_store[alignment=8](0, _ED25519_BT0)
     p.unsafe_store[alignment=8](128, _ED25519_BT1)
@@ -483,8 +483,8 @@ def ed25519_base_table() -> InlineArray[UInt64, 4096]:
     return t^
 
 @no_inline
-def ed25519_b_odd_table() -> InlineArray[UInt64, 1024]:
-    var t = InlineArray[UInt64, 1024](fill=0)
+def ed25519_b_odd_table() -> Array[UInt64, 1024]:
+    var t = Array[UInt64, 1024](fill=0)
     var p = t.unsafe_ptr()
     p.unsafe_store[alignment=8](0, _ED25519_B_ODD0)
     p.unsafe_store[alignment=8](128, _ED25519_B_ODD1)

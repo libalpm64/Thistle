@@ -63,7 +63,7 @@ def _rho2(x: UInt32) -> UInt32:
 
 
 @always_inline
-def _sbox_planes(mut p: InlineArray[UInt32, 8]):
+def _sbox_planes(mut p: Array[UInt32, 8]):
     # Boyar-Peralta AES S-box circuit.
     # https://tches.iacr.org/index.php/TCHES/article/view/11940/11800
     var x0 = p[7]
@@ -240,7 +240,7 @@ def _sub_k2_x4_bitsliced(
     # Transpose the packed input words into S-box bit planes.
     var tlo = transpose8x8(UInt64(w0) | (UInt64(w1) << 32))
     var thi = transpose8x8(UInt64(w2) | (UInt64(w3) << 32))
-    var p = InlineArray[UInt32, 8](fill=0)
+    var p = Array[UInt32, 8](fill=0)
 
     comptime for j in range(8):
         p[j] = UInt32((tlo >> UInt64(8 * j)) & 0xFF) | (
@@ -252,15 +252,15 @@ def _sub_k2_x4_bitsliced(
     # MixColumns: q_k = 2*t_k ^ 3*t_{k+1} ^ t_{k+2} ^ t_{k+3}.
     # With e = t ^ rho(t), this becomes xtime(e) ^ e ^ rho2(e) ^ t.
     # Here rho(t) ^ rho2(t) ^ rho3(t) = e ^ rho2(e) ^ t.
-    var e = InlineArray[UInt32, 8](fill=0)
-    var s = InlineArray[UInt32, 8](fill=0)
+    var e = Array[UInt32, 8](fill=0)
+    var s = Array[UInt32, 8](fill=0)
 
     comptime for j in range(8):
         e[j] = p[j] ^ _rho(p[j])
         s[j] = e[j] ^ _rho2(e[j]) ^ p[j]
 
     # Reduce the xtime carry plane e[7] into planes 1, 3, and 4 (AES polynomial 0x1B).
-    var q = InlineArray[UInt32, 8](fill=0)
+    var q = Array[UInt32, 8](fill=0)
     q[0] = e[7] ^ s[0]
     q[1] = e[0] ^ e[7] ^ s[1]
     q[2] = e[1] ^ s[2]
@@ -363,8 +363,8 @@ struct KCipher2:
 
     def _key_expansion(
         mut self, key: SIMD[DType.uint32, 4], iv: SIMD[DType.uint32, 4]
-    ) -> InlineArray[UInt32, 12]:
-        var ik = InlineArray[UInt32, 12](fill=0)
+    ) -> Array[UInt32, 12]:
+        var ik = Array[UInt32, 12](fill=0)
 
         ik[0] = key[0]
         ik[1] = key[1]

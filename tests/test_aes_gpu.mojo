@@ -8,7 +8,7 @@ from thistle.aes_gpu import (
     aes_gpu_kernel_ecb, aes_gpu_kernel_ctr, aes_gpu_kernel_gcm_ctr
 )
 from max.gpu.host import DeviceContext
-from std.memory.unsafe_pointer import Pointer
+from std.memory import Pointer
 from std.memory import Layout, alloc
 
 
@@ -19,7 +19,7 @@ def byte_to_hex(b: UInt8) -> String:
 
 
 @fieldwise_init
-struct TestResult(Copyable, Movable):
+struct TestResult(Copyable):
     var passed: Int
     var failed: Int
     var failures: List[String]

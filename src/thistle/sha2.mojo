@@ -154,23 +154,23 @@ comptime SHA384_IV = SIMD[DType.uint64, 8](
 )
 
 
-struct SHA256Context(Movable):
+struct SHA256Context:
     """Streaming SHA-256 state with a 64-byte partial-block buffer."""
     var state: SIMD[DType.uint32, 8]
     var count: UInt64
-    var buffer: InlineArray[UInt8, 64]
+    var buffer: Array[UInt8, 64]
     var buffer_len: Int
 
     def __init__(out self):
         self.state = SHA256_IV
         self.count = 0
-        self.buffer = InlineArray[UInt8, 64](fill=0)
+        self.buffer = Array[UInt8, 64](fill=0)
         self.buffer_len = 0
 
     def __init__(out self, iv: SIMD[DType.uint32, 8]):
         self.state = iv
         self.count = 0
-        self.buffer = InlineArray[UInt8, 64](fill=0)
+        self.buffer = Array[UInt8, 64](fill=0)
         self.buffer_len = 0
 
     def __init__(out self, *, deinit move: Self):
@@ -224,7 +224,7 @@ def sha256_transform_blocks(
 
     for blk in range(nblocks):
         var block = data.unsafe_offset(blk * 64)
-        var w = InlineArray[UInt32, 16](fill=0)
+        var w = Array[UInt32, 16](fill=0)
 
         var a = a0
         var b = b0
@@ -389,12 +389,12 @@ def sha256_final_to_buffer(mut ctx: SHA256Context, output: Pointer[mut=True, UIn
         (output.unsafe_offset(i * 4)).unsafe_bitcast[UInt32]().unsafe_store[alignment=1](byte_swap(ctx.state[i]))
 
 
-struct SHA512Context(Movable):
+struct SHA512Context:
     """Streaming SHA-512 state with a 128-byte partial-block buffer."""
     var state: SIMD[DType.uint64, 8]
     var count_high: UInt64
     var count_low: UInt64
-    var buffer: InlineArray[UInt8, 128]
+    var buffer: Array[UInt8, 128]
     var buffer_len: Int
 
     def __init__(out self):
@@ -402,14 +402,14 @@ struct SHA512Context(Movable):
         self.state = iv
         self.count_high = 0
         self.count_low = 0
-        self.buffer = InlineArray[UInt8, 128](fill=0)
+        self.buffer = Array[UInt8, 128](fill=0)
         self.buffer_len = 0
 
     def __init__(out self, iv: SIMD[DType.uint64, 8]):
         self.state = iv
         self.count_high = 0
         self.count_low = 0
-        self.buffer = InlineArray[UInt8, 128](fill=0)
+        self.buffer = Array[UInt8, 128](fill=0)
         self.buffer_len = 0
 
     def __init__(out self, *, deinit move: Self):
@@ -480,7 +480,7 @@ def sha512_transform_blocks(
     for blk in range(nblocks):
         # Expand adjacent schedule words together, keeping the 16-word ring in
         # vectors and the eight round-state words in scalars.
-        var w = InlineArray[SIMD[DType.uint64, 2], 8](uninitialized=True)
+        var w = Array[SIMD[DType.uint64, 2], 8](uninitialized=True)
         var a = a0
         var b = b0
         var c = c0

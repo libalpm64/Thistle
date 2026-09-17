@@ -1,7 +1,7 @@
 """Poly1305 one-time authenticator (RFC 8439, sec. 2.5)."""
 
 from std.memory import Pointer
-from std.collections import InlineArray
+from std.collections import Array
 from .utils import volatile_wipe
 
 # Masks for the 44/44/42-bit representation modulo 2^130 - 5.
@@ -14,7 +14,7 @@ def _le64(ptr: Pointer[mut=False, UInt8, _, address_space=_], offset: Int) -> UI
     return (ptr.unsafe_offset(offset)).unsafe_bitcast[UInt64]().unsafe_load[width=1, alignment=1]()
 
 
-struct _RPower(Copyable, ImplicitlyCopyable, Movable):
+struct _RPower(ImplicitlyCopyable):
     var r0: UInt64
     var r1: UInt64
     var r2: UInt64
@@ -28,22 +28,6 @@ struct _RPower(Copyable, ImplicitlyCopyable, Movable):
         self.r2 = r2
         self.s1 = r1 * 20
         self.s2 = r2 * 20
-
-    @always_inline
-    def __copyinit__(out self, copy: Self):
-        self.r0 = copy.r0
-        self.r1 = copy.r1
-        self.r2 = copy.r2
-        self.s1 = copy.s1
-        self.s2 = copy.s2
-
-    @always_inline
-    def __moveinit__(out self, deinit take: Self):
-        self.r0 = take.r0
-        self.r1 = take.r1
-        self.r2 = take.r2
-        self.s1 = take.s1
-        self.s2 = take.s2
 
     @always_inline
     def wipe(mut self):
@@ -123,7 +107,7 @@ struct Poly1305:
     var h0: UInt64
     var h1: UInt64
     var h2: UInt64
-    var buf: InlineArray[UInt8, 16]
+    var buf: Array[UInt8, 16]
     var buf_len: Int
     var powers4_ready: Bool
     var powers8_ready: Bool
@@ -145,7 +129,7 @@ struct Poly1305:
         self.h0 = 0
         self.h1 = 0
         self.h2 = 0
-        self.buf = InlineArray[UInt8, 16](fill=0)
+        self.buf = Array[UInt8, 16](fill=0)
         self.buf_len = 0
         self.r2 = self.r
         self.r3 = self.r

@@ -1,7 +1,6 @@
 """IETF ChaCha20 with a 96-bit nonce and 32-bit block counter (RFC 8439)."""
 
-from std.memory import bitcast
-from std.memory.unsafe_pointer import Pointer
+from std.memory import Pointer, bitcast
 from std.bit import rotate_bits_left
 
 # Little-endian words of "expand 32-byte k" (RFC 8439, sec. 2.3).

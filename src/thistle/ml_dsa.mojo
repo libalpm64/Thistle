@@ -9,11 +9,11 @@ from std.collections import List
 from std.builtin.globals import global_constant
 from std.memory import unsafe_memset_zero
 from std.os import abort
-from thistle.sha3 import (
+from .sha3 import (
     SHA3Context, sha3_update, shake_final, shake128, shake256, shake256_into
 )
-from thistle.random import random_bytes
-from thistle.utils import StackBuffer, zero_stack_u8
+from .random import random_bytes
+from .utils import StackBuffer, volatile_wipe, zero_list_u8, zero_stack_u8
 
 comptime MLDSA44_PUBLICKEYBYTES = 1312
 comptime MLDSA44_SECRETKEYBYTES = 2560
@@ -37,12 +37,12 @@ comptime MINUS_ONE: UInt32 = 4186625
 comptime N = 256
 comptime MAX_K = 8
 comptime MAX_L = 7
-comptime DSAPoly = InlineArray[UInt32, N]
-comptime DSAHintRow = InlineArray[UInt8, N]
-comptime DSAHintVec = InlineArray[DSAHintRow, MAX_K]
+comptime DSAPoly = Array[UInt32, N]
+comptime DSAHintRow = Array[UInt8, N]
+comptime DSAHintVec = Array[DSAHintRow, MAX_K]
 
 
-comptime ZETAS_TABLE: InlineArray[UInt32, 256] = [
+comptime ZETAS_TABLE: Array[UInt32, 256] = [
     4193792, 25847, 5771523, 7861508, 237124, 7602457, 7504169, 466468,
     1826347, 2353451, 8021166, 6288512, 3119733, 5495562, 3111497, 2680103,
     2725464, 1024112, 7300517, 3585928, 7830929, 7260833, 2619752, 6271868,
@@ -86,7 +86,7 @@ def _zeta(i: Int) -> UInt32:
 
 
 @fieldwise_init
-struct MLDSAParams(Copyable, Movable):
+struct MLDSAParams(Copyable):
     var k: Int
     var l: Int
     var eta: Int
@@ -97,12 +97,12 @@ struct MLDSAParams(Copyable, Movable):
     var omega: Int
 
 
-struct DSAPolyVec[ROWS: Int](Movable):
-    var data: InlineArray[DSAPoly, Self.ROWS]
+struct DSAPolyVec[ROWS: Int]:
+    var data: Array[DSAPoly, Self.ROWS]
 
     @always_inline
     def __init__(out self):
-        self.data = InlineArray[DSAPoly, Self.ROWS](fill=DSAPoly(fill=0))
+        self.data = Array[DSAPoly, Self.ROWS](fill=DSAPoly(fill=0))
 
     @always_inline
     def __getitem__(ref self, i: Int) -> ref[self.data] DSAPoly:
@@ -114,7 +114,7 @@ struct DSAPolyVec[ROWS: Int](Movable):
 
 
 @fieldwise_init
-struct MLDSAPublicKey(Copyable, Movable):
+struct MLDSAPublicKey(Copyable):
     """Expanded public key containing the matrix and hashed public-key encoding."""
     var p: MLDSAParams
     var raw: List[UInt8]
@@ -124,7 +124,7 @@ struct MLDSAPublicKey(Copyable, Movable):
 
 
 @fieldwise_init
-struct MLDSAPrivateKey(Copyable, Movable):
+struct MLDSAPrivateKey(Copyable):
     """Expanded private key containing small secret polynomials, seed material, and the public
     key.
     """
@@ -137,24 +137,14 @@ struct MLDSAPrivateKey(Copyable, Movable):
     var k_seed: List[UInt8]
 
     def __deinit__(deinit self):
-        var seed_ptr = self.seed.unsafe_ptr()
-        for i in range(len(self.seed)):
-            seed_ptr.unsafe_store[volatile=True](i, UInt8(0))
-        var key_ptr = self.k_seed.unsafe_ptr()
-        for i in range(len(self.k_seed)):
-            key_ptr.unsafe_store[volatile=True](i, UInt8(0))
+        zero_list_u8(self.seed)
+        zero_list_u8(self.k_seed)
         for row in range(len(self.s1)):
-            var ptr = self.s1[row].unsafe_ptr()
-            for i in range(len(self.s1[row])):
-                ptr.unsafe_store[volatile=True](i, UInt32(0))
+            volatile_wipe(self.s1[row].unsafe_ptr(), len(self.s1[row]))
         for row in range(len(self.s2)):
-            var ptr = self.s2[row].unsafe_ptr()
-            for i in range(len(self.s2[row])):
-                ptr.unsafe_store[volatile=True](i, UInt32(0))
+            volatile_wipe(self.s2[row].unsafe_ptr(), len(self.s2[row]))
         for row in range(len(self.t0)):
-            var ptr = self.t0[row].unsafe_ptr()
-            for i in range(len(self.t0[row])):
-                ptr.unsafe_store[volatile=True](i, UInt32(0))
+            volatile_wipe(self.t0[row].unsafe_ptr(), len(self.t0[row]))
 
 
 def params44() -> MLDSAParams:
@@ -311,7 +301,7 @@ def _zero_dsa_hint_vec(mut h: DSAHintVec):
         ptr.unsafe_store[volatile=True](i, UInt8(0))
 
 
-def _zero_dsa_ch(mut ch: InlineArray[UInt8, MLDSA_CRHBYTES]):
+def _zero_dsa_ch(mut ch: Array[UInt8, MLDSA_CRHBYTES]):
     var ptr = ch.unsafe_ptr()
     for i in range(MLDSA_CRHBYTES):
         ptr.unsafe_store[volatile=True](i, UInt8(0))
@@ -354,12 +344,6 @@ def _ct_bool_to_u32(b: Bool) -> UInt32:
 # Volatile stores preserve the wipe against dead-store elimination.
 
 
-def _zero_list_u8(mut data: List[UInt8]):
-    var ptr = data.unsafe_ptr()
-    for i in range(len(data)):
-        ptr.unsafe_store[volatile=True](i, UInt8(0))
-
-
 def _zero_list_u32(mut data: List[UInt32]):
     var ptr = data.unsafe_ptr()
     for i in range(len(data)):
@@ -373,7 +357,7 @@ def _zero_poly_vec_u32(mut data: List[List[UInt32]]):
 
 def _zero_poly_vec_u8(mut data: List[List[UInt8]]):
     for i in range(len(data)):
-        _zero_list_u8(data[i])
+        zero_list_u8(data[i])
 
 
 def _bytes_equal(a: Span[UInt8, ...], b: Span[UInt8, ...]) -> Bool:
@@ -775,7 +759,7 @@ def _sample_in_ball_dsa(rho: Span[UInt8, ...], p: MLDSAParams) -> DSAPoly:
                     break
             if not ok:
                 break
-        _zero_list_u8(buf)
+        zero_list_u8(buf)
         if ok:
             return c^
         out_len *= 2
@@ -1149,7 +1133,7 @@ def _append_use_hint_encoded_stack(mut out: StackBuffer[UInt8, ...], w: List[UIn
 
 def _dsa_hint_encode(mut out: List[UInt8], h: DSAHintVec, p: MLDSAParams):
     var y = List[UInt8](unsafe_uninit_length=p.omega + p.k)
-    _zero_list_u8(y)
+    zero_list_u8(y)
     var idx: UInt8 = 0
     for i in range(p.k):
         for j in range(N):
@@ -1158,7 +1142,7 @@ def _dsa_hint_encode(mut out: List[UInt8], h: DSAHintVec, p: MLDSAParams):
                 idx += 1
         y[p.omega + i] = idx
     _append_bytes(out, Span[UInt8, ...](y))
-    _zero_list_u8(y)
+    zero_list_u8(y)
 
 
 def _hint_decode(y: Span[UInt8, ...], p: MLDSAParams) raises -> List[List[UInt8]]:
@@ -1168,7 +1152,7 @@ def _hint_decode(y: Span[UInt8, ...], p: MLDSAParams) raises -> List[List[UInt8]
     var idx: UInt8 = 0
     for i in range(p.k):
         var row = List[UInt8](unsafe_uninit_length=N)
-        _zero_list_u8(row)
+        zero_list_u8(row)
         var limit = y[p.omega + i]
         if limit < idx or limit > UInt8(p.omega):
             raise Error("ML-DSA invalid hint limits")
@@ -1187,7 +1171,7 @@ def _hint_decode(y: Span[UInt8, ...], p: MLDSAParams) raises -> List[List[UInt8]
     return h^
 
 
-def _dsa_sig_encode(ch: InlineArray[UInt8, MLDSA_CRHBYTES], z: DSAPolyVec[MAX_L], h: DSAHintVec, p: MLDSAParams
+def _dsa_sig_encode(ch: Array[UInt8, MLDSA_CRHBYTES], z: DSAPolyVec[MAX_L], h: DSAHintVec, p: MLDSAParams
 ) -> List[UInt8]:
     var sig = List[UInt8](capacity=signature_size(p))
     for i in range(p.lambda_bits // 4):
@@ -1286,8 +1270,8 @@ def mldsa_private_key_from_seed(seed: Span[UInt8, ...], p: MLDSAParams) raises -
     var tr = _compute_public_key_hash(Span[UInt8, ...](pk))
     var t1_hat = _compute_t1_hat(t1, p)
     var pub = MLDSAPublicKey(p.copy(), pk^, a^, t1_hat^, tr^)
-    _zero_list_u8(expanded)
-    _zero_list_u8(rho_s)
+    zero_list_u8(expanded)
+    zero_list_u8(rho_s)
     _zero_poly_vec_u32(t_hat)
     return MLDSAPrivateKey(p.copy(), _copy_bytes(seed), pub^, s1^, s2^, t0^, k_seed^)
 
@@ -1360,7 +1344,7 @@ def mldsa_private_key_from_semiexpanded(sk: Span[UInt8, ...], p: MLDSAParams) ra
     var pk = _pk_encode(Span[UInt8, ...](rho), t1, p)
     var computed_tr = _compute_public_key_hash(Span[UInt8, ...](pk))
     if not _bytes_equal(Span[UInt8, ...](computed_tr), Span[UInt8, ...](tr)):
-        _zero_list_u8(computed_tr)
+        zero_list_u8(computed_tr)
         _zero_poly_vec_u32(s1_plain)
         _zero_poly_vec_u32(s2_plain)
         _zero_poly_vec_u32(t0_plain)
@@ -1368,7 +1352,7 @@ def mldsa_private_key_from_semiexpanded(sk: Span[UInt8, ...], p: MLDSAParams) ra
         _zero_poly_vec_u32(s2)
         _zero_poly_vec_u32(t0)
         raise Error("ML-DSA inconsistent public key hash")
-    _zero_list_u8(computed_tr)
+    zero_list_u8(computed_tr)
     var t1_hat = _compute_t1_hat(t1, p)
     var pub = MLDSAPublicKey(p.copy(), pk^, a^, t1_hat^, tr^)
     _zero_poly_vec_u32(s1_plain)
@@ -1451,7 +1435,7 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
             _dsa_append_w1_encoded_stack(ch_input, w[i], p)
         var ch_list = shake256(Span[UInt8, ...](unsafe_ptr=ch_input.ptr(), length=ch_input.len()), p.lambda_bits // 4)
         zero_stack_u8(ch_input)
-        var ch = InlineArray[UInt8, MLDSA_CRHBYTES](fill=0)
+        var ch = Array[UInt8, MLDSA_CRHBYTES](fill=0)
         for i in range(p.lambda_bits // 4):
             ch[i] = ch_list[i]
         var c = _sample_in_ball_dsa(Span[UInt8, ...](ch_list), p)
@@ -1481,7 +1465,7 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
             _zero_dsa_hint_vec(h)
             _zero_dsa_poly(product)
             _zero_dsa_ch(ch)
-            _zero_list_u8(ch_list)
+            zero_list_u8(ch_list)
             _zero_dsa_poly(c)
             continue
 
@@ -1502,7 +1486,7 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
             _zero_dsa_poly_vec(ct0)
             _zero_dsa_hint_vec(h)
             _zero_dsa_ch(ch)
-            _zero_list_u8(ch_list)
+            zero_list_u8(ch_list)
             _zero_dsa_poly(c)
             continue
 
@@ -1522,7 +1506,7 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
             _zero_dsa_poly_vec(ct0)
             _zero_dsa_hint_vec(h)
             _zero_dsa_ch(ch)
-            _zero_list_u8(ch_list)
+            zero_list_u8(ch_list)
             _zero_dsa_poly(c)
             continue
 
@@ -1539,7 +1523,7 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
             _zero_dsa_poly_vec(ct0)
             _zero_dsa_hint_vec(h)
             _zero_dsa_ch(ch)
-            _zero_list_u8(ch_list)
+            zero_list_u8(ch_list)
             _zero_dsa_poly(c)
             continue
         var sig = _dsa_sig_encode(ch, z, h, p)
@@ -1553,9 +1537,9 @@ def mldsa_sign_external_mu(priv: MLDSAPrivateKey, mu: Span[UInt8, ...], random: 
         _zero_dsa_hint_vec(h)
         _zero_dsa_poly(product)
         _zero_dsa_ch(ch)
-        _zero_list_u8(ch_list)
+        zero_list_u8(ch_list)
         _zero_dsa_poly(c)
-        _zero_list_u8(nonce)
+        zero_list_u8(nonce)
         return sig^
 
 
@@ -1570,7 +1554,7 @@ def mldsa_sign(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Span[UInt8
     try:
         return mldsa_sign_external_mu(priv, Span[UInt8, ...](mu), random)
     finally:
-        _zero_list_u8(mu)
+        zero_list_u8(mu)
 
 
 def mldsa_verify_external_mu(pub: MLDSAPublicKey, mu: Span[UInt8, ...], sig: Span[UInt8, ...]) raises -> Bool:
@@ -1591,7 +1575,7 @@ def mldsa_verify_external_mu(pub: MLDSAPublicKey, mu: Span[UInt8, ...], sig: Spa
     for i in range(p.l):
         z_bound_fail |= _ct_bool_to_u32(_coefficients_exceed_bound(z[i], gamma1_beta))
     if z_bound_fail != UInt32(0):
-        _zero_list_u8(ch)
+        zero_list_u8(ch)
         _zero_poly_vec_u32(z)
         _zero_poly_vec_u8(h)
         return False
@@ -1619,13 +1603,13 @@ def mldsa_verify_external_mu(pub: MLDSAPublicKey, mu: Span[UInt8, ...], sig: Spa
     var computed = shake256(Span[UInt8, ...](unsafe_ptr=ch_input.ptr(), length=ch_input.len()), p.lambda_bits // 4)
     zero_stack_u8(ch_input)
     var ok = _bytes_equal(Span[UInt8, ...](ch), Span[UInt8, ...](computed))
-    _zero_list_u8(ch)
+    zero_list_u8(ch)
     _zero_poly_vec_u32(z)
     _zero_poly_vec_u8(h)
     _zero_list_u32(c)
     _zero_poly_vec_u32(z_hat)
     _zero_poly_vec_u32(w)
-    _zero_list_u8(computed)
+    zero_list_u8(computed)
     return ok
 
 
@@ -1640,7 +1624,7 @@ def mldsa_verify(pub: MLDSAPublicKey, msg: Span[UInt8, ...], sig: Span[UInt8, ..
     try:
         return mldsa_verify_external_mu(pub, Span[UInt8, ...](mu), sig)
     finally:
-        _zero_list_u8(mu)
+        zero_list_u8(mu)
 
 
 def mldsa44_public_key(pk: Span[UInt8, ...]) raises -> MLDSAPublicKey:
@@ -1691,7 +1675,7 @@ def mldsa87_private_key_from_semiexpanded(sk: Span[UInt8, ...]) raises -> MLDSAP
 def _zero_random32() -> List[UInt8]:
     # Deterministic signing uses rnd = {0}^32 (FIPS 204, sec. 3.4).
     var r = List[UInt8](unsafe_uninit_length=MLDSA_RNDBYTES)
-    _zero_list_u8(r)
+    zero_list_u8(r)
     return r^
 
 
@@ -1704,7 +1688,7 @@ def mldsa_keygen(p: MLDSAParams) raises -> MLDSAPrivateKey:
     try:
         return mldsa_private_key_from_seed(Span[UInt8, ...](xi), p)
     finally:
-        _zero_list_u8(xi)
+        zero_list_u8(xi)
 
 
 def mldsa44_keygen() raises -> MLDSAPrivateKey:
@@ -1734,7 +1718,7 @@ def mldsa_sign_hedged(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Spa
     try:
         return mldsa_sign(priv, msg, context, Span[UInt8, ...](rnd))
     finally:
-        _zero_list_u8(rnd)
+        zero_list_u8(rnd)
 
 
 def mldsa_sign_deterministic(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], context: Span[UInt8, ...]) raises -> List[UInt8]:
@@ -1745,7 +1729,7 @@ def mldsa_sign_deterministic(priv: MLDSAPrivateKey, msg: Span[UInt8, ...], conte
     try:
         return mldsa_sign(priv, msg, context, Span[UInt8, ...](rnd))
     finally:
-        _zero_list_u8(rnd)
+        zero_list_u8(rnd)
 
 
 def mldsa_sign_external_mu_hedged(priv: MLDSAPrivateKey, mu: Span[UInt8, ...]) raises -> List[UInt8]:
@@ -1756,7 +1740,7 @@ def mldsa_sign_external_mu_hedged(priv: MLDSAPrivateKey, mu: Span[UInt8, ...]) r
     try:
         return mldsa_sign_external_mu(priv, mu, Span[UInt8, ...](rnd))
     finally:
-        _zero_list_u8(rnd)
+        zero_list_u8(rnd)
 
 
 def mldsa_sign_external_mu_deterministic(priv: MLDSAPrivateKey, mu: Span[UInt8, ...]) raises -> List[UInt8]:
@@ -1767,4 +1751,4 @@ def mldsa_sign_external_mu_deterministic(priv: MLDSAPrivateKey, mu: Span[UInt8, 
     try:
         return mldsa_sign_external_mu(priv, mu, Span[UInt8, ...](rnd))
     finally:
-        _zero_list_u8(rnd)
+        zero_list_u8(rnd)

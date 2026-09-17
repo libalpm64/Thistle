@@ -1,14 +1,14 @@
 """SHA-3 and SHAKE sponge functions (FIPS 202)."""
 
+from std.bit import rotate_bits_left
+from std.builtin.dtype import DType
+from std.builtin.simd import SIMD
 from std.collections import List
 from std.memory import Pointer, stack_allocation, unsafe_memcpy, unsafe_memset_zero
 from std.os import abort
-from .utils import StackBuffer, bytes_to_hex, string_to_bytes
-from std.bit import rotate_bits_left
-from std.builtin.simd import SIMD
-from std.builtin.dtype import DType
 from std.sys import llvm_intrinsic, CompilationTarget, simd_width_of
 from std.utils import StaticTuple
+from .utils import StackBuffer, bytes_to_hex, string_to_bytes
 
 # Round constants for the 24 rounds of Keccak-f[1600] (FIPS 202, sec. 3.2.5).
 comptime KECCAK_RC = StaticTuple[UInt64, 24](
@@ -284,7 +284,7 @@ def _keccak_f1600_scalar(state: Pointer[mut=True, UInt64, _, address_space=_]):
         _keccak_round(scratch, state, KECCAK_RC[pair * 2 + 1])
 
 
-struct SHA3Context(Movable):
+struct SHA3Context:
     """Keccak sponge state; the constructor accepts rate bits and stores the rate in bytes."""
     var state: StackBuffer[UInt64, 25]
     var rate_bytes: Int
